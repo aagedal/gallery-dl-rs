@@ -222,6 +222,18 @@ struct Args {
     /// Use Windows filename restrictions (same as --restrict-filenames windows)
     #[arg(long)]
     windows_filenames: bool,
+    /// Additional configuration files in JSON format
+    #[arg(long, value_name = "FILE")]
+    config_json: Option<PathBuf>,
+    /// Additional configuration files in YAML format
+    #[arg(long, value_name = "FILE")]
+    config_yaml: Option<PathBuf>,
+    /// Additional configuration files in TOML format
+    #[arg(long, value_name = "FILE")]
+    config_toml: Option<PathBuf>,
+    /// Set filetype of a --config-create file: json, yaml or toml
+    #[arg(long, value_name = "TYPE")]
+    config_type: Option<String>,
     /// Show configuration file status
     #[arg(long)]
     config_status: bool,
@@ -486,16 +498,10 @@ async fn config_command(args: &Args) -> Result<()> {
             let status = match tokio::fs::read(path).await {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => "Not Present",
                 Err(_) => "Inaccessible",
-                Ok(bytes) => {
-                    let directory = std::path::absolute(path)?
-                        .parent()
-                        .map(std::path::Path::to_path_buf)
-                        .unwrap_or_default();
-                    match Config::parse(&bytes, &directory) {
-                        Ok(_) => "OK",
-                        Err(_) => "Invalid",
-                    }
-                }
+                Ok(_) => match Config::load(path).await {
+                    Ok(_) => "OK",
+                    Err(_) => "Invalid",
+                },
             };
             println!("{} : {status}", path.display());
         }
@@ -522,7 +528,19 @@ async fn config_command(args: &Args) -> Result<()> {
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
-        tokio::fs::write(&path, "{\n    \"extractor\": {\n\n    }\n}\n").await?;
+        let (path, contents) = match args.config_type.as_deref() {
+            None | Some("json") => (path, "{\n    \"extractor\": {\n\n    }\n}\n"),
+            Some("yaml") => (path.with_extension("yaml"), "extractor: {}\n"),
+            Some("toml") => (path.with_extension("toml"), "[extractor]\n"),
+            Some(_) => return Err(error("--config-type must be json, yaml or toml")),
+        };
+        if path.exists() {
+            return Err(error(format!(
+                "configuration file {} already exists",
+                path.display()
+            )));
+        }
+        tokio::fs::write(&path, contents).await?;
         eprintln!("Created a basic configuration file at '{}'", path.display());
         return Ok(());
     }
@@ -658,7 +676,23 @@ fn parse_timeout(value: &str) -> std::result::Result<Duration, String> {
 const MAIN_STACK_SIZE: usize = 8 * 1024 * 1024;
 
 fn main() {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    for (path, format) in [
+        (&args.config_json, gallery_dl_rs::config::Format::Json),
+        (&args.config_yaml, gallery_dl_rs::config::Format::Yaml),
+        (&args.config_toml, gallery_dl_rs::config::Format::Toml),
+    ] {
+        if let Some(path) = path {
+            gallery_dl_rs::config::set_format(path, format);
+        }
+    }
+    if args.config.is_none() {
+        args.config = args
+            .config_json
+            .clone()
+            .or_else(|| args.config_yaml.clone())
+            .or_else(|| args.config_toml.clone());
+    }
     if let Some(path) = &args.write_unsupported
         && let Err(e) = gallery_dl_rs::unsupported::set_file(path)
     {

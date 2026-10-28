@@ -1587,7 +1587,11 @@ Facebook and every initialized registry site as a Netscape file.
 registry responses to numbered files in the working directory, and
 `--print-traffic` shows registry requests and response headers. Dedicated
 extractors (Instagram, Twitter/X, Facebook, ...) do not report traffic.
-**Remaining CLI gaps:** YAML/TOML configuration files.
+Configuration files may be YAML (`.yaml`/`.yml`) or TOML (`.toml`), or be
+declared with `--config-json`, `--config-yaml` or `--config-toml`;
+`--config-type` selects the `--config-create` format. Every upstream 1.32.17
+command-line option is now accepted; `-X` and `--compat` fail explicitly and
+the update options report that self-updating is unsupported.
 
 **Implemented upstream configuration compatibility, 2026-10-28:** native
 configuration files now load typical upstream `config.json` files. Unknown

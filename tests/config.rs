@@ -3944,3 +3944,18 @@ fn upstream_configs_load_with_unknown_keys_and_sections() {
     );
     assert!(parse(r#"{"extractor":{"password":"x"}}"#).is_err());
 }
+
+#[tokio::test]
+async fn yaml_and_toml_configurations_load_by_extension_or_declaration() {
+    let root = tempfile::tempdir().unwrap();
+    let yaml = root.path().join("c.yml");
+    std::fs::write(&yaml, "extractor:\n  imgur:\n    mp4: false\n").unwrap();
+    let config = Config::load(&yaml).await.unwrap();
+    assert_eq!(config.resolve("imgur").unwrap().mp4, Some(false));
+    let toml = root.path().join("c.conf");
+    std::fs::write(&toml, "[extractor.imgur]\nmp4 = true\n").unwrap();
+    assert!(Config::load(&toml).await.is_err());
+    gallery_dl_rs::config::set_format(&toml, gallery_dl_rs::config::Format::Toml);
+    let config = Config::load(&toml).await.unwrap();
+    assert_eq!(config.resolve("imgur").unwrap().mp4, Some(true));
+}

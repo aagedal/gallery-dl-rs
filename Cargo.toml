@@ -31,6 +31,8 @@ md-5 = "0.10"
 sha3 = "0.10"
 blake2 = "0.10"
 libc = "0.2"
+toml = "1"
+serde_yaml_ng = "0.10"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }

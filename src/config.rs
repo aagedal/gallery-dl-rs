@@ -620,6 +620,61 @@ fn take_unknown(
         .collect()
 }
 
+/// Configuration file formats, like upstream's `--config-json`,
+/// `--config-yaml` and `--config-toml`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Format {
+    Json,
+    Yaml,
+    Toml,
+}
+
+static FORMATS: std::sync::Mutex<Vec<(PathBuf, Format)>> = std::sync::Mutex::new(Vec::new());
+
+/// Declare the format of a configuration file regardless of its extension.
+pub fn set_format(path: &Path, format: Format) {
+    FORMATS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push((path.to_path_buf(), format));
+}
+
+/// Convert YAML and TOML configuration files to JSON. The format is declared
+/// with [`set_format`] or follows the `.yaml`/`.yml`/`.toml` extension.
+fn to_json(path: &Path, bytes: Vec<u8>) -> Result<Vec<u8>> {
+    let declared = FORMATS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .find(|(declared, _)| {
+            declared == path || std::path::absolute(declared).ok().as_deref() == Some(path)
+        })
+        .map(|(_, format)| *format);
+    let format = declared.unwrap_or_else(|| {
+        match path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("yaml" | "yml") => Format::Yaml,
+            Some("toml") => Format::Toml,
+            _ => Format::Json,
+        }
+    });
+    let value: Value = match format {
+        Format::Json => return Ok(bytes),
+        Format::Yaml => {
+            serde_yaml_ng::from_slice(&bytes).map_err(|_| error("invalid YAML configuration"))?
+        }
+        Format::Toml => std::str::from_utf8(&bytes)
+            .ok()
+            .and_then(|text| toml::from_str(text).ok())
+            .ok_or_else(|| error("invalid TOML configuration"))?,
+    };
+    serde_json::to_vec(&value).map_err(|_| error("invalid configuration"))
+}
+
 /// Categories with dedicated native extractors and typed scopes.
 const DEDICATED_CATEGORIES: &[&str] = &[
     "instagram",
@@ -1069,6 +1124,7 @@ impl Config {
             .read_to_end(&mut bytes)
             .await
             .map_err(|_| error("cannot read native configuration"))?;
+        let bytes = to_json(&absolute, bytes)?;
         Self::parse(&bytes, &parent)
     }
 
@@ -1098,6 +1154,7 @@ impl Config {
             .read_to_end(&mut bytes)
             .await
             .map_err(|_| error("cannot read native configuration"))?;
+        let bytes = to_json(&absolute, bytes)?;
         Self::parse_with_options(&bytes, &parent, options)
     }
 
