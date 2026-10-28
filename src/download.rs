@@ -24,6 +24,9 @@ use std::{
 use tokio::io::AsyncWriteExt;
 pub use ytdl::{YtdlOptions, executable as ytdl_executable, module_command as ytdl_module_command};
 
+type HeaderCapture =
+    std::sync::Arc<std::sync::Mutex<Option<serde_json::Map<String, serde_json::Value>>>>;
+
 /// Clones share the HTTP connection pool and per-origin rate-limit cooldowns.
 #[derive(Clone)]
 pub struct DownloadClient {
@@ -37,9 +40,7 @@ pub struct DownloadClient {
     mtime_field: Option<String>,
     response_mtime: Option<std::sync::Arc<std::sync::Mutex<Option<SystemTime>>>>,
     /// Response headers captured for `metadata-http`.
-    pub(crate) response_headers: Option<
-        std::sync::Arc<std::sync::Mutex<Option<serde_json::Map<String, serde_json::Value>>>>,
-    >,
+    pub(crate) response_headers: Option<HeaderCapture>,
     /// Upstream `metadata-http`: keyword receiving the response headers.
     pub(crate) metadata_http: Option<std::sync::Arc<str>>,
     sleep: Option<crate::sleep::SleepRange>,

@@ -611,11 +611,12 @@ pub(crate) async fn download(
     }
     // Upstream `metadata-http`: headers become a keyword, and the path is
     // built afterwards so templates can use them.
+    let headers = captured_headers
+        .lock()
+        .map_err(|_| error("HTTP metadata lock poisoned"))?
+        .take();
     if let Some(name) = &client.metadata_http
-        && let Some(headers) = captured_headers
-            .lock()
-            .map_err(|_| error("HTTP metadata lock poisoned"))?
-            .take()
+        && let Some(headers) = headers
     {
         prepared
             .keywords
