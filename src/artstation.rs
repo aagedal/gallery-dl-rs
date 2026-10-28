@@ -86,8 +86,21 @@ fn valid_user(user: &str) -> bool {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
-    Project { hash: String },
-    User { user: String },
+    Project {
+        hash: String,
+    },
+    User {
+        user: String,
+    },
+    /// A `projects.json`-style listing: albums, likes, one collection or the
+    /// artwork page, as an API path with its query.
+    Listing {
+        path: String,
+    },
+    /// `USER/collections`: queued collection children.
+    Collections {
+        user: String,
+    },
 }
 
 fn plain(url: &Url) -> bool {
@@ -95,6 +108,10 @@ fn plain(url: &Url) -> bool {
         && url.port().is_none()
         && url.username().is_empty()
         && url.password().is_none()
+}
+
+fn digits(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 20 && id.bytes().all(|b| b.is_ascii_digit())
 }
 
 pub fn target(url: &Url) -> Result<Target> {
@@ -116,6 +133,23 @@ pub fn target(url: &Url) -> Result<Target> {
             ["artwork" | "projects", hash] if valid_hash(hash) => {
                 Ok(Target::Project { hash: hash.into() })
             }
+            ["artwork"] if url.query().is_some() => Ok(Target::Listing {
+                path: format!("projects.json?{}", url.query().unwrap_or_default()),
+            }),
+            [user, "albums", id] if valid_user(user) && digits(id) => Ok(Target::Listing {
+                path: format!("users/{user}/projects.json?album_id={id}"),
+            }),
+            [user, "likes"] if valid_user(user) && !RESERVED.contains(&user) => {
+                Ok(Target::Listing {
+                    path: format!("users/{user}/likes.json"),
+                })
+            }
+            [user, "collections"] if valid_user(user) && !RESERVED.contains(&user) => {
+                Ok(Target::Collections { user: user.into() })
+            }
+            [user, "collections", id] if valid_user(user) && digits(id) => Ok(Target::Listing {
+                path: format!("collections/{id}/projects.json?collection_id={id}"),
+            }),
             [user] | [user, "albums", "all"] if valid_user(user) && !RESERVED.contains(&user) => {
                 Ok(Target::User { user: user.into() })
             }
@@ -132,6 +166,9 @@ pub fn target(url: &Url) -> Result<Target> {
                 }
                 // Upstream's `USER.artstation.com(?:/projects)?/?$`.
                 [] | ["projects"] | ["albums", "all"] => Ok(Target::User { user: user.into() }),
+                ["albums", id] if digits(id) => Ok(Target::Listing {
+                    path: format!("users/{user}/projects.json?album_id={id}"),
+                }),
                 _ => Err(unsupported()),
             }
         }
@@ -271,7 +308,8 @@ pub struct ArtStation {
 }
 
 struct ListingState {
-    user: String,
+    /// API path, possibly with a query.
+    path: String,
     page: u64,
     seen: u64,
     done: bool,
@@ -354,11 +392,9 @@ impl ArtStation {
 
     async fn next_page(&self, state: &mut ListingState) -> Result<()> {
         state.page += 1;
+        let separator = if state.path.contains('?') { '&' } else { '?' };
         let body = self
-            .call(&format!(
-                "users/{}/projects.json?page={}",
-                state.user, state.page
-            ))
+            .call(&format!("{}{separator}page={}", state.path, state.page))
             .await?;
         let (hashes, total) = parse_listing(&body)?;
         state.seen += hashes.len() as u64;
@@ -374,10 +410,52 @@ impl ArtStation {
         crate::event::media_only(self.events(url))
     }
 
+    /// Upstream `ArtstationCollectionsExtractor`: queue every collection.
+    fn collections(&self, user: String) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::once(async move {
+            let body = self
+                .call(&format!("collections.json?username={user}"))
+                .await?;
+            let list: Value = serde_json::from_slice(&body)
+                .map_err(|_| error("ArtStation returned invalid JSON"))?;
+            Ok::<_, crate::Error>((user, list.as_array().cloned().unwrap_or_default()))
+        })
+        .map(move |result| match result {
+            Ok((user, list)) => stream::iter(list)
+                .filter_map(move |collection| {
+                    let user = user.clone();
+                    std::future::ready(collection.get("id").and_then(Value::as_u64).map(|id| {
+                        let data = collection.as_object().cloned().unwrap_or_default();
+                        crate::event::child_job(
+                            crate::event::ChildMetadata::from_raw(
+                                "artstation",
+                                "collections",
+                                &data,
+                            ),
+                            move || {
+                                let url = Url::parse(&format!(
+                                    "https://www.artstation.com/{user}/collections/{id}"
+                                ))
+                                .expect("valid collection URL");
+                                self.events(&url)
+                            },
+                        )
+                    }))
+                })
+                .flatten()
+                .boxed(),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
     /// Emit one post boundary per project; portfolios paginate lazily.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
-        let user = match target(url) {
-            Ok(Target::User { user }) => user,
+        let path = match target(url) {
+            Ok(Target::User { user }) => format!("users/{user}/projects.json"),
+            Ok(Target::Listing { path }) => path,
+            Ok(Target::Collections { user }) => return self.collections(user),
             Ok(Target::Project { hash }) => {
                 return stream::once(async move { self.project(&hash).await })
                     .map(|result| match result {
@@ -390,7 +468,7 @@ impl ArtStation {
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
         };
         let state = ListingState {
-            user,
+            path,
             page: 0,
             seen: 0,
             done: false,
@@ -584,6 +662,33 @@ mod tests {
         };
         assert_eq!(t("https://www.artstation.com/artwork/LQVJr").unwrap(), p);
         assert_eq!(t("https://alice.artstation.com/projects/LQVJr").unwrap(), p);
+        let listing = |path: &str| Target::Listing { path: path.into() };
+        assert_eq!(
+            t("https://www.artstation.com/huimeiye/albums/770899").unwrap(),
+            listing("users/huimeiye/projects.json?album_id=770899")
+        );
+        assert_eq!(
+            t("https://fede-x-rojas.artstation.com/albums/8533110").unwrap(),
+            listing("users/fede-x-rojas/projects.json?album_id=8533110")
+        );
+        assert_eq!(
+            t("https://www.artstation.com/mikf/likes").unwrap(),
+            listing("users/mikf/likes.json")
+        );
+        assert_eq!(
+            t("https://www.artstation.com/mikf/collections/2647023").unwrap(),
+            listing("collections/2647023/projects.json?collection_id=2647023")
+        );
+        assert_eq!(
+            t("https://www.artstation.com/mikf/collections").unwrap(),
+            Target::Collections {
+                user: "mikf".into()
+            }
+        );
+        assert_eq!(
+            t("https://www.artstation.com/artwork?sorting=latest").unwrap(),
+            listing("projects.json?sorting=latest")
+        );
         assert_eq!(
             t("https://alice.artstation.com/projects/").unwrap(),
             Target::User {
@@ -600,7 +705,6 @@ mod tests {
             "https://www.artstation.com/",
             "https://www.artstation.com/search",
             "https://www.artstation.com/artwork/",
-            "https://www.artstation.com/alice/albums/5",
             "https://cdna.artstation.com/p/assets/images/1/large/a.jpg",
             "https://www.artstation.com.evil.example/alice",
             "https://www.artstation.com:444/alice",
