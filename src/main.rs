@@ -790,6 +790,45 @@ async fn run(args: Args) -> Result<()> {
         ));
     }
     let settings = resolved_settings(&args, &[]).await?;
+    if args
+        .urls
+        .iter()
+        .any(|url| gallery_dl_rs::oauth::is_oauth(url))
+    {
+        let options = |category: &str, key: &str| {
+            let options = &settings.get(category)?.options;
+            match key {
+                "client-id" => options.client_id.clone(),
+                "client-secret" => options.client_secret.clone(),
+                "api-key" => options.api_key.clone(),
+                _ => None,
+            }
+            .or_else(|| {
+                options
+                    .site_options
+                    .as_ref()?
+                    .get(key)
+                    .map(|value| match value {
+                        serde_json::Value::String(text) => text.clone(),
+                        other => other.to_string(),
+                    })
+            })
+        };
+        for url in args
+            .urls
+            .iter()
+            .filter(|url| gallery_dl_rs::oauth::is_oauth(url))
+        {
+            gallery_dl_rs::oauth::run(url, &options).await?;
+        }
+        if args
+            .urls
+            .iter()
+            .all(|url| gallery_dl_rs::oauth::is_oauth(url))
+        {
+            return Ok(());
+        }
+    }
     if args.extractor_info {
         for url in &args.urls {
             print_extractor_info(url, &settings, args.extractor)?;

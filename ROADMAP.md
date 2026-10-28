@@ -1605,6 +1605,13 @@ progress), `downloader.http`/`ytdl` subsections, format-string archive paths,
 relative paths resolve against the configuration directory rather than the
 working directory, and the default base directory differs (`downloads`).
 
+**Implemented OAuth helpers, 2026-10-28:** `oauth:pixiv` (PKCE with a pasted
+code), `oauth:deviantart`, `oauth:reddit`, `oauth:mastodon:INSTANCE`
+(registering an application for unknown instances), `oauth:tumblr`,
+`oauth:smugmug` and `oauth:flickr` (OAuth 1.0a) open the authorization page,
+receive the callback on `localhost:6414` (`extractor.oauth.host`/`port`), and
+print the token with the configuration key to set. Tokens are never cached.
+
 ### Companion yt-dlp-rs integration
 
 Prefer an optional Rust library adapter once yt-dlp-rs has a stable, consumable

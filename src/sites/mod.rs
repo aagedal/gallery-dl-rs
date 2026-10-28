@@ -9,7 +9,7 @@
 pub(crate) mod gdl;
 pub mod http;
 
-mod art;
+pub(crate) mod art;
 mod boorus;
 mod filehosts;
 mod galleries;

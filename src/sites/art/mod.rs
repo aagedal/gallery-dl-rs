@@ -46,7 +46,7 @@ mod seiga;
 mod skeb;
 mod slickpic;
 mod slideshare;
-mod smugmug;
+pub(crate) mod smugmug;
 mod speakerdeck;
 mod steamgriddb;
 mod thirtyfivephoto;

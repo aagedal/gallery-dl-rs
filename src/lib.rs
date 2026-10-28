@@ -35,6 +35,7 @@ pub mod naming;
 pub mod netrc;
 pub mod network;
 pub mod newgrounds;
+pub mod oauth;
 pub mod path_options;
 pub mod pinterest;
 pub mod pixiv;

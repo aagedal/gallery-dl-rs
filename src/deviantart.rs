@@ -30,8 +30,8 @@ use std::{
 use url::Url;
 
 /// Upstream gallery-dl's public OAuth client.
-const CLIENT_ID: &str = "5388";
-const CLIENT_SECRET: &str = "76b08c69cfb27f26d6161f9ab6d061a1";
+pub(crate) const CLIENT_ID: &str = "5388";
+pub(crate) const CLIENT_SECRET: &str = "76b08c69cfb27f26d6161f9ab6d061a1";
 const USER_AGENT: &str = "gallery-dl-rs";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 const MAX_PAGES: usize = 200;
