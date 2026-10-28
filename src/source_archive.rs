@@ -181,7 +181,18 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
     if let Ok(target) = crate::deviantart::target(url) {
         let format = match target {
             crate::deviantart::Target::Folder { .. } => "F_{folder[uuid]}_{index}.{extension}",
-            crate::deviantart::Target::Deviation { .. } => "g_{_username}_{index}.{extension}",
+            crate::deviantart::Target::Deviation { .. }
+            | crate::deviantart::Target::DeviationId(_) => "g_{_username}_{index}.{extension}",
+            crate::deviantart::Target::Favorites { folder: None, .. } => {
+                "f_{_username}_{index}.{extension}"
+            }
+            crate::deviantart::Target::Favorites { .. } => {
+                "C_{collection[uuid]}_{index}.{extension}"
+            }
+            crate::deviantart::Target::Tag(_) => "T_{search_tags}_{index}.{extension}",
+            crate::deviantart::Target::Avatar(_) => "a_{_username}_{index}",
+            crate::deviantart::Target::Banner(_) => "b_{index}",
+            crate::deviantart::Target::Following(_) => "",
             crate::deviantart::Target::Gallery(_) => {
                 if path.split('/').any(|part| part == "gallery") {
                     "g_{_username}_{index}.{extension}"
