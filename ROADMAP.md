@@ -1573,11 +1573,13 @@ processors like upstream and imply `download: false`, which (also via
 without fetching files; `-s` remains the separate simulation mode.
 `--config-status`, `--config-create` and `--config-open` manage the native
 configuration file. `-U/--update`, `--update-check` and `--update-to` report
-that self-updating is unsupported. **Remaining CLI gaps:** `--cache-*`,
-`--clear-cache`, `--cookies-export`, `--extractor-info`, `--extractors`,
-`--blacklist`/`--whitelist`, `--tags-blacklist`/`--tags-whitelist`,
-`--write-log`, `--write-pages`, `--print-traffic`, `--xff`, `--compat`, and
-YAML/TOML configuration files.
+that self-updating is unsupported. `--xff` sends a random `X-Forwarded-For` address from CIDR blocks or
+country codes (upstream's table), `--blacklist`/`--whitelist` filter child
+extractors for external URLs by category, `--write-log` copies standard error
+(Unix), and the `--cache-*` commands report that no cache is kept. `-X` and
+`--compat` fail explicitly. **Remaining CLI gaps:** `--cookies-export`,
+`-E/--extractor-info`, `--tags-blacklist`/`--tags-whitelist`, `--write-pages`,
+`--print-traffic`, and YAML/TOML configuration files.
 
 ### Companion yt-dlp-rs integration
 

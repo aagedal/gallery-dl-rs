@@ -12,6 +12,8 @@ pub struct NetworkOptions {
     insecure: bool,
     /// Upstream `source-address`: bind outgoing connections to this address.
     source_address: Option<std::net::IpAddr>,
+    /// Upstream `geo-bypass`: the configured value and the generated address.
+    xff: Option<(String, std::net::Ipv4Addr)>,
 }
 impl fmt::Debug for NetworkOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -69,7 +71,23 @@ impl NetworkOptions {
         if let Some(address) = self.source_address {
             args.extend(["--source-address".into(), address.to_string()]);
         }
+        if let Some((value, _)) = &self.xff {
+            args.extend(["--xff".into(), value.clone()]);
+        }
         args
+    }
+    /// Send a fake `X-Forwarded-For` address from CIDR blocks or country
+    /// codes (`--xff`). Fails when no block or code is valid.
+    pub fn with_geo_bypass(mut self, value: Option<&str>) -> Result<Self> {
+        self.xff = match value {
+            None => None,
+            Some(value) => Some((
+                value.to_owned(),
+                crate::geo::random_ipv4(value)
+                    .ok_or_else(|| error("xff: invalid IP block or ISO 3166 country code"))?,
+            )),
+        };
+        Ok(self)
     }
     /// Bind outgoing connections to a local address (`--source-address`, `-4`, `-6`).
     pub fn with_source_address(mut self, address: Option<std::net::IpAddr>) -> Self {
@@ -95,6 +113,15 @@ impl NetworkOptions {
         }
         if let Some(address) = self.source_address {
             builder = builder.local_address(address);
+        }
+        if let Some((_, address)) = &self.xff {
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                "X-Forwarded-For",
+                HeaderValue::from_str(&address.to_string())
+                    .map_err(|_| error("invalid X-Forwarded-For address"))?,
+            );
+            builder = builder.default_headers(headers);
         }
         if let Some(proxy) = self.proxy() {
             builder = if proxy.is_empty() {

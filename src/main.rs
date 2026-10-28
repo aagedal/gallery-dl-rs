@@ -47,7 +47,7 @@ use tokio::sync::OnceCell;
 )]
 struct Args {
     /// Instagram, Facebook, Twitter/X, or direct media URLs
-    #[arg(required_unless_present_any = ["input_files", "input_file_comment", "input_file_delete", "list_extractors", "list_modules", "config_status", "config_create", "config_open", "update", "update_check", "update_to"])]
+    #[arg(required_unless_present_any = ["input_files", "input_file_comment", "input_file_delete", "list_extractors", "list_modules", "config_status", "config_create", "config_open", "update", "update_check", "update_to", "cache_status", "cache_show", "cache_clear", "cache_vacuum"])]
     urls: Vec<String>,
     /// Read URLs from a UTF-8 file; repeat for multiple files, or use - for stdin
     #[arg(short = 'i', long = "input-file", value_name = "FILE")]
@@ -250,6 +250,34 @@ struct Args {
     /// Append FORMAT during EVENT to FILE instead of downloading files
     #[arg(long, num_args = 2, value_names = ["[EVENT:]FORMAT", "FILE"])]
     print_to_file: Vec<String>,
+    /// Accepted for compatibility: gallery-dl-rs keeps no cache file
+    #[arg(long, value_name = "PATH", hide = true)]
+    cache_file: Option<PathBuf>,
+    /// Show cache file information
+    #[arg(long)]
+    cache_status: bool,
+    /// Show cached values for MODULE
+    #[arg(long, value_name = "MODULE")]
+    cache_show: Option<String>,
+    /// Delete cached login sessions, cookies, etc. for MODULE
+    #[arg(long, alias = "clear-cache", value_name = "MODULE")]
+    cache_clear: Option<String>,
+    /// Clean up the cache database
+    #[arg(long)]
+    cache_vacuum: bool,
+    /// Load external Python extractors from PATH (not supported; reports an error)
+    #[arg(short = 'X', long = "extractors", value_name = "PATH")]
+    extractor_sources: Vec<PathBuf>,
+    /// Restore legacy 'category' names (not supported; reports an error)
+    #[arg(long)]
+    compat: bool,
+    /// Ignore the given comma-separated categories when spawning child
+    /// extractors for external URLs (e.g. 'pixiv,twitter')
+    #[arg(long, value_name = "CATEGORIES")]
+    blacklist: Option<String>,
+    /// Only spawn child extractors for external URLs of these categories
+    #[arg(long, value_name = "CATEGORIES")]
+    whitelist: Option<String>,
     /// Do not skip downloads; overwrite existing files
     #[arg(long)]
     no_skip: bool,
@@ -262,6 +290,9 @@ struct Args {
     /// Enable .netrc authentication data
     #[arg(long)]
     netrc: bool,
+    /// Write logging output to FILE
+    #[arg(long, value_name = "FILE")]
+    write_log: Option<PathBuf>,
     /// Write URLs which get emitted by other extractors but cannot be handled to FILE
     #[arg(long, value_name = "FILE")]
     write_unsupported: Option<PathBuf>,
@@ -271,6 +302,11 @@ struct Args {
     /// Accepted for compatibility; no additional debug output is printed
     #[arg(short = 'v', long)]
     verbose: bool,
+    /// Use a fake 'X-Forwarded-For' HTTP header to try bypassing geographic
+    /// restrictions: IP blocks in CIDR notation or two-letter ISO 3166-2
+    /// country codes (12.0.0.0/8,FR,CN)
+    #[arg(long, value_name = "VALUE")]
+    xff: Option<String>,
     /// Disable HTTPS certificate validation
     #[arg(long)]
     no_check_certificate: bool,
@@ -609,6 +645,12 @@ fn main() {
         eprintln!("error: cannot open {}: {e}", path.display());
         std::process::exit(1);
     }
+    if let Some(path) = &args.write_log
+        && let Err(e) = gallery_dl_rs::logfile::start(path)
+    {
+        eprintln!("error: cannot write log to {}: {e}", path.display());
+        std::process::exit(1);
+    }
     let worker = std::thread::Builder::new()
         .name("main-runtime".into())
         .stack_size(MAIN_STACK_SIZE)
@@ -620,7 +662,9 @@ fn main() {
                 .block_on(async_main(args))
         })
         .expect("failed to start the main runtime thread");
-    if let Err(panic) = worker.join() {
+    let result = worker.join();
+    gallery_dl_rs::logfile::finish();
+    if let Err(panic) = result {
         std::panic::resume_unwind(panic);
     }
 }
@@ -636,10 +680,12 @@ async fn async_main(args: Args) {
     };
     if let Err(e) = result {
         eprintln!("error: {e}");
+        gallery_dl_rs::logfile::finish();
         std::process::exit(1);
     }
     if interrupted {
         eprintln!("cancelled");
+        gallery_dl_rs::logfile::finish();
         std::process::exit(130);
     }
 }
@@ -647,6 +693,27 @@ async fn async_main(args: Args) {
 async fn run(args: Args) -> Result<()> {
     if args.list_extractors || args.list_modules {
         list_extractors(args.list_extractors);
+        return Ok(());
+    }
+    if let Some(list) = &args.whitelist {
+        let _ = CHILD_FILTER.set(ChildFilter::parse(list, true));
+    } else if let Some(list) = &args.blacklist {
+        let _ = CHILD_FILTER.set(ChildFilter::parse(list, false));
+    }
+    if !args.extractor_sources.is_empty() {
+        return Err(error(
+            "-X/--extractors loads Python extractor modules, which gallery-dl-rs cannot run",
+        ));
+    }
+    if args.compat {
+        return Err(error("--compat (legacy category names) is not supported"));
+    }
+    if args.cache_status
+        || args.cache_show.is_some()
+        || args.cache_clear.is_some()
+        || args.cache_vacuum
+    {
+        println!("gallery-dl-rs keeps no cache file; login sessions are not stored between runs");
         return Ok(());
     }
     if args.config_status || args.config_create || args.config_open {
@@ -1465,9 +1532,44 @@ fn child_queue<'a>(
         (routed_site(&url, extractor).is_some()
             || extract::direct(&url).is_some()
             || matches!(extractor, Extractor::Compatibility))
-        .then(|| extract_input(url.to_string(), extractors, backend, extractor, settings))
+        .then_some(())
+        .filter(|_| {
+            CHILD_FILTER
+                .get()
+                .is_none_or(|filter| filter.allows(settings_category(&url, extractor)))
+        })
+        .map(|_| extract_input(url.to_string(), extractors, backend, extractor, settings))
     })
 }
+
+/// Upstream `whitelist`/`blacklist` for child extractors of external URLs,
+/// by category (`CATEGORY` or `CATEGORY:*`; subcategory entries are ignored).
+struct ChildFilter {
+    categories: Vec<String>,
+    whitelist: bool,
+}
+impl ChildFilter {
+    fn parse(list: &str, whitelist: bool) -> Self {
+        let categories = list
+            .split(',')
+            .filter_map(|item| {
+                let (category, subcategory) =
+                    item.trim().split_once(':').unwrap_or((item.trim(), ""));
+                (!category.is_empty() && category != "*" && matches!(subcategory, "" | "*"))
+                    .then(|| category.to_owned())
+            })
+            .collect();
+        Self {
+            categories,
+            whitelist,
+        }
+    }
+    fn allows(&self, category: &str) -> bool {
+        self.categories.iter().any(|c| c == category) == self.whitelist
+    }
+}
+
+static CHILD_FILTER: std::sync::OnceLock<ChildFilter> = std::sync::OnceLock::new();
 
 fn extract_input<'a>(
     source: String,
@@ -2986,6 +3088,7 @@ async fn resolved_settings(
             .then(|| PostSelection::new(post_range, post_filter));
         let network = NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?
             .with_insecure(args.no_check_certificate)
+            .with_geo_bypass(args.xff.as_deref())?
             .with_source_address(args.source_address.or_else(|| {
                 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
                 (args.force_ipv4)
@@ -3037,4 +3140,35 @@ async fn resolved_settings(
         );
     }
     Ok(settings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn child_filters_match_categories_like_upstream_lists() {
+        let black = ChildFilter::parse("pixiv, twitter:*,*:user,danbooru:tag", false);
+        assert!(!black.allows("pixiv"));
+        assert!(!black.allows("twitter"));
+        assert!(black.allows("danbooru"));
+        let white = ChildFilter::parse("imgur", true);
+        assert!(white.allows("imgur"));
+        assert!(!white.allows("pixiv"));
+    }
+
+    #[test]
+    fn print_formats_follow_upstream_print_action() {
+        let pp = print_postprocessor("id", None).unwrap();
+        assert_eq!(pp["content-format"], "{id}\n");
+        assert_eq!(pp["event"], "prepare");
+        let pp = print_postprocessor("after:{a} {b}", Some("dir/out.txt")).unwrap();
+        assert_eq!(pp["event"], "after");
+        assert_eq!(pp["content-format"], "{a} {b}\n");
+        assert_eq!(pp["base-directory"], "dir");
+        assert_eq!(pp["open"], "a");
+        let pp = print_postprocessor("nope:{x}", None).unwrap();
+        assert_eq!(pp["content-format"], "nope:{x}\n");
+        assert!(print_postprocessor("", None).is_none());
+    }
 }
