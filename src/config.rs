@@ -618,6 +618,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     "sleep-extractor",
     "sleep-skip",
     "source-address",
+    "proxy-env",
     "tags-blacklist",
     "tags-whitelist",
     "blacklist-tags",

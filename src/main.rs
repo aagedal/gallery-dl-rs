@@ -3783,7 +3783,13 @@ async fn resolved_settings(
             .transpose()?;
         let post_selection = (post_range.is_some() || post_filter.is_some() || tags.is_some())
             .then(|| PostSelection::new(post_range, post_filter).with_tags(tags.clone()));
-        let network = NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?
+        // Upstream `proxy-env: false`: ignore proxy environment variables
+        // (an empty proxy disables proxy discovery).
+        let proxy = options.proxy.clone().or_else(|| {
+            (config.globals().get("proxy-env") == Some(&serde_json::Value::Bool(false)))
+                .then(String::new)
+        });
+        let network = NetworkOptions::new(proxy, options.user_agent.clone())?
             .with_insecure(args.no_check_certificate || !downloader_verify)
             .with_geo_bypass(geo_bypass.as_deref())?
             .with_source_address(source_address.or_else(|| {
