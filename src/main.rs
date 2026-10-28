@@ -910,6 +910,9 @@ async fn run(args: Args) -> Result<()> {
             print_skipped = false;
         }
     }
+    if let Some(value) = globals.and_then(|g| g.get("keywords-default")) {
+        gallery_dl_rs::naming::set_keywords_default(value.clone());
+    }
     // Upstream `actions`: run actions for matching log messages.
     if let Some(spec) = globals.and_then(|g| g.get("actions")) {
         gallery_dl_rs::actions::install(gallery_dl_rs::actions::LogActions::parse(spec)?);

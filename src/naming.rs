@@ -378,6 +378,19 @@ impl FilenameTemplate {
         name: &str,
         keywords: bool,
     ) -> Option<Value> {
+        Self::lookup_present(media, context, name, keywords).or_else(|| {
+            KEYWORDS_DEFAULT
+                .get()
+                .map(|value| convert(&crate::filter::json_value(value), name))
+        })
+    }
+
+    fn lookup_present(
+        media: &Media,
+        context: &BTreeMap<String, crate::filter::Value>,
+        name: &str,
+        keywords: bool,
+    ) -> Option<Value> {
         if keywords {
             context.get(name).map(|value| {
                 if matches!(name, "date" | "date_updated")
@@ -871,6 +884,15 @@ impl DirectoryTemplate {
         }
         Ok(Some(output))
     }
+}
+
+/// Upstream `keywords-default`: the value of missing keywords in path
+/// templates (otherwise `None`).
+static KEYWORDS_DEFAULT: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+
+/// Install the process-wide `keywords-default` value.
+pub fn set_keywords_default(value: serde_json::Value) {
+    let _ = KEYWORDS_DEFAULT.set(value);
 }
 
 fn convert(value: &crate::filter::Value, key: &str) -> Value {
