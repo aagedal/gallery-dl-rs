@@ -544,10 +544,61 @@ pub fn parse_option(option: &str) -> Result<CliOption> {
     })
 }
 
+/// Upstream `config.remap_categories`: settings of renamed categories
+/// (`extractor.config-map`, by default e.g. `kemonoparty` → `kemono`) apply
+/// to the new name unless it has its own settings.
+fn remap_categories(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut root: Value = serde_json::from_slice(bytes).ok()?;
+    let extractor = root.get_mut("extractor")?.as_object_mut()?;
+    let had_map = extractor.contains_key("config-map");
+    let pairs: Vec<(String, String)> = match extractor.remove("config-map") {
+        None | Some(Value::Null) => [
+            ("coomerparty", "coomer"),
+            ("kemonoparty", "kemono"),
+            ("giantessbooru", "sizebooru"),
+            ("naver", "naver-blog"),
+            ("chzzk", "naver-chzzk"),
+            ("naverwebtoon", "naver-webtoon"),
+            ("pixiv", "pixiv-novel"),
+            ("saint", "turbo"),
+        ]
+        .into_iter()
+        .map(|(a, b)| (a.to_owned(), b.to_owned()))
+        .collect(),
+        Some(Value::Object(map)) => map
+            .into_iter()
+            .filter_map(|(old, new)| Some((old, new.as_str()?.to_owned())))
+            .collect(),
+        Some(Value::Array(list)) => list
+            .into_iter()
+            .filter_map(|pair| {
+                let pair = pair.as_array()?;
+                Some((
+                    pair.first()?.as_str()?.to_owned(),
+                    pair.get(1)?.as_str()?.to_owned(),
+                ))
+            })
+            .collect(),
+        Some(_) => Vec::new(),
+    };
+    let mut changed = had_map;
+    for (old, new) in pairs {
+        if let Some(value) = extractor.get(&old).cloned()
+            && !extractor.contains_key(&new)
+        {
+            extractor.insert(new, value);
+            changed = true;
+        }
+    }
+    // Rewriting would hide duplicate keys from later validation.
+    changed.then(|| serde_json::to_vec(&root).ok()).flatten()
+}
+
 /// Process-wide upstream settings read from the root or `extractor` scope
 /// (the `extractor` value wins), applied once rather than per category.
 pub const GLOBAL_KEYS: &[&str] = &[
     "actions",
+    "category-map",
     "archive-event",
     "archive-mode",
     "skip-filter",
@@ -1229,6 +1280,8 @@ impl Config {
         }
         let normalized = crate::source_date_json::normalize(bytes);
         let bytes = normalized.as_deref().unwrap_or(bytes);
+        let remapped = remap_categories(bytes);
+        let bytes = remapped.as_deref().unwrap_or(bytes);
         // Do not forward serde's diagnostics: they can quote private values or
         // a malicious unknown key. Known setting failures are reported below.
         // serde's struct deserializer also accepts positional arrays. Restrict

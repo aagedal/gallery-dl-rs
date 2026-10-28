@@ -2868,7 +2868,7 @@ fn pixiv_tag_modes_are_sparse_inherited_and_independent_between_categories() {
     let cfg = parse(r#"{"extractor":{"tags":"translated","pixiv":{"tags":"original"}}}"#).unwrap();
     assert_eq!(
         cfg.resolve("pixiv-novel").unwrap().tags,
-        Some(TagMode::Translated)
+        Some(TagMode::Original)
     );
     let cfg = parse(r#"{"tags":"original","extractor":{"tags":"japanese","pixiv":{"tags":"translated"},"pixiv-novel":{"tags":"translated"}}}"#).unwrap();
     for category in ["pixiv", "pixiv-novel"] {
@@ -3113,7 +3113,7 @@ fn pixiv_ugoira_modes_override_original_with_false_and_null_without_scope_leaks(
     assert_eq!(pixiv.ugoira, Some(UgoiraMode::Original));
     assert_eq!(
         cfg.resolve("pixiv-novel").unwrap().ugoira,
-        Some(UgoiraMode::Zip)
+        Some(UgoiraMode::Original)
     );
     assert_eq!(
         pixiv
@@ -3214,8 +3214,11 @@ fn pixiv_enrichment_switches_are_scoped_and_explicit_null_clears_defaults() {
     }
     let cfg =
         parse(r#"{"extractor":{"pixiv":{"comments":true,"metadata-bookmark":true}}}"#).unwrap();
-    assert_eq!(cfg.resolve("pixiv-novel").unwrap().comments, None);
-    assert_eq!(cfg.resolve("pixiv-novel").unwrap().metadata_bookmark, None);
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().comments, Some(true));
+    assert_eq!(
+        cfg.resolve("pixiv-novel").unwrap().metadata_bookmark,
+        Some(true)
+    );
     assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
 }
 
@@ -3265,7 +3268,7 @@ fn metadata_switch_preserves_independent_pixiv_novel_scopes_and_explicit_null_cl
     assert_eq!(cfg.resolve("kemono").unwrap().metadata, Some(false));
     assert_eq!(cfg.resolve("coomer").unwrap().metadata, Some(true));
     let cfg = parse(r#"{"extractor":{"pixiv":{"metadata":true}}}"#).unwrap();
-    assert_eq!(cfg.resolve("pixiv-novel").unwrap().metadata, None);
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().metadata, Some(true));
     let cfg = parse(r#"{"metadata":null,"extractor":{"metadata":true,"pixiv":{"metadata":true},"pixiv-novel":{"metadata":true}}}"#).unwrap();
     for category in ["pixiv", "pixiv-novel", "kemono"] {
         let resolved = cfg.resolve(category).unwrap();
@@ -3359,7 +3362,7 @@ fn pixiv_captions_obey_hierarchy_null_clearing_and_independent_novel_scopes() {
     assert_eq!(pixiv.comments, Some(false));
     assert_eq!(pixiv.metadata, Some(false));
     assert_eq!(pixiv.metadata_bookmark, Some(true));
-    assert_eq!(cfg.resolve("pixiv-novel").unwrap().captions, None);
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().captions, Some(true));
     assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
 }
 
@@ -3433,7 +3436,7 @@ fn pixiv_sanity_preserves_null_clearing_hierarchy_and_independent_categories() {
     assert_eq!(pixiv.comments, Some(false));
     assert_eq!(pixiv.metadata, Some(false));
     assert_eq!(pixiv.metadata_bookmark, Some(true));
-    assert_eq!(cfg.resolve("pixiv-novel").unwrap().sanity, None);
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().sanity, Some(false));
     assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
 }
 
@@ -3958,4 +3961,20 @@ async fn yaml_and_toml_configurations_load_by_extension_or_declaration() {
     gallery_dl_rs::config::set_format(&toml, gallery_dl_rs::config::Format::Toml);
     let config = Config::load(&toml).await.unwrap();
     assert_eq!(config.resolve("imgur").unwrap().mp4, Some(true));
+}
+
+#[test]
+fn config_map_applies_settings_of_renamed_categories() {
+    let cfg = parse(r#"{"extractor":{"kemonoparty":{"metadata":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("kemono").unwrap().metadata, Some(true));
+    // Settings of the new name win, and an empty map disables remapping.
+    let cfg =
+        parse(r#"{"extractor":{"kemonoparty":{"metadata":true},"kemono":{"metadata":false}}}"#)
+            .unwrap();
+    assert_eq!(cfg.resolve("kemono").unwrap().metadata, Some(false));
+    let cfg = parse(r#"{"extractor":{"config-map":{},"pixiv":{"metadata":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().metadata, None);
+    let cfg =
+        parse(r#"{"extractor":{"config-map":{"old":"kemono"},"old":{"metadata":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("kemono").unwrap().metadata, Some(true));
 }

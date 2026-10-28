@@ -1651,7 +1651,8 @@ async fn pixiv_optional_enrichment_forwards_truthiness_only_to_illustrations() {
         for (url, supported) in [
             ("https://www.pixiv.net/artworks/42", true),
             ("https://www.pixivision.net/en/a/77", true),
-            ("https://www.pixiv.net/novel/show.php?id=42", false),
+            // `config-map` applies `pixiv` settings to `pixiv-novel`.
+            ("https://www.pixiv.net/novel/show.php?id=42", true),
             ("https://instagram.com/p/abc/", false),
         ] {
             let log = root.path().join("backend.log");

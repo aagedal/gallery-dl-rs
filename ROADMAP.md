@@ -1655,8 +1655,11 @@ local file errors (extraction errors are classified by their messages).
 without `path-restrict`, filenames use conservative ASCII cleaning rather
 than upstream's `auto`; `metadata-http`, `metadata-extractor`, `parent-*`, `category-transfer`,
 `file-unique`/`child-unique`, `path-extended`/`path-convert`, `tls12`,
-`ciphers`, `truststore`, `proxy-env`, `cookies-select`, `category-map` and
-`config-map` are not implemented.
+`ciphers`, `truststore`, `proxy-env` and `cookies-select` are not
+implemented. `config-map` (default: upstream's renamed categories, e.g.
+`kemonoparty` → `kemono`, `pixiv` → `pixiv-novel`) copies settings to new
+category names; `category-map` and `--compat` rename `category` (and
+`subcategory`) keywords, but configuration lookups keep the native names.
 
 ### Companion yt-dlp-rs integration
 

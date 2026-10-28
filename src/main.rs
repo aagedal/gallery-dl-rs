@@ -784,7 +784,8 @@ async fn run(args: Args) -> Result<()> {
         ));
     }
     if args.compat {
-        return Err(error("--compat (legacy category names) is not supported"));
+        // Takes precedence over a configured `category-map`.
+        gallery_dl_rs::filter::set_category_map(&serde_json::Value::String("compat".into()));
     }
     if args.cache_status
         || args.cache_show.is_some()
@@ -918,6 +919,9 @@ async fn run(args: Args) -> Result<()> {
         if output.get("skip") == Some(&serde_json::Value::Bool(false)) {
             print_skipped = false;
         }
+    }
+    if let Some(value) = globals.and_then(|g| g.get("category-map")) {
+        gallery_dl_rs::filter::set_category_map(value);
     }
     if let Some(value) = globals.and_then(|g| g.get("keywords-default")) {
         gallery_dl_rs::naming::set_keywords_default(value.clone());
