@@ -1636,7 +1636,7 @@ Errors and warnings use upstream's `[NAME][LEVEL] MESSAGE` format
 yt-dlp warnings and errors are relayed as `[ytdl][LEVEL]` messages
 (`logging`, deprecation warnings only with `deprecations: true`);
 `logging: false` shows yt-dlp's own output.
-**Remaining:** ytdl `outtmpl`. Relative configuration paths resolve against the working
+`outtmpl` lets yt-dlp name the file (`default`: `%(title)s [%(id)s].%(ext)s`). Relative configuration paths resolve against the working
 directory like upstream (since 2026-10-28; they used to be anchored to the
 configuration file's directory).
 

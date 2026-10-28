@@ -74,6 +74,8 @@ pub struct YtdlOptions {
     /// `logging` (default true) and `deprecations` (default false).
     pub logging: bool,
     pub deprecations: bool,
+    /// `outtmpl`: a yt-dlp output template for the file name.
+    pub outtmpl: Option<String>,
 }
 
 /// Re-log yt-dlp's `WARNING:`/`ERROR:` lines as `[ytdl][LEVEL]` messages,
@@ -200,6 +202,11 @@ impl YtdlOptions {
                 .map(crate::postprocess::expand_path),
             forward_cookies: object.get("forward-cookies") != Some(&serde_json::Value::Bool(false)),
             logging: object.get("logging") != Some(&serde_json::Value::Bool(false)),
+            outtmpl: object
+                .get("outtmpl")
+                .and_then(serde_json::Value::as_str)
+                .filter(|t| !t.is_empty())
+                .map(str::to_owned),
             deprecations: object
                 .get("deprecations")
                 .is_some_and(|v| v.as_bool() == Some(true)),
@@ -229,6 +236,10 @@ impl YtdlOptions {
         args.extend(options.raw_args.iter().cloned());
         args.extend(options.cmdline_args.iter().cloned());
         args
+    }
+
+    fn outtmpl() -> Option<&'static str> {
+        OPTIONS.get()?.outtmpl.as_deref()
     }
 
     /// Upstream `logging` (default true): relay yt-dlp's messages.
@@ -325,7 +336,13 @@ pub(super) fn arguments(
     args.extend_from_slice(cookies);
     args.extend(YtdlOptions::arguments());
     args.push("--output".into());
-    args.push(output.join(format!("{STEM}.%(ext)s")).display().to_string());
+    // Upstream `outtmpl`: yt-dlp names the file (`default`: its own default).
+    let template = match YtdlOptions::outtmpl() {
+        Some("default") => "%(title)s [%(id)s].%(ext)s".to_owned(),
+        Some(template) => template.replace(['/', '\\'], "_"),
+        None => format!("{STEM}.%(ext)s"),
+    };
+    args.push(output.join(template).display().to_string());
     // URLs never start with '-', but keep them out of option parsing anyway.
     args.push("--".into());
     args.push(url.as_str().to_owned());
@@ -400,6 +417,15 @@ pub(super) async fn download(request: Request<'_>) -> std::result::Result<Outcom
     }
     let output = produced_file(work.path())?
         .ok_or_else(|| failure("yt-dlp produced no media file", false))?;
+    // With `outtmpl`, the file keeps the name yt-dlp gave it.
+    let named;
+    let destination: &Path = match (YtdlOptions::outtmpl(), output.file_name()) {
+        (Some(_), Some(name)) => {
+            named = parent.join(name);
+            &named
+        }
+        _ => request.path,
+    };
     let size = std::fs::metadata(&output)?.len();
     if let Some(rejection) = request.limits.check(size) {
         return Ok(Outcome::Filtered(rejection));
@@ -412,11 +438,11 @@ pub(super) async fn download(request: Request<'_>) -> std::result::Result<Outcom
     }
     // A hard link publishes atomically and never replaces an existing file;
     // the temporary directory, including the source name, is removed on drop.
-    match std::fs::hard_link(&output, request.path) {
-        Ok(()) => Ok(Outcome::Downloaded(request.path.into())),
+    match std::fs::hard_link(&output, destination) {
+        Ok(()) => Ok(Outcome::Downloaded(destination.into())),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            if std::fs::symlink_metadata(request.path)?.is_file() {
-                Ok(Outcome::Skipped(request.path.into()))
+            if std::fs::symlink_metadata(destination)?.is_file() {
+                Ok(Outcome::Skipped(destination.into()))
             } else {
                 Err(failure("media destination is not a regular file", false))
             }
@@ -425,10 +451,10 @@ pub(super) async fn download(request: Request<'_>) -> std::result::Result<Outcom
             // Filesystems without hard links: copy, then refuse to clobber.
             let temporary = tempfile::NamedTempFile::new_in(parent)?.into_temp_path();
             std::fs::copy(&output, &temporary)?;
-            match temporary.persist_noclobber(request.path) {
-                Ok(_) => Ok(Outcome::Downloaded(request.path.into())),
+            match temporary.persist_noclobber(destination) {
+                Ok(_) => Ok(Outcome::Downloaded(destination.into())),
                 Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    Ok(Outcome::Skipped(request.path.into()))
+                    Ok(Outcome::Skipped(destination.into()))
                 }
                 Err(e) => Err(e.error.into()),
             }
@@ -488,6 +514,22 @@ fn find(command: &Path, path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
 
 /// The single completed `media.EXT` file yt-dlp wrote.
 fn produced_file(dir: &Path) -> std::io::Result<Option<PathBuf>> {
+    if YtdlOptions::outtmpl().is_some() {
+        // Any finished file yt-dlp wrote.
+        let mut found = None;
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let partial = [".part", ".ytdl", ".temp"]
+                .iter()
+                .any(|s| name.ends_with(s));
+            if !partial && entry.file_type()?.is_file() {
+                found = Some(entry.path());
+            }
+        }
+        return Ok(found);
+    }
     let mut found = None;
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
