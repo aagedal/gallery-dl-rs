@@ -103,6 +103,8 @@ pub enum Target {
     Following(String),
     /// `USER/journal/`, `USER/posts[/journals]`: the user's journals.
     Journals(String),
+    /// `USER/posts/statuses`: shared deviations and status texts.
+    Statuses(String),
     /// A Sta.sh item or folder; `true` for legacy `sta.sh` links.
     Stash(String, bool),
 }
@@ -216,6 +218,7 @@ pub fn target(url: &Url) -> Result<Target> {
                 numeric_id(slug).unwrap_or_default().to_owned(),
             ));
         }
+        ["posts", "statuses"] => return Ok(Target::Statuses(user)),
         ["journal"] | ["posts"] | ["posts", "journals"] => return Ok(Target::Journals(user)),
         ["avatar", ..] => return Ok(Target::Avatar(user)),
         ["banner" | "background", ..] => return Ok(Target::Banner(user)),
@@ -237,7 +240,7 @@ pub fn target(url: &Url) -> Result<Target> {
         _ => {}
     }
     match rest {
-        [] | ["gallery"] | ["gallery", "all"] => Ok(Target::Gallery(user)),
+        [] | ["gallery"] | ["gallery", "all" | "recommended-for-you"] => Ok(Target::Gallery(user)),
         ["art", slug] if numeric_id(slug).is_some() => Ok(Target::Deviation {
             user,
             slug: slug.to_string(),
@@ -682,7 +685,7 @@ impl DeviantArt {
         let offset = state.offset.take().unwrap_or(0);
         let path = match (&state.folder, state.kind) {
             (_, "browse/tags") => "browse/tags".to_owned(),
-            (_, "user/profile/posts") => "user/profile/posts".to_owned(),
+            (_, "user/profile/posts" | "statuses") => "user/profile/posts".to_owned(),
             (Some(folder), kind) => format!("{kind}/{folder}"),
             (None, kind) => format!("{kind}/all"),
         };
@@ -711,6 +714,16 @@ impl DeviantArt {
         if state.pages < MAX_PAGES {
             state.offset = page.next.filter(|next| *next > offset);
         }
+        if state.kind == "statuses" {
+            for status in &page.results {
+                if string(status, "url").is_some_and(|url| url.contains("/status-update/")) {
+                    for media in self.status_media(status, 0).await {
+                        state.pending.extend(group(vec![media], "deviantart"));
+                    }
+                }
+            }
+            return Ok(());
+        }
         for deviation in &page.results {
             // Profile posts also contain status updates; keep journals.
             if state.kind == "user/profile/posts"
@@ -727,6 +740,72 @@ impl DeviantArt {
 
     pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
         crate::event::media_only(self.events(url))
+    }
+
+    /// Upstream `process_status`: shared deviations and statuses, then the
+    /// status text itself (unless deleted) as an `.htm` file.
+    fn status_media<'a>(
+        &'a self,
+        status: &'a Value,
+        depth: u8,
+    ) -> futures_util::future::BoxFuture<'a, Vec<Media>> {
+        Box::pin(async move {
+            let mut out = Vec::new();
+            for item in status
+                .get("items")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if let Some(deviation) = item.get("deviation")
+                    && let Some(media) = self.media(deviation).await
+                {
+                    out.push(media);
+                }
+                if let Some(shared) = item.get("status").filter(|_| depth < 8) {
+                    out.extend(self.status_media(shared, depth + 1).await);
+                }
+            }
+            if status.get("is_deleted").and_then(Value::as_bool) == Some(true) {
+                return out;
+            }
+            let Some(id) = string(status, "statusid").filter(|id| valid_uuid(id)) else {
+                return out;
+            };
+            let body = string(status, "body").unwrap_or_default();
+            let url = string(status, "url")
+                .and_then(|url| Url::parse(url).ok())
+                .unwrap_or_else(|| self.root.clone());
+            let username = status
+                .get("author")
+                .and_then(|a| string(a, "username"))
+                .map(Into::into);
+            let timestamp = string(status, "ts").and_then(|ts| crate::date::parse_date(ts).ok());
+            let mut media = Media {
+                filename: format!("{id}.htm"),
+                job: MediaJob::InlineText {
+                    data: format!(
+                        "<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"><title>Status Update</title></head>\n<body>\n{body}\n</body>\n</html>\n"
+                    ),
+                },
+                category: "deviantart".into(),
+                metadata: Some(PostMetadata {
+                    post_id: id.to_owned(),
+                    media_id: id.to_owned(),
+                    username,
+                    caption: Some("Status Update".into()),
+                    timestamp,
+                    index: 1,
+                    ..PostMetadata::default()
+                }),
+                url,
+                headers: BTreeMap::new(),
+                handoff: BTreeMap::new(),
+            };
+            self.network.apply_media(&mut media);
+            out.push(media);
+            out
+        })
     }
 
     /// `user/profile/NAME`.
@@ -991,6 +1070,7 @@ impl DeviantArt {
             Target::Following(user) => return self.following(user),
             Target::Stash(id, legacy) => return self.stash(id, legacy, 0),
             Target::Journals(user) => ("user/profile/posts", user, None),
+            Target::Statuses(user) => ("statuses", user, None),
             Target::Tag(tag) => ("browse/tags", tag, None),
             Target::Favorites { user, folder } => ("collections", user, folder),
             Target::Gallery(user) => ("gallery", user, None),
@@ -1268,6 +1348,14 @@ mod tests {
         assert_eq!(
             t("https://www.deviantart.com/shimoda7/about#watching"),
             Target::Following("shimoda7".into())
+        );
+        assert_eq!(
+            t("https://www.deviantart.com/t1na/posts/statuses"),
+            Target::Statuses("t1na".into())
+        );
+        assert_eq!(
+            t("https://www.deviantart.com/shimoda7/gallery/recommended-for-you"),
+            Target::Gallery("shimoda7".into())
         );
         assert_eq!(
             t("https://sta.sh/215twi387vfj"),

@@ -195,6 +195,7 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
             crate::deviantart::Target::Following(_) => "",
             crate::deviantart::Target::Journals(_) => "j_{_username}_{index}.{extension}",
             crate::deviantart::Target::Stash(..) => "{index}.{extension}",
+            crate::deviantart::Target::Statuses(_) => "S_{_username}_{index}.{extension}",
             crate::deviantart::Target::Gallery(_) => {
                 if path.split('/').any(|part| part == "gallery") {
                     "g_{_username}_{index}.{extension}"

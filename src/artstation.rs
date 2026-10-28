@@ -106,6 +106,10 @@ pub enum Target {
         id: String,
         sorting: String,
     },
+    /// `USER/following`: followed users, queued as portfolio children.
+    Following {
+        user: String,
+    },
 }
 
 fn plain(url: &Url) -> bool {
@@ -134,7 +138,15 @@ pub fn target(url: &Url) -> Result<Target> {
         .unwrap_or_default();
     let host = url.host_str().ok_or_else(unsupported)?;
     match host {
+        // Upstream `ArtstationImageExtractor` also accepts `artstn.co/p/HASH`.
+        "artstn.co" | "www.artstn.co" => match parts[..] {
+            ["p", hash] if valid_hash(hash) => Ok(Target::Project { hash: hash.into() }),
+            _ => Err(unsupported()),
+        },
         "www.artstation.com" | "artstation.com" => match parts[..] {
+            [user, "following"] if valid_user(user) && !RESERVED.contains(&user) => {
+                Ok(Target::Following { user: user.into() })
+            }
             ["artwork" | "projects", hash] if valid_hash(hash) => {
                 Ok(Target::Project { hash: hash.into() })
             }
@@ -545,6 +557,40 @@ impl ArtStation {
         .boxed()
     }
 
+    /// Upstream `ArtstationFollowingExtractor`: queue followed portfolios.
+    fn following(&self, user: String) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::once(async move {
+            self.all_pages(&format!("users/{user}/following.json?per_page=50"))
+                .await
+        })
+        .map(move |result| match result {
+            Ok(users) => stream::iter(users)
+                .filter_map(move |entry| {
+                    let name = entry
+                        .get("username")
+                        .and_then(Value::as_str)
+                        .filter(|name| valid_user(name))
+                        .map(str::to_owned);
+                    std::future::ready(name.map(|name| {
+                        let data = entry.as_object().cloned().unwrap_or_default();
+                        crate::event::child_job(
+                            crate::event::ChildMetadata::from_raw("artstation", "following", &data),
+                            move || {
+                                let url = Url::parse(&format!("https://www.artstation.com/{name}"))
+                                    .expect("validated user");
+                                self.events(&url)
+                            },
+                        )
+                    }))
+                })
+                .flatten()
+                .boxed(),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
     /// Upstream `ArtstationCollectionsExtractor`: queue every collection.
     fn collections(&self, user: String) -> BoxStream<'_, Result<ExtractionEvent>> {
         stream::once(async move {
@@ -592,6 +638,7 @@ impl ArtStation {
             Ok(Target::Listing { path }) => path,
             Ok(Target::Collections { user }) => return self.collections(user),
             Ok(Target::Challenge { id, sorting }) => return self.challenge(id, sorting),
+            Ok(Target::Following { user }) => return self.following(user),
             Ok(Target::Project { hash }) => {
                 return stream::once(async move { self.project(&hash).await })
                     .map(|result| match result {
@@ -829,6 +876,13 @@ mod tests {
             Target::Challenge {
                 id: "23".into(),
                 sorting: "popular".into()
+            }
+        );
+        assert_eq!(t("https://artstn.co/p/LQVJr").unwrap(), p);
+        assert_eq!(
+            t("https://www.artstation.com/sungchoi/following").unwrap(),
+            Target::Following {
+                user: "sungchoi".into()
             }
         );
         assert_eq!(
