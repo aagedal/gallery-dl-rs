@@ -1579,8 +1579,10 @@ extractors for external URLs by category, `--write-log` copies standard error
 (Unix), and the `--cache-*` commands report that no cache is kept. `-X` and
 `--compat` fail explicitly. `--tags-blacklist`/`--tags-whitelist` (and the
 `tags-*`/`*-tags` options) filter posts by tags with Danbooru-style rules;
-`/import` is unsupported. **Remaining CLI gaps:** `--cookies-export`,
-`-E/--extractor-info`, `--write-pages`,
+`/import` is unsupported. `-E/--extractor-info` prints each registry route's
+category, subcategory and formats (all routes of the matching site, since
+routes are chosen during extraction) with configured custom values. **Remaining CLI gaps:** `--cookies-export`,
+`--write-pages`,
 `--print-traffic`, and YAML/TOML configuration files.
 
 **Implemented upstream configuration compatibility, 2026-10-28:** native

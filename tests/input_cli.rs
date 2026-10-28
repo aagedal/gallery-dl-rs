@@ -381,3 +381,17 @@ fn print_writes_formats_without_downloading() {
     assert_eq!(std::fs::read_to_string(&list).unwrap(), "a.jpg\nb.png\n");
     assert!(!root.path().join("out").exists());
 }
+
+#[test]
+fn extractor_info_prints_route_formats_without_requests() {
+    let output = binary()
+        .args(["-E", "-o", "extractor.4chan.sleep-request=2"])
+        .arg("https://boards.4chan.org/a/thread/1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Category / Subcategory\n  \"4chan\" / \"thread\"\n"));
+    assert!(stdout.contains("Filename format (default):\n  \"{tim} {filename}.{extension}\"\n"));
+    assert!(stdout.contains("Request interval (custom):\n  2\n"));
+}

@@ -347,6 +347,9 @@ struct Args {
     /// Simulate: print destination paths ("# PATH") without downloading
     #[arg(short = 's', long, conflicts_with_all = ["get_urls", "dump_json"])]
     simulate: bool,
+    /// Print extractor defaults and settings
+    #[arg(short = 'E', long, conflicts_with_all = ["get_urls", "dump_json", "simulate", "list_keywords"])]
+    extractor_info: bool,
     /// Print available keywords and example values for the first file of each input
     #[arg(short = 'K', long, conflicts_with_all = ["get_urls", "dump_json", "simulate"])]
     list_keywords: bool,
@@ -740,6 +743,12 @@ async fn run(args: Args) -> Result<()> {
         ));
     }
     let settings = resolved_settings(&args, &[]).await?;
+    if args.extractor_info {
+        for url in &args.urls {
+            print_extractor_info(url, &settings, args.extractor)?;
+        }
+        return Ok(());
+    }
     // Upstream `skip`: false replaces files; "abort:N", "terminate:N" and
     // "exit:N" stop after N consecutive skipped files.
     let mut args = args;
@@ -2606,6 +2615,75 @@ impl Settings {
 /// the first settings.
 static GLOBAL_OPTIONS: std::sync::OnceLock<serde_json::Map<String, serde_json::Value>> =
     std::sync::OnceLock::new();
+
+/// Upstream `-E/--extractor-info` (`InfoJob`).
+fn print_extractor_info(
+    source: &str,
+    settings: &BTreeMap<&'static str, Settings>,
+    extractor: Extractor,
+) -> Result<()> {
+    let url = extract::http_url(source)?;
+    let json = |value: &serde_json::Value| value.to_string();
+    let category = settings_category(&url, extractor);
+    let configured = settings.get(category).map(|s| &s.options);
+    let custom = |title: &str, value: Option<serde_json::Value>, default: serde_json::Value| {
+        let empty = matches!(&default, serde_json::Value::Null)
+            || default.as_str() == Some("")
+            || default.as_array().is_some_and(Vec::is_empty);
+        if let Some(value) = value {
+            println!("{title} (custom):\n  {}", json(&value));
+            println!("{title} (default):\n  {}\n", json(&default));
+        } else if !empty {
+            println!("{title} (default):\n  {}\n", json(&default));
+        }
+    };
+    let filename = configured.and_then(|o| o.filename.clone()).map(Into::into);
+    let directory = configured
+        .and_then(|o| o.directory.clone())
+        .map(|d| serde_json::json!(d));
+    let site_option = |key: &str| {
+        configured
+            .and_then(|o| o.site_options.as_ref())
+            .and_then(|o| o.get(key))
+            .cloned()
+    };
+    match gallery_dl_rs::sites::find(&url) {
+        Some(site) => {
+            for route in site.routes {
+                println!(
+                    "Category / Subcategory\n  {} / {}\n",
+                    json(&site.category.into()),
+                    json(&route.subcategory.into())
+                );
+                custom("Filename format", filename.clone(), route.filename.into());
+                custom(
+                    "Directory format",
+                    directory.clone(),
+                    serde_json::json!(route.directory),
+                );
+                custom(
+                    "Archive format",
+                    site_option("archive-format"),
+                    route.archive.into(),
+                );
+                custom(
+                    "Request interval",
+                    site_option("sleep-request"),
+                    serde_json::Value::Null,
+                );
+            }
+        }
+        None => {
+            println!(
+                "Category / Subcategory\n  {} / \"\"\n",
+                json(&category.into())
+            );
+            custom("Filename format", filename, serde_json::Value::Null);
+            custom("Directory format", directory, serde_json::Value::Null);
+        }
+    }
+    Ok(())
+}
 
 /// Upstream `PrintAction`: a metadata postprocessor writing FORMAT.
 fn print_postprocessor(value: &str, file: Option<&str>) -> Option<serde_json::Value> {
