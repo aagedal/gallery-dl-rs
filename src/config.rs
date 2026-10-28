@@ -2964,11 +2964,9 @@ fn archive_path(field: Field, directory: &Path) -> Result<Option<PathBuf>> {
     if joined.as_os_str().is_empty() {
         return Err(invalid());
     }
-    Ok(Some(if joined.is_absolute() {
-        joined
-    } else {
-        directory.join(joined)
-    }))
+    // Like upstream, relative paths resolve against the working directory.
+    let _ = directory;
+    Ok(Some(joined))
 }
 
 /// Replace `{category}` in an archive path from a segment list.
@@ -3011,12 +3009,9 @@ fn path_with(field: Field, directory: &Path, name: &str, expand: bool) -> Result
     {
         return Err(invalid());
     }
-    let value = Path::new(&value);
-    Ok(Some(if value.is_absolute() {
-        value.into()
-    } else {
-        directory.join(value)
-    }))
+    // Like upstream, relative paths resolve against the working directory.
+    let _ = directory;
+    Ok(Some(PathBuf::from(value)))
 }
 
 fn size(field: Field) -> Result<Option<u64>> {

@@ -300,9 +300,9 @@ async fn configured_browser_arrays_import_relative_profiles_with_optional_placeh
     let original = std::fs::read(profile.join("cookies.sqlite")).unwrap();
     let config = settings.join("native.json");
     for browser in [
-        serde_json::json!(["firefox", "synthetic profile"]),
-        serde_json::json!(["firefox", "synthetic profile", null, null]),
-        serde_json::json!(["firefox", "synthetic profile", null, "none"]),
+        serde_json::json!(["firefox", "settings/synthetic profile"]),
+        serde_json::json!(["firefox", "settings/synthetic profile", null, null]),
+        serde_json::json!(["firefox", "settings/synthetic profile", null, "none"]),
     ] {
         native_config(
             &config,
@@ -523,7 +523,6 @@ async fn malformed_configured_browser_arrays_fail_privately_before_input_process
 async fn compatibility_forwards_each_scoped_browser_profile_as_one_argument_without_cookie_file() {
     use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().unwrap();
-    let canonical = std::fs::canonicalize(root.path()).unwrap();
     let backend = root.path().join("fake backend");
     std::fs::write(&backend, b"#!/bin/sh\nprintf 'BEGIN\\n' >> \"$BROWSER_CLI_LOG\"\nprintf '%s\\n' \"$@\" >> \"$BROWSER_CLI_LOG\"\nprintf '%s' '[[3,\"https://example.com/image.jpg\",{}]]'\n").unwrap();
     std::fs::set_permissions(&backend, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -567,7 +566,8 @@ async fn compatibility_forwards_each_scoped_browser_profile_as_one_argument_with
             .unwrap();
         assert_eq!(
             arguments[browser + 1],
-            browser_spec(&canonical.join(profile))
+            // Like upstream, relative profiles are forwarded as written.
+            browser_spec(std::path::Path::new(profile))
         );
         assert!(!arguments.contains(&"--cookies"));
         assert!(!block.contains("private-missing"));

@@ -128,11 +128,13 @@ impl NetworkOptions {
             builder = builder.min_tls_version(reqwest::tls::Version::TLS_1_3);
         }
         if self.system_roots {
-            builder = builder
-                .tls_built_in_webpki_certs(false)
-                .tls_built_in_native_certs(true);
-        } else {
-            builder = builder.tls_built_in_native_certs(false);
+            // Loaded only on request: reading the system store is slow.
+            builder = builder.tls_built_in_root_certs(false);
+            for certificate in rustls_native_certs::load_native_certs().certs {
+                if let Ok(certificate) = reqwest::Certificate::from_der(certificate.as_ref()) {
+                    builder = builder.add_root_certificate(certificate);
+                }
+            }
         }
         if let Some(address) = self.source_address {
             builder = builder.local_address(address);

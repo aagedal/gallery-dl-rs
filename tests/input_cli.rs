@@ -222,7 +222,9 @@ fn file_only_download_uses_category_destination_metadata_and_archive() {
     .unwrap();
     let inputs = root.path().join("urls.txt");
     std::fs::write(&inputs, format!("{url}\n")).unwrap();
+    // Relative configuration paths resolve against the working directory.
     let output = binary()
+        .current_dir(root.path())
         .args(["--write-metadata", "--native-config"])
         .arg(&config)
         .arg("-i")
@@ -246,6 +248,7 @@ fn file_only_download_uses_category_destination_metadata_and_archive() {
     assert_eq!(count, 1);
     std::fs::remove_file(&saved).unwrap();
     let output = binary()
+        .current_dir(root.path())
         .args(["--native-config"])
         .arg(config)
         .arg("-i")

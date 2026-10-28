@@ -69,7 +69,7 @@ printf '[[3,"https://cdn.example/%s.jpg",{"filename":"remote","extension":"jpg"}
 
 #[cfg(unix)]
 #[tokio::test]
-async fn category_destinations_and_filenames_anchor_to_config_directory() {
+async fn category_destinations_and_filenames_resolve_against_working_directory() {
     let root = tempfile::tempdir().unwrap();
     let settings = root.path().join("settings");
     let cwd = root.path().join("elsewhere");
@@ -94,8 +94,7 @@ async fn category_destinations_and_filenames_anchor_to_config_directory() {
         ("direct", "direct"),
     ] {
         touch(
-            &settings
-                .join(folder)
+            &cwd.join(folder)
                 .join(category)
                 .join(format!("{folder}.jpg")),
         );
@@ -118,14 +117,13 @@ async fn category_destinations_and_filenames_anchor_to_config_directory() {
     let stdout = String::from_utf8_lossy(&result.stdout);
     assert_eq!(stdout.matches("# ").count(), 5, "{stdout}");
     assert!(!cwd.join("gallery-dl").exists());
-    assert!(!settings.join("base").exists());
+    assert!(!cwd.join("base").exists() && !settings.join("base").exists());
 }
 
 #[cfg(unix)]
 #[tokio::test]
 async fn category_cookies_reach_backend_and_explicit_cli_cookie_overrides() {
     let root = tempfile::tempdir().unwrap();
-    let canonical = std::fs::canonicalize(root.path()).unwrap();
     let cfg = config(
         root.path(),
         serde_json::json!({"extractor": {
@@ -149,7 +147,8 @@ async fn category_cookies_reach_backend_and_explicit_cli_cookie_overrides() {
     let logs = std::fs::read_to_string(&log).unwrap();
     let blocks: Vec<_> = logs.split("BEGIN\n").skip(1).collect();
     for (block, name) in blocks.iter().zip(["ig.txt", "tw.txt", "default.txt"]) {
-        assert!(block.contains(&format!("--cookies\n{}\n", canonical.join(name).display())));
+        // Relative paths are forwarded as written, like upstream.
+        assert!(block.contains(&format!("--cookies\n{name}\n")), "{block}");
     }
     assert_eq!(blocks.len(), 3);
     std::fs::write(&log, b"").unwrap();
@@ -488,15 +487,15 @@ async fn directory_config_cli_override_and_empty_list_choose_exact_parent() {
     );
     let configured = root.path().join("output/config/direct/custom.jpg");
     touch(&configured);
-    let result = output(binary(&elsewhere, &cfg).arg(url)).await;
+    let result = output(binary(root.path(), &cfg).arg(url)).await;
     success(&result);
     let exact = root.path().join("exact");
     touch(&exact.join("custom.jpg"));
-    success(&output(binary(&elsewhere, &cfg).arg("-D").arg(&exact).arg(url)).await);
+    success(&output(binary(root.path(), &cfg).arg("-D").arg(&exact).arg(url)).await);
     assert!(!exact.join("direct").exists());
     let custom = root.path().join("output/cli/direct/custom.jpg");
     touch(&custom);
-    let result = output(binary(&elsewhere, &cfg).args([
+    let result = output(binary(root.path(), &cfg).args([
         "--directory-template",
         "cli",
         "--directory-template",
@@ -512,7 +511,7 @@ async fn directory_config_cli_override_and_empty_list_choose_exact_parent() {
         serde_json::json!({"base-directory":"output", "directory":[], "filename":"at-base.jpg"}),
     );
     touch(&root.path().join("output/at-base.jpg"));
-    success(&output(binary(&elsewhere, &cfg).arg(url)).await);
+    success(&output(binary(root.path(), &cfg).arg(url)).await);
     assert!(!root.path().join("output/direct").exists());
 }
 

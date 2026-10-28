@@ -55,7 +55,7 @@ fn category_overrides_defaults_and_global_overrides_category() {
 }
 
 #[test]
-fn literal_paths_resolve_against_configuration_directory() {
+fn literal_paths_resolve_against_the_working_directory() {
     let absolute = directory().join("absolute/history.sqlite");
     let settings = parse(
         &serde_json::json!({"extractor": {
@@ -66,11 +66,8 @@ fn literal_paths_resolve_against_configuration_directory() {
     .unwrap()
     .resolve("instagram")
     .unwrap();
-    assert_eq!(
-        settings.base_directory,
-        Some(directory().join("../downloads"))
-    );
-    assert_eq!(settings.cookies, Some(directory().join("cookies.txt")));
+    assert_eq!(settings.base_directory, Some(PathBuf::from("../downloads")));
+    assert_eq!(settings.cookies, Some(PathBuf::from("cookies.txt")));
     assert_eq!(settings.archive, Some(absolute));
     assert!(Config::parse(b"{}", Path::new("relative")).is_err());
 }
@@ -83,7 +80,7 @@ fn browser_cookie_sources_replace_files_across_scopes_and_anchor_profiles() {
         assert!(selected.cookies.is_none());
         assert_eq!(
             selected.browser_cookies,
-            Some(directory().join("profiles").join(profile))
+            Some(PathBuf::from("profiles").join(profile))
         );
         let cli = selected.overlay(&Options {
             cookies: Some("cli.txt".into()),
@@ -101,7 +98,7 @@ fn browser_cookie_sources_replace_files_across_scopes_and_anchor_profiles() {
     );
     assert_eq!(
         config.resolve("facebook").unwrap().cookies,
-        Some(directory().join("default.txt"))
+        Some(PathBuf::from("default.txt"))
     );
     let config = parse(
         r#"{"extractor":{"cookies":["firefox","default-profile"],"twitter":{"cookies":"x.txt"}}}"#,
@@ -109,13 +106,13 @@ fn browser_cookie_sources_replace_files_across_scopes_and_anchor_profiles() {
     .unwrap();
     let selected = config.resolve("twitter").unwrap();
     assert!(selected.browser_cookies.is_none());
-    assert_eq!(selected.cookies, Some(directory().join("x.txt")));
+    assert_eq!(selected.cookies, Some(PathBuf::from("x.txt")));
     let global = parse(r#"{"cookies":["firefox","global-profile"],"extractor":{"cookies":"default.txt","twitter":{"cookies":"x.txt"}}}"#).unwrap();
     let selected = global.resolve("twitter").unwrap();
     assert!(selected.cookies.is_none());
     assert_eq!(
         selected.browser_cookies,
-        Some(directory().join("global-profile"))
+        Some(PathBuf::from("global-profile"))
     );
 }
 
@@ -158,7 +155,7 @@ fn browser_cookie_arrays_validate_every_scope_without_private_diagnostics() {
             .unwrap();
         assert_eq!(
             selected.browser_cookies,
-            Some(directory().join("private-profile"))
+            Some(PathBuf::from("private-profile"))
         );
         assert!(!format!("{selected:?}").contains("private-profile"));
     }
@@ -262,10 +259,8 @@ async fn file_loading_anchors_paths_and_enforces_size_limit() {
     tokio::fs::write(&path, br#"{"cookies":"cookies.txt"}"#)
         .await
         .unwrap();
-    let expected = tokio::fs::canonicalize(dir.path())
-        .await
-        .unwrap()
-        .join("cookies.txt");
+    // Like upstream, relative paths stay relative to the working directory.
+    let expected = PathBuf::from("cookies.txt");
     assert_eq!(
         Config::load(&path)
             .await

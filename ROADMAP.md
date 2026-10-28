@@ -1634,8 +1634,9 @@ Errors and warnings use upstream's `[NAME][LEVEL] MESSAGE` format
 (`output.log`: a format string or `{"format": ...}` with `{name}`,
 `{levelname}`, `{message}`, `{asctime}`).
 **Remaining:** ytdl `outtmpl`/`logging`/
-`deprecations`, and relative paths
-resolve against the configuration directory rather than the working directory.
+`deprecations`. Relative configuration paths resolve against the working
+directory like upstream (since 2026-10-28; they used to be anchored to the
+configuration file's directory).
 
 **Implemented OAuth helpers, 2026-10-28:** `oauth:pixiv` (PKCE with a pasted
 code), `oauth:deviantart`, `oauth:reddit`, `oauth:mastodon:INSTANCE`
