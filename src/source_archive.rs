@@ -538,7 +538,7 @@ mod tests {
             for_url(&Url::parse("https://example.invalid/not-a-native-route").unwrap()).is_none()
         );
         assert!(
-            for_url(&Url::parse("https://www.flickr.com/photos/example/favorites").unwrap())
+            for_url(&Url::parse("https://www.flickr.com/photos/example/stats").unwrap())
                 .is_none()
         );
         assert!(for_url(&Url::parse("https://user:PRIVATE@imgur.com/abcde").unwrap()).is_none());
