@@ -36,6 +36,12 @@ impl Archive {
     /// Database work runs on the blocking pool, including lock waits.
     pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_owned();
+        // Like upstream, create missing parent directories.
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty())
+            && !parent.exists()
+        {
+            tokio::fs::create_dir_all(parent).await?;
+        }
         let connection = tokio::task::spawn_blocking(move || open_connection(&path)).await??;
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),

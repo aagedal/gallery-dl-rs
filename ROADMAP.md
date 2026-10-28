@@ -1602,6 +1602,8 @@ and `cache` are ignored. Credentials stay confined to supporting categories,
 and `base-directory`, `archive` and cookie-file paths expand `~` and
 environment variables. The `output` section's `logfile`, `unsupportedfile`, `errorfile` (paths or
 `{"path": ...}`), `mode: null`/`false` and `skip: false` apply.
+`archive` also accepts upstream's list-of-segments form with `{category}`,
+and archive parent directories are created on demand.
 Registry sites apply user `keywords`/`keywords-global` (with `keywords-eval`
 format strings), `metadata-url` and `metadata-version`; `cookies-update` with
 a path writes session cookies there (rewriting the input file with `true` is

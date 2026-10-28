@@ -3402,6 +3402,10 @@ async fn resolved_settings(
             None => config.resolve(category)?,
         };
         let mut options = defaults.overlay(&resolved).overlay(&overrides);
+        if let Some(archive) = &options.archive {
+            let base = category.split('.').next().unwrap_or(category);
+            options.archive = Some(gallery_dl_rs::config::render_archive(archive, base));
+        }
         let has_username = options.username.as_ref().is_some_and(|u| !u.is_empty())
             || options
                 .site_options

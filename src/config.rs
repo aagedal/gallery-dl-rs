@@ -2604,7 +2604,7 @@ impl RawOptions {
             base_directory: path(self.base_directory, directory, "base-directory")?,
             cookies,
             browser_cookies,
-            archive: path(self.archive, directory, "archive")?,
+            archive: archive_path(self.archive, directory)?,
             filename,
             filename_conditions,
             file_range,
@@ -2829,6 +2829,51 @@ fn cookie_source(field: Field, directory: &Path) -> Result<(Option<PathBuf>, Opt
         Ok((None, Some(profile)))
     } else {
         Ok((path(Field(Some(value)), directory, "cookies")?, None))
+    }
+}
+
+/// Upstream archive paths: a string, or a list of path segments where
+/// `{category}` is replaced per category (see [`render_archive`]).
+fn archive_path(field: Field, directory: &Path) -> Result<Option<PathBuf>> {
+    let Some(Value::Array(segments)) = &field.0 else {
+        return path(field, directory, "archive");
+    };
+    let invalid = || error("native configuration archive segments must be strings");
+    let mut joined = PathBuf::new();
+    for (index, segment) in segments.iter().enumerate() {
+        let segment = segment.as_str().ok_or_else(invalid)?;
+        let without = segment.replace("{category}", "");
+        if without.contains(['{', '}'])
+            || segment.is_empty()
+            || segment.chars().any(char::is_control)
+        {
+            return Err(error(
+                "native configuration archive segments support only the {category} field",
+            ));
+        }
+        if index == 0 {
+            joined.push(crate::postprocess::ugoira::expanded(segment));
+        } else if matches!(segment, "." | "..") || segment.contains(['/', '\\']) {
+            return Err(invalid());
+        } else {
+            joined.push(segment);
+        }
+    }
+    if joined.as_os_str().is_empty() {
+        return Err(invalid());
+    }
+    Ok(Some(if joined.is_absolute() {
+        joined
+    } else {
+        directory.join(joined)
+    }))
+}
+
+/// Replace `{category}` in an archive path from a segment list.
+pub fn render_archive(path: &Path, category: &str) -> PathBuf {
+    match path.to_str() {
+        Some(text) if text.contains("{category}") => text.replace("{category}", category).into(),
+        _ => path.to_owned(),
     }
 }
 
