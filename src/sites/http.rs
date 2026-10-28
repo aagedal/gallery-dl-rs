@@ -48,6 +48,46 @@ pub struct Http {
     sleep_429: Option<SleepRange>,
 }
 
+/// Upstream `--print-traffic`: show requests and responses on stderr.
+pub static PRINT_TRAFFIC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static DUMP_INDEX: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Upstream `_dump_response` for `write-pages`: `true` writes bodies, "all"
+/// adds headers without authentication values, "ALL" includes them.
+fn dump_response(
+    mode: &Value,
+    url: &Url,
+    status: StatusCode,
+    headers: &reqwest::header::HeaderMap,
+    body: &[u8],
+) {
+    let index = DUMP_INDEX.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let name: String = format!(
+        "{index:02}_{}",
+        crate::sites::gdl::re!(r#"[\\|/<>:"?*&=#]+"#).replace_all(url.as_str(), "_")
+    );
+    let name: String = name.chars().take(251).collect();
+    let mut out = Vec::new();
+    let with_headers = matches!(mode.as_str(), Some("all" | "ALL"));
+    if with_headers {
+        out.extend_from_slice(format!("{} {}\n", status.as_u16(), url).as_bytes());
+        for (key, value) in headers {
+            let value = if mode.as_str() != Some("ALL") && sensitive(key.as_str()) {
+                "***".to_owned()
+            } else {
+                String::from_utf8_lossy(value.as_bytes()).into_owned()
+            };
+            out.extend_from_slice(format!("{key}: {value}\n").as_bytes());
+        }
+        out.push(b'\n');
+    }
+    out.extend_from_slice(body);
+    match std::fs::write(format!("{name}.txt"), out) {
+        Ok(()) => eprintln!("Writing '{url}' response to '{name}.txt'"),
+        Err(e) => eprintln!("warning: Failed to dump HTTP request ({e})"),
+    }
+}
+
 /// Upstream `Extractor.request_timestamp`: when any extractor last sent a
 /// request, shared so `sleep-request` spaces requests across sites.
 static LAST_REQUEST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
@@ -692,9 +732,25 @@ impl Http {
             for (key, value) in headers {
                 request = request.header(*key, *value);
             }
+            let traffic = PRINT_TRAFFIC.load(std::sync::atomic::Ordering::Relaxed);
+            if traffic {
+                eprintln!(
+                    "send: {} {target}",
+                    if body.is_some() { "POST" } else { "GET" }
+                );
+            }
             let response = request.send().await.map_err(|_| {
                 Failure::transient(format!("{name} request failed; check network access"))
             })?;
+            if traffic {
+                eprintln!("reply: {:?} {}", response.version(), response.status());
+                for (key, value) in response.headers() {
+                    eprintln!(
+                        "header: {key}: {}",
+                        String::from_utf8_lossy(value.as_bytes())
+                    );
+                }
+            }
             self.cookies
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -751,11 +807,14 @@ impl Http {
             }
             bytes.extend_from_slice(&chunk);
         }
-        Ok((
-            crate::transport::decode_api_body(bytes, &headers, MAX_RESPONSE).await?,
-            target,
-            headers,
-        ))
+        let bytes = crate::transport::decode_api_body(bytes, &headers, MAX_RESPONSE).await?;
+        if let Some(mode) = self
+            .option("write-pages")
+            .filter(|_| self.option_bool("write-pages", false))
+        {
+            dump_response(mode, &target, status, &headers, &bytes);
+        }
+        Ok((bytes, target, headers))
     }
 }
 
@@ -873,6 +932,28 @@ impl From<crate::Error> for Failure {
 mod tests {
     use super::*;
     use crate::sites::testing::{http, json, response, serve};
+
+    #[tokio::test]
+    async fn write_pages_dumps_response_bodies() {
+        let (root, server) = serve(vec![json(serde_json::json!({"dumped": true}))]);
+        let options = serde_json::Map::from_iter([("write-pages".into(), "all".into())]);
+        let client = http("Test", root.clone()).with_options(Some(std::sync::Arc::new(options)));
+        client.json(&root.join("page").unwrap()).await.unwrap();
+        server.join().unwrap();
+        let dumped: Vec<_> = std::fs::read_dir(".")
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                name.ends_with(".txt") && name.contains(&format!("{}_page", root.port().unwrap()))
+            })
+            .collect();
+        assert_eq!(dumped.len(), 1);
+        let text = std::fs::read_to_string(dumped[0].path()).unwrap();
+        std::fs::remove_file(dumped[0].path()).unwrap();
+        assert!(text.starts_with("200 http://"), "{text}");
+        assert!(text.ends_with("{\"dumped\":true}"), "{text}");
+    }
 
     #[tokio::test]
     async fn sleep_request_spaces_consecutive_requests() {

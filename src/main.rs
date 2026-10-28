@@ -297,6 +297,13 @@ struct Args {
     /// Enable .netrc authentication data
     #[arg(long)]
     netrc: bool,
+    /// Write downloaded intermediary pages to files in the current directory
+    /// to debug problems
+    #[arg(long)]
+    write_pages: bool,
+    /// Display sent and read HTTP traffic of registry extractors
+    #[arg(long)]
+    print_traffic: bool,
     /// Export session cookies to FILE
     #[arg(long, value_name = "FILE")]
     cookies_export: Option<PathBuf>,
@@ -657,6 +664,9 @@ fn main() {
     {
         eprintln!("error: cannot open {}: {e}", path.display());
         std::process::exit(1);
+    }
+    if args.print_traffic {
+        gallery_dl_rs::sites::http::PRINT_TRAFFIC.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     if let Some(path) = &args.write_log
         && let Err(e) = gallery_dl_rs::logfile::start(path)
@@ -2933,6 +2943,10 @@ async fn resolved_settings(
     };
     let (username, password, mut site_options) =
         credentials(args.username.clone(), args.password.clone());
+    if args.write_pages {
+        Arc::make_mut(site_options.get_or_insert_with(Default::default))
+            .insert("write-pages".into(), true.into());
+    }
     // Upstream --sleep-* options are root-level too; registry sites read them.
     for (key, value) in [
         ("sleep-request", &args.sleep_request),

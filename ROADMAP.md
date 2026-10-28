@@ -1583,8 +1583,11 @@ extractors for external URLs by category, `--write-log` copies standard error
 category, subcategory and formats (all routes of the matching site, since
 routes are chosen during extraction) with configured custom values. `--cookies-export FILE` writes the session cookies of Instagram, Twitter/X,
 Facebook and every initialized registry site as a Netscape file.
-**Remaining CLI gaps:** `--write-pages`,
-`--print-traffic`, and YAML/TOML configuration files.
+`--write-pages` (and the `write-pages` option: `true`, `all`, `ALL`) dumps
+registry responses to numbered files in the working directory, and
+`--print-traffic` shows registry requests and response headers. Dedicated
+extractors (Instagram, Twitter/X, Facebook, ...) do not report traffic.
+**Remaining CLI gaps:** YAML/TOML configuration files.
 
 **Implemented upstream configuration compatibility, 2026-10-28:** native
 configuration files now load typical upstream `config.json` files. Unknown
