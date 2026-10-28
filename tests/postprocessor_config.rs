@@ -250,7 +250,7 @@ fn category_selector_bounds_qualifier_errors_and_unsupported_processors_are_priv
         };
         assert!(!error.to_string().contains(PRIVATE));
     }
-    let configuration = config(json!({"postprocessors":[{"name":"python","function":PRIVATE}]}));
+    let configuration = config(json!({"postprocessors":[{"name":"bogus","function":PRIVATE}]}));
     let Err(error) = configuration
         .resolve("pixiv")
         .unwrap()
@@ -258,7 +258,7 @@ fn category_selector_bounds_qualifier_errors_and_unsupported_processors_are_priv
         .unwrap()
         .specifications()
     else {
-        panic!("python accepted")
+        panic!("unknown processor accepted")
     };
     assert!(!error.to_string().contains(PRIVATE));
     assert!(error.to_string().contains("supported: ugoira"));

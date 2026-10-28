@@ -237,7 +237,7 @@ impl Specification {
             _ => {
                 return Err(error(
                     "unsupported native postprocessor; supported: ugoira, metadata, mtime, hash, \
-                     exec, classify, directory, zip, rename, compare",
+                     exec, python, classify, directory, zip, rename, compare",
                 ));
             }
         };
