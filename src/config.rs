@@ -548,6 +548,9 @@ pub fn parse_option(option: &str) -> Result<CliOption> {
 /// (the `extractor` value wins), applied once rather than per category.
 pub const GLOBAL_KEYS: &[&str] = &[
     "actions",
+    "archive-event",
+    "archive-mode",
+    "skip-filter",
     "keywords-default",
     "path-restrict",
     "path-replace",

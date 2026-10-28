@@ -1414,6 +1414,13 @@ async fn run(args: Args) -> Result<()> {
             .with_ytdl_cookies(ytdl_cookies(&args));
         let aborted = &aborted;
         let terminated = &terminated;
+        let skip_filter = GLOBAL_OPTIONS
+            .get()
+            .and_then(|g| g.get("skip-filter"))
+            .and_then(serde_json::Value::as_str)
+            .map(gallery_dl_rs::filter::FilterExpression::parse)
+            .transpose()?;
+        let skip_filter = &skip_filter;
         let results = media
             .map(|(index, job)| {
                 let gallery_dl_rs::postprocess::jobs::JobMedia { media: item, scope } = job;
@@ -1469,7 +1476,15 @@ async fn run(args: Args) -> Result<()> {
                         match archive {
                             Some((cell, path)) => {
                                 let archive = cell
-                                    .get_or_init(|| Archive::open(path))
+                                    .get_or_init(|| async {
+                                        let globals = GLOBAL_OPTIONS.get();
+                                        Archive::open(path).await.map(|archive| {
+                                            archive.with_options(
+                                                globals.and_then(|g| g.get("archive-event")),
+                                                globals.and_then(|g| g.get("archive-mode")),
+                                            )
+                                        })
+                                    })
                                     .await
                                     .as_ref()
                                     .map_err(|e| {
@@ -1504,7 +1519,12 @@ async fn run(args: Args) -> Result<()> {
                     {
                         scope.fail();
                     }
-                    (index, Some(result))
+                    // Upstream `skip-filter`: only matching skipped files
+                    // count toward abort/terminate limits.
+                    let counted = skip_filter
+                        .as_ref()
+                        .is_none_or(|filter| filter.matches(&item).unwrap_or(false));
+                    (index, Some((result, counted)))
                 }
             })
             .buffer_unordered(args.jobs as usize);
@@ -1512,13 +1532,17 @@ async fn run(args: Args) -> Result<()> {
         let mut skipped = 0u64;
         let mut input_skipped = BTreeMap::<usize, u64>::new();
         while let Some((index, result)) = results.next().await {
-            let Some(result) = result else { continue };
+            let Some((result, counted)) = result else {
+                continue;
+            };
             let input = input_skipped.entry(index).or_default();
-            if matches!(
-                result,
-                Ok(ArchiveOutcome::Completed(Outcome::Skipped(_))
-                    | ArchiveOutcome::AlreadyArchived)
-            ) {
+            if counted
+                && matches!(
+                    result,
+                    Ok(ArchiveOutcome::Completed(Outcome::Skipped(_))
+                        | ArchiveOutcome::AlreadyArchived)
+                )
+            {
                 skipped += 1;
                 *input += 1;
             } else if matches!(
@@ -1600,6 +1624,22 @@ async fn run(args: Args) -> Result<()> {
                 // Stop new work while draining active files and finalization hooks.
                 eprintln!("stopping after {skipped} consecutive skipped files");
             }
+        }
+    }
+    // Upstream `archive-mode: memory` writes its keys at the end of a run
+    // without errors.
+    let extra: Vec<_> = extra_archives
+        .lock()
+        .expect("archive map lock poisoned")
+        .values()
+        .copied()
+        .collect();
+    for cell in archives.values().chain(extra).filter(|_| failed.get() == 0) {
+        if let Some(Ok(archive)) = cell.get()
+            && let Err(e) = archive.finalize().await
+        {
+            eprintln!("download archive update failed: {e}");
+            failed.set(failed.get() + 1);
         }
     }
     if let Some(path) = &args.cookies_export {

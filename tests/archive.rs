@@ -147,17 +147,19 @@ async fn archive_persists_and_concurrent_connections_record_idempotently() {
 #[tokio::test]
 async fn incompatible_archives_are_rejected_without_altering_their_contents() {
     let root = tempfile::tempdir().unwrap();
+    // Python gallery-dl archives are used as they are.
     let foreign = root.path().join("python.sqlite3");
     let connection = Connection::open(&foreign).unwrap();
     connection.execute_batch("CREATE TABLE archive (entry TEXT PRIMARY KEY); INSERT INTO archive VALUES ('existing');").unwrap();
-    assert!(
-        Archive::open(&foreign)
-            .await
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("not interchangeable")
-    );
+    let python = Archive::open(&foreign).await.unwrap();
+    assert!(python.is_upstream());
+    assert!(python.contains("existing").await.unwrap());
+    let other = root.path().join("other.sqlite3");
+    Connection::open(&other)
+        .unwrap()
+        .execute_batch("CREATE TABLE things (id INTEGER)")
+        .unwrap();
+    assert!(Archive::open(&other).await.is_err());
     let value: String = connection
         .query_row("SELECT entry FROM archive", [], |r| r.get(0))
         .unwrap();
