@@ -3111,6 +3111,9 @@ async fn resolved_settings(
         }
         _ => None,
     };
+    if let Some(map) = config.globals().get("extension-map") {
+        gallery_dl_rs::path_options::set_extension_map(map)?;
+    }
     let mut path_options = config.globals().clone();
     path_options.retain(|key, _| key.starts_with("path-"));
     if let Some(value) = &args.restrict_filenames {

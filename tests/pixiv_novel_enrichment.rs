@@ -163,7 +163,7 @@ fn novel_source_numbering_and_uploaded_fields_reach_filters_and_templates() {
             .unwrap()
             .render(&item)
             .unwrap(),
-        "Uploaded_title_02_first.jpeg"
+        "Uploaded_title_02_first.jpg"
     );
 }
 

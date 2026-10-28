@@ -992,7 +992,9 @@ fn lookup(
     Some(match name {
         // Like upstream, `filename` excludes the extension.
         "filename" | "name" => Value::Str(stem.into()),
-        "extension" => Value::Str(extension.into()),
+        "extension" => Value::Str(
+            crate::path_options::map_extension(extension).unwrap_or_else(|| extension.into()),
+        ),
         "num" if metadata?.source_num.is_some() => convert(context.get("num")?, "num"),
         "num" if metadata?.pixiv_novel_metadata.is_some() => convert(context.get("num")?, "num"),
         "index" | "num" => match metadata?.index {

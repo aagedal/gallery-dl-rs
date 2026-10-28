@@ -231,13 +231,13 @@ fn substitutions_and_escaped_literals_are_safe_basenames() {
 #[test]
 fn long_names_keep_the_complete_extension_within_byte_limit() {
     let mut item = media();
-    item.filename = format!("{}.jpeg", "雪a".repeat(200));
+    item.filename = format!("{}.webm", "雪a".repeat(200));
     let name = FilenameTemplate::parse("{filename}.{extension}")
         .unwrap()
         .render(&item)
         .unwrap();
     assert_eq!(name.len(), 240);
-    assert!(name.ends_with(".jpeg"));
+    assert!(name.ends_with(".webm"));
     assert!(name.is_ascii());
     item.filename = "a".repeat(1000);
     assert_eq!(

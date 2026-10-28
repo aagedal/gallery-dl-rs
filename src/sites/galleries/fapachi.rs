@@ -133,7 +133,7 @@ mod tests {
             "https://fapachi.com/models/s/o/sonson/1/full/sonson_0082.jpeg"
         );
         let (file, _) = crate::sites::default_templates(&files[0]).unwrap();
-        assert_eq!(file.render(&files[0]).unwrap(), "sonson_0082.jpeg");
+        assert_eq!(file.render(&files[0]).unwrap(), "sonson_0082.jpg");
         server.join().unwrap();
 
         let (root, server) = serve(vec![

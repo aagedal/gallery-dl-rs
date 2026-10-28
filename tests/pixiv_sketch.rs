@@ -147,7 +147,7 @@ fn sketch_public_fields_and_photo_identity_support_filters_templates_and_inspect
             .unwrap()
             .render(&item)
             .unwrap(),
-        "post-A_photo-X_fixture.user.jpeg"
+        "post-A_photo-X_fixture.user.jpg"
     );
     let public = serde_json::to_value(&item).unwrap();
     assert_eq!(public["metadata"]["sketch"]["favorite_count"], 3);

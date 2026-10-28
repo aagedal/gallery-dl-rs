@@ -691,7 +691,7 @@ mod tests {
             (Some(3), Some("someone"))
         );
         let (file, dir) = crate::sites::default_templates(&files[0]).unwrap();
-        assert_eq!(file.render(&files[0]).unwrap(), "100_1_f1a.jpeg");
+        assert_eq!(file.render(&files[0]).unwrap(), "100_1_f1a.jpg");
         assert_eq!(
             dir.render(&files[0]).unwrap().unwrap(),
             crate::sites::testing::os_dir("fansly/someone (9)")

@@ -479,6 +479,13 @@ fn media(site: &Site, http: &Http, route: &'static Route, item: Item, index: usi
         keywords.entry("filename").or_insert(name.into());
         keywords.entry("extension").or_insert(ext.into());
     }
+    if let Some(mapped) = keywords
+        .get("extension")
+        .and_then(Value::as_str)
+        .and_then(crate::path_options::map_extension)
+    {
+        keywords.insert("extension".into(), mapped.into());
+    }
     // Sites with per-URL categories (upstream `generic`, `fandom`) pass
     // them in `_category`/`_subcategory`; lookups keep the site's category.
     let category = keywords

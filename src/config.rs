@@ -553,6 +553,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     "path-strip",
     "skip",
     "download",
+    "extension-map",
     "tags-blacklist",
     "tags-whitelist",
     "blacklist-tags",

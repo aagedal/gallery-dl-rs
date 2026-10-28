@@ -146,6 +146,34 @@ impl PathOptions {
     }
 }
 
+static EXTENSION_MAP: OnceLock<HashMap<String, String>> = OnceLock::new();
+
+/// Install upstream's `extension-map` (an object); later calls are ignored.
+pub fn set_extension_map(value: &Value) -> Result<()> {
+    let map = value
+        .as_object()
+        .ok_or_else(|| error("extension-map must be an object"))?
+        .iter()
+        .map(|(key, value)| {
+            value
+                .as_str()
+                .map(|value| (key.clone(), value.to_owned()))
+                .ok_or_else(|| error("extension-map values must be strings"))
+        })
+        .collect::<Result<_>>()?;
+    let _ = EXTENSION_MAP.set(map);
+    Ok(())
+}
+
+/// Upstream `PathFormat.extension_map`: by default `jpeg`, `jpe`, `jfif`,
+/// `jif` and `jfi` become `jpg`.
+pub fn map_extension(extension: &str) -> Option<String> {
+    match EXTENSION_MAP.get() {
+        Some(map) => map.get(extension).cloned(),
+        None => matches!(extension, "jpeg" | "jpe" | "jfif" | "jif" | "jfi").then(|| "jpg".into()),
+    }
+}
+
 /// Upstream inserts custom character sets into a regex class verbatim;
 /// escape only what Rust's class syntax treats differently from Python's.
 fn regex_class(chars: &str) -> String {

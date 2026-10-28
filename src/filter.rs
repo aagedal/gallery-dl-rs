@@ -641,7 +641,10 @@ pub(crate) fn direct_keywords(url: &url::Url) -> Vec<(&'static str, String)> {
         ("path", path.to_owned()),
         ("filename", filename.to_owned()),
         ("name", filename.to_owned()),
-        ("extension", extension.to_lowercase()),
+        ("extension", {
+            let extension = extension.to_lowercase();
+            crate::path_options::map_extension(&extension).unwrap_or(extension)
+        }),
         ("query", url.query().map(unquote).unwrap_or_default()),
         ("fragment", url.fragment().map(unquote).unwrap_or_default()),
         ("subcategory", subcategory),
@@ -662,6 +665,8 @@ fn context_parts(
             .filename
             .rsplit_once('.')
             .unwrap_or((&media.filename, ""));
+        let extension =
+            crate::path_options::map_extension(extension).unwrap_or_else(|| extension.into());
         values.extend(BTreeMap::from([
             ("filename".into(), text(stem)),
             ("name".into(), text(stem)),
