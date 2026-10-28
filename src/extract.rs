@@ -885,6 +885,7 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
         ("imgur.com", "imgur"),
         ("reddit.com", "reddit"),
         ("redd.it", "reddit"),
+        ("reddituploads.com", "reddit"),
         ("danbooru.donmai.us", "danbooru"),
         ("hijiribe.donmai.us", "danbooru"),
         ("sonohara.donmai.us", "danbooru"),

@@ -119,12 +119,20 @@ pub(crate) fn profile_input(url: &Url) -> Option<ProfileInput> {
                     .find(|(key, _)| key == name)
                     .map(|(_, value)| value.into_owned())
             };
-            let tab = match query("sk").as_deref() {
-                None | Some("photos" | "photos_by") => Tab::Photos,
-                Some("photos_albums") => Tab::Albums(None),
-                Some(_) => return None,
-            };
-            (query("id")?, tab)
+            let id = query("id")?;
+            // Upstream's pattern also reads tabs after the ID inside the
+            // query (`profile.php?id=ID/photos`).
+            if let Some((id, rest)) = id.split_once('/') {
+                let rest: Vec<&str> = rest.split('/').filter(|s| !s.is_empty()).collect();
+                (id.to_owned(), tab(&rest)?)
+            } else {
+                let tab = match query("sk").as_deref() {
+                    None | Some("photos" | "photos_by") => Tab::Photos,
+                    Some("photos_albums") => Tab::Albums(None),
+                    Some(_) => return None,
+                };
+                (id, tab)
+            }
         }
         ["people", _, id, rest @ ..] => (id.to_string(), tab(rest)?),
         [name, rest @ ..] => (name.to_string(), tab(rest)?),
@@ -436,6 +444,10 @@ mod tests {
         );
         assert_eq!(
             input("https://www.facebook.com/profile.php?id=1&sk=photos_albums"),
+            of("1", Tab::Albums(None))
+        );
+        assert_eq!(
+            input("https://www.facebook.com/profile.php?id=1/photos_albums"),
             of("1", Tab::Albums(None))
         );
         assert_eq!(
