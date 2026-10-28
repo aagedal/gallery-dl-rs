@@ -553,6 +553,10 @@ pub const GLOBAL_KEYS: &[&str] = &[
     "path-strip",
     "skip",
     "download",
+    "tags-blacklist",
+    "tags-whitelist",
+    "blacklist-tags",
+    "whitelist-tags",
 ];
 
 #[derive(Clone, Debug, Default)]

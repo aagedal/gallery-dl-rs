@@ -278,6 +278,13 @@ struct Args {
     /// Only spawn child extractors for external URLs of these categories
     #[arg(long, value_name = "CATEGORIES")]
     whitelist: Option<String>,
+    /// Ignore posts tagged with any of the given comma-separated tags (or
+    /// the lines of a file); Danbooru blacklist rules are supported
+    #[arg(long, value_name = "TAGS")]
+    tags_blacklist: Option<String>,
+    /// Allow only posts tagged with at least one of the given tags
+    #[arg(long, value_name = "TAGS")]
+    tags_whitelist: Option<String>,
     /// Do not skip downloads; overwrite existing files
     #[arg(long)]
     no_skip: bool,
@@ -2807,6 +2814,38 @@ async fn resolved_settings(
         }
     }
     let _ = GLOBAL_OPTIONS.set(config.globals().clone());
+    // Upstream `config2("whitelist-tags", "tags-whitelist")`, then blacklist.
+    let global = |key: &str| {
+        config
+            .globals()
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+    };
+    let whitelist = args
+        .tags_whitelist
+        .clone()
+        .or_else(|| global("whitelist-tags"))
+        .or_else(|| global("tags-whitelist"))
+        .filter(|list| !list.is_empty());
+    let blacklist = args
+        .tags_blacklist
+        .clone()
+        .or_else(|| global("blacklist-tags"))
+        .or_else(|| global("tags-blacklist"))
+        .filter(|list| !list.is_empty());
+    if whitelist.as_deref() == Some("/import") || blacklist.as_deref() == Some("/import") {
+        eprintln!("warning: Blacklist import unsupported");
+    }
+    let tags = match (whitelist, blacklist) {
+        (Some(list), _) if list != "/import" => {
+            Some(gallery_dl_rs::tag_filter::TagFilter::parse(&list, true))
+        }
+        (None, Some(list)) if list != "/import" => {
+            Some(gallery_dl_rs::tag_filter::TagFilter::parse(&list, false))
+        }
+        _ => None,
+    };
     let mut path_options = config.globals().clone();
     path_options.retain(|key, _| key.starts_with("path-"));
     if let Some(value) = &args.restrict_filenames {
@@ -3084,8 +3123,8 @@ async fn resolved_settings(
             .filter(|clauses| !clauses.is_empty())
             .map(FilterExpression::parse_all)
             .transpose()?;
-        let post_selection = (post_range.is_some() || post_filter.is_some())
-            .then(|| PostSelection::new(post_range, post_filter));
+        let post_selection = (post_range.is_some() || post_filter.is_some() || tags.is_some())
+            .then(|| PostSelection::new(post_range, post_filter).with_tags(tags.clone()));
         let network = NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?
             .with_insecure(args.no_check_certificate)
             .with_geo_bypass(args.xff.as_deref())?

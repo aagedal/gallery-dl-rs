@@ -1577,8 +1577,10 @@ that self-updating is unsupported. `--xff` sends a random `X-Forwarded-For` addr
 country codes (upstream's table), `--blacklist`/`--whitelist` filter child
 extractors for external URLs by category, `--write-log` copies standard error
 (Unix), and the `--cache-*` commands report that no cache is kept. `-X` and
-`--compat` fail explicitly. **Remaining CLI gaps:** `--cookies-export`,
-`-E/--extractor-info`, `--tags-blacklist`/`--tags-whitelist`, `--write-pages`,
+`--compat` fail explicitly. `--tags-blacklist`/`--tags-whitelist` (and the
+`tags-*`/`*-tags` options) filter posts by tags with Danbooru-style rules;
+`/import` is unsupported. **Remaining CLI gaps:** `--cookies-export`,
+`-E/--extractor-info`, `--write-pages`,
 `--print-traffic`, and YAML/TOML configuration files.
 
 ### Companion yt-dlp-rs integration

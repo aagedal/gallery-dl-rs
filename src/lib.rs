@@ -52,6 +52,7 @@ pub mod size;
 pub mod sleep;
 mod source_date;
 mod source_date_json;
+pub mod tag_filter;
 mod transport;
 pub mod tumblr;
 pub mod twitter;
