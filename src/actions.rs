@@ -319,14 +319,63 @@ pub fn install(actions: LogActions) {
 /// logging actions, then print `message` unless a `level` action lowered it
 /// below warnings. Stop actions are returned as errors.
 pub fn log(level: u32, message: &str) -> Result<()> {
+    log_as("gallery-dl", level, message)
+}
+
+static LOG_FORMAT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Install upstream `output.log` (a format string or `{"format": ...}`).
+pub fn set_log_format(value: &Value) {
+    let format = match value {
+        Value::String(format) => Some(format.clone()),
+        Value::Object(map) => map.get("format").and_then(Value::as_str).map(str::to_owned),
+        _ => None,
+    };
+    if let Some(format) = format {
+        let _ = LOG_FORMAT.set(format);
+    }
+}
+
+fn level_name(level: u32) -> &'static str {
+    match level {
+        0..=10 => "debug",
+        11..=20 => "info",
+        21..=30 => "warning",
+        31..=40 => "error",
+        _ => "critical",
+    }
+}
+
+/// [`log`] from the logger `name` (upstream's `[NAME][LEVEL] MESSAGE`
+/// format, configurable with `output.log`).
+pub fn log_as(name: &str, level: u32, message: &str) -> Result<()> {
     let level = match LOG_ACTIONS.get() {
         Some(actions) => actions.run(level, message)?,
         None => level,
     };
-    match level {
-        WARNING => eprintln!("warning: {message}"),
-        level if level > WARNING => eprintln!("{message}"),
-        _ => {}
+    if level >= WARNING {
+        let format = LOG_FORMAT
+            .get()
+            .map(String::as_str)
+            .unwrap_or("[{name}][{levelname}] {message}");
+        let now = time::OffsetDateTime::now_utc();
+        let asctime = format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+            now.year(),
+            now.month() as u8,
+            now.day(),
+            now.hour(),
+            now.minute(),
+            now.second()
+        );
+        eprintln!(
+            "{}",
+            format
+                .replace("{name}", name)
+                .replace("{levelname}", level_name(level))
+                .replace("{asctime}", &asctime)
+                .replace("{message}", message)
+        );
     }
     Ok(())
 }

@@ -916,6 +916,9 @@ async fn run(args: Args) -> Result<()> {
             _ => {}
         }
     }
+    if let Some(value) = globals.and_then(|g| g.get("output")?.get("log")) {
+        gallery_dl_rs::actions::set_log_format(value);
+    }
     if let Some(value) = globals.and_then(|g| g.get("category-map")) {
         gallery_dl_rs::filter::set_category_map(value);
     }
@@ -1312,6 +1315,7 @@ async fn run(args: Args) -> Result<()> {
                 }
                 Err(e) => stream::once(async move { Err(e) }).boxed(),
             };
+            let log_name = root_category.clone().unwrap_or_else(|| "gallery-dl".into());
             let input = input
                 .take_while(move |_| {
                     std::future::ready(
@@ -1338,9 +1342,13 @@ async fn run(args: Args) -> Result<()> {
                             &e.to_string(),
                         ));
                         let message = format!("extraction failed for input {}: {e}", index + 1);
-                        match gallery_dl_rs::actions::log(gallery_dl_rs::actions::ERROR, &message)
-                            .err()
-                            .and_then(|e| gallery_dl_rs::Stop::of(&e))
+                        match gallery_dl_rs::actions::log_as(
+                            &log_name,
+                            gallery_dl_rs::actions::ERROR,
+                            &message,
+                        )
+                        .err()
+                        .and_then(|e| gallery_dl_rs::Stop::of(&e))
                         {
                             Some(gallery_dl_rs::Stop::Abort) => {
                                 aborted
@@ -1722,7 +1730,8 @@ async fn run(args: Args) -> Result<()> {
                             gallery_dl_rs::actions::code::HTTP
                         },
                     );
-                    match gallery_dl_rs::actions::log(
+                    match gallery_dl_rs::actions::log_as(
+                        "download",
                         gallery_dl_rs::actions::ERROR,
                         &format!("download failed: {e}"),
                     )

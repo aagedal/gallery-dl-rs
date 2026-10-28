@@ -293,7 +293,8 @@ impl ExecOptions {
             }
             let status = child.wait().await?;
             if !status.success() {
-                crate::actions::log(
+                crate::actions::log_as(
+                    "postprocessor.exec",
                     crate::actions::WARNING,
                     &format!(
                         "'{display}' returned with non-zero exit status ({})",
