@@ -146,6 +146,10 @@ pub enum Target {
     Random {
         tags: String,
     },
+    /// Danbooru `/media_assets/ID`: an uploaded file, with or without a post.
+    MediaAsset {
+        id: u64,
+    },
     Popular {
         params: Vec<(String, String)>,
     },
@@ -374,6 +378,9 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
         })
     } else if site.danbooru_dialect() {
         match segments.as_slice() {
+            ["media_assets", id] if site == Site::Danbooru => {
+                post_id(id).map(|id| Target::MediaAsset { id })
+            }
             ["posts", "random"] if site == Site::Danbooru => Some(Target::Random {
                 tags: query("tags").unwrap_or_default(),
             }),
@@ -723,7 +730,9 @@ fn defaults(
 ) -> Arc<crate::naming::SourceDefaults> {
     let collection =
         site.danbooru_dialect() && matches!(target, Target::Pool { .. } | Target::Favgroup { .. });
-    let filename = if collection {
+    let filename = if matches!(target, Target::MediaAsset { .. }) {
+        "{category}_ma{id}_{filename}.{extension}"
+    } else if collection {
         "{num:>04}_{id}_{filename}.{extension}"
     } else if site.danbooru_dialect() {
         "{category}_{id}_{filename}.{extension}"
@@ -731,9 +740,10 @@ fn defaults(
         "{category}_{id}_{md5}.{extension}"
     };
     let directory: &[&str] = match target {
-        Target::Post { .. } | Target::Artist { .. } | Target::ArtistSearch { .. } => {
-            &["{category}"]
-        }
+        Target::Post { .. }
+        | Target::MediaAsset { .. }
+        | Target::Artist { .. }
+        | Target::ArtistSearch { .. } => &["{category}"],
         Target::Tags { .. } | Target::Random { .. } => &["{category}", "{search_tags}"],
         Target::Favorites { .. } => &["{category}", "Favorites", "{user_id}"],
         Target::Popular { .. } => &["{category}", "popular", "{scale}", "{date}"],
@@ -748,6 +758,7 @@ fn defaults(
     };
     let archive = match target {
         Target::Post { .. } => "{id}",
+        Target::MediaAsset { .. } => "m{id}",
         Target::Artist { .. } | Target::ArtistSearch { .. } => "",
         Target::Tags { .. } | Target::Random { .. } => "t_{search_tags}_{id}",
         Target::Pool { .. } if !site.danbooru_dialect() => "p_{pool}_{id}",
@@ -761,6 +772,7 @@ fn defaults(
         Target::Post { .. } => "post",
         Target::Tags { .. } => "tag",
         Target::Random { .. } => "random",
+        Target::MediaAsset { .. } => "media-asset",
         Target::Pool { .. } => "pool",
         Target::Favgroup { .. } => "favgroup",
         Target::Favorites { .. } | Target::DapiFavorites { .. } => "favorite",
@@ -1701,7 +1713,7 @@ impl Booru {
                     pending_error: None,
                 });
             }
-            Target::Post { .. } | Target::Random { .. } => {
+            Target::Post { .. } | Target::Random { .. } | Target::MediaAsset { .. } => {
                 return stream::once(async move {
                     let search_tags = match &target {
                         Target::Random { tags } => Some(Arc::<str>::from(tags.as_str())),
@@ -1719,6 +1731,38 @@ impl Booru {
                                 self.site,
                                 &self.call(&root, "posts/random.json", &query).await?,
                             )?
+                        }
+                        Target::MediaAsset { id } => {
+                            let mut asset: Value = serde_json::from_slice(
+                                &self
+                                    .call(&root, &format!("media_assets/{id}.json"), &[])
+                                    .await?,
+                            )
+                            .map_err(|_| error("Danbooru returned an invalid media asset"))?;
+                            // Upstream: the largest variant is the file; an
+                            // asset has no tags.
+                            let file_url = asset
+                                .get("variants")
+                                .and_then(Value::as_array)
+                                .and_then(|v| v.last())
+                                .and_then(|v| v.get("url"))
+                                .cloned()
+                                .ok_or_else(|| error("Danbooru media asset has no file"))?;
+                            let object = asset
+                                .as_object_mut()
+                                .ok_or_else(|| error("Danbooru returned an invalid media asset"))?;
+                            object.insert("file_url".into(), file_url);
+                            for key in [
+                                "tag_string",
+                                "tag_string_artist",
+                                "tag_string_character",
+                                "tag_string_copyright",
+                                "tag_string_general",
+                                "tag_string_meta",
+                            ] {
+                                object.insert(key.into(), Value::String(String::new()));
+                            }
+                            vec![asset]
                         }
                         _ => unreachable!("post targets"),
                     };
@@ -2530,6 +2574,22 @@ mod tests {
             )
             .0,
             Target::Post { id: 294929 }
+        );
+        assert_eq!(
+            t(
+                Site::Danbooru,
+                "https://danbooru.donmai.us/media_assets/35394309"
+            )
+            .0,
+            Target::MediaAsset { id: 35394309 }
+        );
+        assert_eq!(
+            t(
+                Site::Danbooru,
+                "https://danbooru.donmai.us/posts/random?tags=a+b"
+            )
+            .0,
+            Target::Random { tags: "a b".into() }
         );
         assert_eq!(
             t(Site::E621, "https://e621.net/post/show/535").0,

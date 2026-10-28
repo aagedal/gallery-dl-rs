@@ -290,6 +290,7 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
             let format = match target {
                 crate::booru::Target::Post { .. } => "{id}",
                 crate::booru::Target::Random { .. } => "t_{search_tags}_{id}",
+                crate::booru::Target::MediaAsset { .. } => "m{id}",
                 crate::booru::Target::Tags { .. } => {
                     crate::booru::source_search_tags(site, url)?;
                     "t_{search_tags}_{id}"
