@@ -1566,6 +1566,19 @@ now excludes the extension for every extractor, as upstream.
 upstream `./gallery-dl/`) and direct links (`direct/<digest>_NAME` versus
 upstream `directlink` with `{domain}`, `{path}`, `{query}` and `{fragment}`).
 
+**Implemented output and configuration commands, 2026-10-28:** `-N/--print
+[EVENT:]FORMAT` and `--print-to-file [EVENT:]FORMAT FILE` configure metadata
+processors like upstream and imply `download: false`, which (also via
+`--no-download` or the `download` option) runs preparation and `after` hooks
+without fetching files; `-s` remains the separate simulation mode.
+`--config-status`, `--config-create` and `--config-open` manage the native
+configuration file. `-U/--update`, `--update-check` and `--update-to` report
+that self-updating is unsupported. **Remaining CLI gaps:** `--cache-*`,
+`--clear-cache`, `--cookies-export`, `--extractor-info`, `--extractors`,
+`--blacklist`/`--whitelist`, `--tags-blacklist`/`--tags-whitelist`,
+`--write-log`, `--write-pages`, `--print-traffic`, `--xff`, `--compat`, and
+YAML/TOML configuration files.
+
 ### Companion yt-dlp-rs integration
 
 Prefer an optional Rust library adapter once yt-dlp-rs has a stable, consumable

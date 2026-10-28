@@ -552,6 +552,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     "path-remove",
     "path-strip",
     "skip",
+    "download",
 ];
 
 #[derive(Clone, Debug, Default)]

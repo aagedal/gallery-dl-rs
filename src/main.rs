@@ -47,7 +47,7 @@ use tokio::sync::OnceCell;
 )]
 struct Args {
     /// Instagram, Facebook, Twitter/X, or direct media URLs
-    #[arg(required_unless_present_any = ["input_files", "input_file_comment", "input_file_delete", "list_extractors", "list_modules"])]
+    #[arg(required_unless_present_any = ["input_files", "input_file_comment", "input_file_delete", "list_extractors", "list_modules", "config_status", "config_create", "config_open", "update", "update_check", "update_to"])]
     urls: Vec<String>,
     /// Read URLs from a UTF-8 file; repeat for multiple files, or use - for stdin
     #[arg(short = 'i', long = "input-file", value_name = "FILE")]
@@ -222,6 +222,34 @@ struct Args {
     /// Use Windows filename restrictions (same as --restrict-filenames windows)
     #[arg(long)]
     windows_filenames: bool,
+    /// Show configuration file status
+    #[arg(long)]
+    config_status: bool,
+    /// Create a basic configuration file
+    #[arg(long)]
+    config_create: bool,
+    /// Open the configuration file in an external application
+    #[arg(long)]
+    config_open: bool,
+    /// Update to the latest version (not supported; reports an error)
+    #[arg(short = 'U', long)]
+    update: bool,
+    /// Check if a newer version is available (not supported; reports an error)
+    #[arg(long)]
+    update_check: bool,
+    /// Switch to a different release channel or version (not supported)
+    #[arg(long, value_name = "CHANNEL")]
+    update_to: Option<String>,
+    /// Do not download any files; postprocessor preparation hooks still run
+    #[arg(long)]
+    no_download: bool,
+    /// Write FORMAT during EVENT (default 'prepare') to standard output
+    /// instead of downloading files; e.g. -N '{id}' or -N 'after:{_path}'
+    #[arg(short = 'N', long = "print", value_name = "[EVENT:]FORMAT")]
+    print: Vec<String>,
+    /// Append FORMAT during EVENT to FILE instead of downloading files
+    #[arg(long, num_args = 2, value_names = ["[EVENT:]FORMAT", "FILE"])]
+    print_to_file: Vec<String>,
     /// Do not skip downloads; overwrite existing files
     #[arg(long)]
     no_skip: bool,
@@ -274,7 +302,7 @@ struct Args {
     #[arg(short = 'o', long = "option", value_name = "KEY=VALUE")]
     options: Vec<String>,
     /// Simulate: print destination paths ("# PATH") without downloading
-    #[arg(short = 's', long, visible_alias = "no-download", conflicts_with_all = ["get_urls", "dump_json"])]
+    #[arg(short = 's', long, conflicts_with_all = ["get_urls", "dump_json"])]
     simulate: bool,
     /// Print available keywords and example values for the first file of each input
     #[arg(short = 'K', long, conflicts_with_all = ["get_urls", "dump_json", "simulate"])]
@@ -366,6 +394,13 @@ fn parse_size(value: &str) -> std::result::Result<u64, String> {
 /// of user configuration directories. Upstream gallery-dl files are not read:
 /// the native schema is a strict subset and would reject their settings.
 fn default_native_config() -> Option<PathBuf> {
+    native_config_candidates()
+        .into_iter()
+        .find(|path| path.is_file())
+}
+
+/// Native configuration search locations, in priority order.
+fn native_config_candidates() -> Vec<PathBuf> {
     let var = |name| {
         std::env::var_os(name)
             .filter(|value| !value.is_empty())
@@ -384,7 +419,72 @@ fn default_native_config() -> Option<PathBuf> {
         candidates.extend(config.map(|dir| dir.join("gallery-dl-rs").join("config.json")));
         candidates.extend(var("HOME").map(|home| home.join(".gallery-dl-rs.conf")));
     }
-    candidates.into_iter().find(|path| path.is_file())
+    candidates
+}
+
+/// Upstream `--config-status`, `--config-create` and `--config-open`.
+async fn config_command(args: &Args) -> Result<()> {
+    let candidates = native_config_candidates();
+    if args.config_status {
+        for path in args.native_config.iter().chain(&candidates) {
+            let status = match tokio::fs::read(path).await {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => "Not Present",
+                Err(_) => "Inaccessible",
+                Ok(bytes) => {
+                    let directory = std::path::absolute(path)?
+                        .parent()
+                        .map(std::path::Path::to_path_buf)
+                        .unwrap_or_default();
+                    match Config::parse(&bytes, &directory) {
+                        Ok(_) => "OK",
+                        Err(_) => "Invalid",
+                    }
+                }
+            };
+            println!("{} : {status}", path.display());
+        }
+        return Ok(());
+    }
+    let path = match &args.native_config {
+        Some(path) => path.clone(),
+        None if args.config_open => default_native_config()
+            .ok_or_else(|| error("no configuration file found; use --config-create"))?,
+        None => candidates
+            .into_iter()
+            .find(|path| {
+                !path.ends_with(".gallery-dl-rs.conf") && !path.ends_with("gallery-dl-rs.conf")
+            })
+            .ok_or_else(|| error("no configuration location available"))?,
+    };
+    if args.config_create {
+        if path.exists() {
+            return Err(error(format!(
+                "configuration file {} already exists",
+                path.display()
+            )));
+        }
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        tokio::fs::write(&path, "{\n    \"extractor\": {\n\n    }\n}\n").await?;
+        eprintln!("Created a basic configuration file at '{}'", path.display());
+        return Ok(());
+    }
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(windows) {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    let status = tokio::process::Command::new(opener)
+        .arg(&path)
+        .status()
+        .await?;
+    if !status.success() && !cfg!(windows) {
+        return Err(error(format!("{opener} exited with {status}")));
+    }
+    Ok(())
 }
 
 /// Compatibility mode keeps plain Imgur file links as direct downloads, as
@@ -549,6 +649,14 @@ async fn run(args: Args) -> Result<()> {
         list_extractors(args.list_extractors);
         return Ok(());
     }
+    if args.config_status || args.config_create || args.config_open {
+        return config_command(&args).await;
+    }
+    if args.update || args.update_check || args.update_to.is_some() {
+        return Err(error(
+            "self-updating is not supported; install a newer gallery-dl-rs release instead",
+        ));
+    }
     if matches!(args.extractor, Extractor::Native) && args.config.is_some() {
         return Err(error(
             "--config is only supported with --extractor compatibility",
@@ -558,7 +666,20 @@ async fn run(args: Args) -> Result<()> {
     // Upstream `skip`: false replaces files; "abort:N", "terminate:N" and
     // "exit:N" stop after N consecutive skipped files.
     let mut args = args;
-    match SKIP_OPTION.get() {
+    let globals = GLOBAL_OPTIONS.get();
+    if globals.and_then(|g| g.get("download")) == Some(&serde_json::Value::Bool(false))
+        || !args.print.is_empty()
+        || !args.print_to_file.is_empty()
+    {
+        args.no_download = true;
+    }
+    if !args.print.is_empty() || !args.print_to_file.is_empty() {
+        args.no_skip = true;
+    }
+    if !args.print.is_empty() {
+        args.quiet = true;
+    }
+    match globals.and_then(|g| g.get("skip")) {
         Some(serde_json::Value::Bool(false)) => args.no_skip = true,
         Some(serde_json::Value::String(value)) => {
             let (mode, limit) = value.split_once(':').unwrap_or((value, ""));
@@ -974,6 +1095,7 @@ async fn run(args: Args) -> Result<()> {
         let client = download::client(Duration::from_secs(60))?
             .with_resume(args.resume)
             .with_overwrite(args.no_skip)
+            .with_no_download(args.no_download)
             .with_http_mtime(!args.no_mtime)
             .with_metadata_mtime(args.mtime.clone())
             .with_sleep(args.sleep)
@@ -2350,8 +2472,73 @@ impl Settings {
     }
 }
 
-/// The configured upstream `skip` value, read with the first settings.
-static SKIP_OPTION: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+/// Configured process-wide upstream options (`skip`, `download`), read with
+/// the first settings.
+static GLOBAL_OPTIONS: std::sync::OnceLock<serde_json::Map<String, serde_json::Value>> =
+    std::sync::OnceLock::new();
+
+/// Upstream `PrintAction`: a metadata postprocessor writing FORMAT.
+fn print_postprocessor(value: &str, file: Option<&str>) -> Option<serde_json::Value> {
+    const EVENTS: &[&str] = &[
+        "init",
+        "file",
+        "after",
+        "skip",
+        "error",
+        "prepare",
+        "prepare-after",
+        "post",
+        "post-after",
+        "finalize",
+        "finalize-success",
+        "finalize-error",
+        "child",
+        "child-after",
+    ];
+    let (event, format) = match value.split_once(':') {
+        Some((event, format)) if EVENTS.contains(&event.trim().to_lowercase().as_str()) => {
+            (event.trim().to_lowercase(), format.to_owned())
+        }
+        _ => ("prepare".to_owned(), value.to_owned()),
+    };
+    if format.is_empty() {
+        return None;
+    }
+    let mut format = match format.strip_prefix("\\f") {
+        Some(rest) => format!("\u{000c}{rest}"),
+        None => format,
+    };
+    if let Some(rest) = format.strip_prefix('\u{000c}') {
+        if rest.starts_with('F') && !format.ends_with('\n') {
+            format.push('\n');
+        }
+    } else if !format.contains('{') && !format.contains(' ') {
+        format = format!("{{{format}}}\n");
+    } else if !format.ends_with('\n') {
+        format.push('\n');
+    }
+    let (base, filename, open) = match file {
+        None => (".".to_owned(), "-".to_owned(), "w"),
+        Some(path) => {
+            let path = std::path::Path::new(path);
+            let base = path
+                .parent()
+                .map(|p| p.to_string_lossy().into_owned())
+                .filter(|p| !p.is_empty())
+                .unwrap_or_else(|| ".".into());
+            let name = path.file_name()?.to_string_lossy().into_owned();
+            (base, name, "a")
+        }
+    };
+    Some(serde_json::json!({
+        "name": "metadata",
+        "event": event,
+        "filename": filename,
+        "base-directory": base,
+        "content-format": format,
+        "open": open,
+    }))
+}
 
 /// Upstream's `--ugoira FMT` postprocessor presets.
 fn ugoira_postprocessor(format: &str) -> Result<serde_json::Value> {
@@ -2429,6 +2616,15 @@ async fn resolved_settings(
         options.push(CliOption::postprocessor(
             serde_json::json!({"name": "rename", "to": format}),
         ));
+    }
+    for format in &args.print {
+        options.extend(print_postprocessor(format, None).map(CliOption::postprocessor));
+    }
+    for pair in args.print_to_file.chunks(2) {
+        options.extend(
+            print_postprocessor(&pair[0], pair.get(1).map(String::as_str))
+                .map(CliOption::postprocessor),
+        );
     }
     if args.zip {
         options.push(CliOption::postprocessor(serde_json::json!("zip")));
@@ -2508,11 +2704,9 @@ async fn resolved_settings(
                 .insert(key.into(), value.clone().into());
         }
     }
-    if let Some(skip) = config.globals().get("skip") {
-        let _ = SKIP_OPTION.set(skip.clone());
-    }
+    let _ = GLOBAL_OPTIONS.set(config.globals().clone());
     let mut path_options = config.globals().clone();
-    path_options.remove("skip");
+    path_options.retain(|key, _| key.starts_with("path-"));
     if let Some(value) = &args.restrict_filenames {
         path_options.insert("path-restrict".into(), value.clone().into());
     } else if args.windows_filenames {

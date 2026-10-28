@@ -353,3 +353,31 @@ fn no_skip_replaces_files_and_compare_enumerates_differing_downloads() {
     run(&["--no-skip"]);
     assert_eq!(std::fs::read(&existing).unwrap(), b"data");
 }
+
+#[test]
+fn print_writes_formats_without_downloading() {
+    let root = tempfile::tempdir().unwrap();
+    let list = root.path().join("list.txt");
+    let output = binary()
+        .args(["-d"])
+        .arg(root.path().join("out"))
+        .args(["-N", "filename", "-N", "after:{domain} {extension}"])
+        .arg("--print-to-file")
+        .arg("{filename}.{extension}")
+        .arg(&list)
+        .arg("http://127.0.0.1:9/a.jpg")
+        .arg("http://127.0.0.1:9/b.png")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "a\n127.0.0.1:9 jpg\nb\n127.0.0.1:9 png\n"
+    );
+    assert_eq!(std::fs::read_to_string(&list).unwrap(), "a.jpg\nb.png\n");
+    assert!(!root.path().join("out").exists());
+}

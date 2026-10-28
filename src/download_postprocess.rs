@@ -503,6 +503,26 @@ pub(crate) async fn download(
         let converted = skip(client, root, media, options, template, &mut prepared).await?;
         return Ok(converted.unwrap_or(Outcome::Skipped(prepared.path)));
     }
+    if client.no_download {
+        let path = prepared.path.clone();
+        run_hook(
+            HookCall {
+                client,
+                root,
+                media,
+                options,
+                template,
+            },
+            Hook::After,
+            &path,
+            &mut prepared,
+        )
+        .await?;
+        if let Some(scope) = options.postprocessor_scope {
+            scope.complete_at(&prepared.keywords, &path);
+        }
+        return Ok(Outcome::Skipped(path));
+    }
     let parent = prepared
         .path
         .parent()

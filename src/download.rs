@@ -44,6 +44,8 @@ pub struct DownloadClient {
     ytdl_cookies: Option<std::sync::Arc<crate::cookies::YtdlCookies>>,
     /// Upstream `skip: false`: download and replace existing files.
     pub(crate) overwrite: bool,
+    /// Upstream `download: false`: run hooks without fetching files.
+    pub(crate) no_download: bool,
 }
 
 /// Per-attempt state shared between the attempt and its deadline. Throttling
@@ -233,6 +235,12 @@ impl DownloadClient {
         self
     }
 
+    /// Run preparation hooks but do not fetch files (`download: false`).
+    pub fn with_no_download(mut self, enabled: bool) -> Self {
+        self.no_download = enabled;
+        self
+    }
+
     /// Retain validated partial HTTP downloads for retries and later invocations.
     pub fn with_resume(mut self, enabled: bool) -> Self {
         self.resume = enabled;
@@ -261,6 +269,7 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         ytdl: Some(Path::new("yt-dlp").into()),
         ytdl_cookies: None,
         overwrite: false,
+        no_download: false,
     })
 }
 
@@ -459,6 +468,14 @@ pub async fn download_with_template(
     if source_booru || options.postprocessors.is_some_and(|pp| pp.has_generic()) {
         let prepared = processing::prepare(client, root, media, options, template).await?;
         return processing::download(client, root, media, options, template, prepared).await;
+    }
+    if client.no_download {
+        return Ok(Outcome::Skipped(destination_with_templates(
+            root,
+            media,
+            template,
+            options.directory,
+        )?));
     }
     let prepared = options.postprocessors.map(|pp| pp.prepared_media(media));
     let output_media = prepared.as_ref().unwrap_or(media);
