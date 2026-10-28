@@ -1560,7 +1560,8 @@ unix, windows, windows+, ascii, ascii+, character sets or mappings),
 `path-replace`, `path-remove` and `path-strip` are read process-wide from the
 root or `extractor` scope or `-o`, with `--restrict-filenames VALUE` and
 `--windows-filenames`. Separators and NUL are always replaced. Without them,
-native filename templates keep the conservative ASCII cleaning. `{filename}`
+native filename templates kept the conservative ASCII cleaning (since
+2026-10-28 `path-restrict` defaults to `auto`). `{filename}`
 now excludes the extension for every extractor, as upstream.
 **Remaining divergences:** the default base directory (`downloads` versus
 upstream `./gallery-dl/`) and direct links (`direct/<digest>_NAME` versus
@@ -1646,14 +1647,15 @@ files), `archive-mode: memory` (written after a run without errors) and
 checks, default on), `validate-html`, `retry-codes` and `part-directory`
 apply. `-j/--dump-json` prints upstream's `[2, post]`/`[3, url, file]`
 message list (`output.private`, `num-to-str`, `jsonl`, `ascii`); the native
-media dump is the hidden `--dump-media-json`. Exit codes follow upstream's
+media dump is the hidden `--dump-media-json`. `path-restrict` defaults to
+`auto` like upstream (only `/`, or Windows' reserved characters, are
+replaced). Exit codes follow upstream's
 bit flags: 4 for download and extraction errors, 8 for bot challenges, 16 for
 authentication, 32 for format errors, 64 for unsupported URLs and 128 for
 local file errors (extraction errors are classified by their messages).
 **Remaining divergences:** direct links keep `direct/<digest>_NAME` paths
 (request-identity separation) rather than `directlink/{domain}_{path}_NAME`;
-without `path-restrict`, filenames use conservative ASCII cleaning rather
-than upstream's `auto`; `metadata-http`, `metadata-extractor`, `parent-*`, `category-transfer`,
+`metadata-http`, `metadata-extractor`, `parent-*`, `category-transfer`,
 `file-unique`/`child-unique`, `path-extended`/`path-convert`, `tls12`,
 `ciphers`, `truststore`, `proxy-env` and `cookies-select` are not
 implemented. `config-map` (default: upstream's renamed categories, e.g.

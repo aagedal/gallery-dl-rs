@@ -3447,6 +3447,10 @@ async fn resolved_settings(
     } else if args.windows_filenames {
         path_options.insert("path-restrict".into(), "windows".into());
     }
+    // Like upstream, `path-restrict` defaults to `auto`.
+    path_options
+        .entry("path-restrict")
+        .or_insert_with(|| "auto".into());
     if let Some(options) = gallery_dl_rs::path_options::PathOptions::parse(&path_options)? {
         options.install();
     }
