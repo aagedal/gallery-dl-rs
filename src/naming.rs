@@ -30,6 +30,11 @@ const FIELDS: &[&str] = &[
     "name",
     "extension",
     "category",
+    "subcategory",
+    "domain",
+    "path",
+    "query",
+    "fragment",
     "post_id",
     "media_id",
     "shortcode",
@@ -976,6 +981,13 @@ fn lookup(
         .is_some_and(|keywords| keywords.fields.contains_key(name))
     {
         return context.get(name).map(|value| convert(value, name));
+    }
+    if media.category == "direct"
+        && let Some((_, value)) = crate::filter::direct_keywords(&media.url)
+            .into_iter()
+            .find(|(key, _)| *key == name)
+    {
+        return Some(Value::Str(value));
     }
     Some(match name {
         // Like upstream, `filename` excludes the extension.

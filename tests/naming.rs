@@ -579,3 +579,18 @@ fn conditional_directories_fall_back_to_category_folders() {
         gallery_dl_rs::download::destination(root, &item)
     );
 }
+
+#[test]
+fn direct_links_provide_upstream_directlink_keywords() {
+    let url = "https://cdn.example.org/x/y%20z/a%3Cb.JPG?q=1#f"
+        .parse()
+        .unwrap();
+    let item = gallery_dl_rs::extract::direct(&url).unwrap();
+    let name = FilenameTemplate::parse(
+        "{domain}-{path}-{filename}-{extension}-{query}-{fragment}-{subcategory}",
+    )
+    .unwrap()
+    .render(&item)
+    .unwrap();
+    assert_eq!(name, "cdn.example.org-x_y_z-a_b-jpg-q_1-f-example.org");
+}

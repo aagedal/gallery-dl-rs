@@ -567,6 +567,33 @@ pub(crate) fn source_selection_date(post: &crate::event::Post) -> Result<Option<
         .and_then(|metadata| metadata.timestamp))
 }
 
+/// Upstream `directlink` keywords: unquoted `domain`, `path` (without the
+/// filename), `filename` (without the extension), lowercase `extension`,
+/// `query`, `fragment`, and the `subcategory` (registrable domain).
+pub(crate) fn direct_keywords(url: &url::Url) -> Vec<(&'static str, String)> {
+    let unquote = crate::sites::gdl::unquote;
+    let host = url.host_str().unwrap_or_default();
+    let domain = match url.port() {
+        Some(port) => format!("{host}:{port}"),
+        None => host.to_owned(),
+    };
+    let full = unquote(url.path().trim_start_matches('/'));
+    let (path, name) = full.rsplit_once('/').unwrap_or(("", &full));
+    let (filename, extension) = name.rsplit_once('.').unwrap_or((name, ""));
+    let labels: Vec<&str> = host.rsplit('.').take(2).collect();
+    let subcategory = labels.into_iter().rev().collect::<Vec<_>>().join(".");
+    vec![
+        ("domain", unquote(&domain)),
+        ("path", path.to_owned()),
+        ("filename", filename.to_owned()),
+        ("name", filename.to_owned()),
+        ("extension", extension.to_lowercase()),
+        ("query", url.query().map(unquote).unwrap_or_default()),
+        ("fragment", url.fragment().map(unquote).unwrap_or_default()),
+        ("subcategory", subcategory),
+    ]
+}
+
 pub(crate) fn context(media: &Media) -> BTreeMap<String, Value> {
     context_parts(&media.category, media.metadata.as_ref(), Some(media))
 }
@@ -588,6 +615,11 @@ fn context_parts(
             ("url".into(), text(media.url.as_str())),
             ("_url".into(), text(media.url.as_str())),
         ]));
+        if media.category == "direct" {
+            for (key, value) in direct_keywords(&media.url) {
+                values.insert(key.into(), text(value));
+            }
+        }
     }
     for (name, extensions) in [
         (
