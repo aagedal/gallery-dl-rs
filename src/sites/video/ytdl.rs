@@ -120,7 +120,20 @@ fn under(host: &str, domain: &str) -> bool {
 
 /// Whether a URL belongs to a platform routed through yt-dlp. Paths that
 /// native extractors handle on shared hosts are left to them.
+/// The page of an upstream `ytdl:URL` input.
+fn prefixed(url: &Url) -> Option<Url> {
+    if url.scheme() != "ytdl" {
+        return None;
+    }
+    Url::parse(url.as_str().strip_prefix("ytdl:")?)
+        .ok()
+        .filter(|page| matches!(page.scheme(), "http" | "https"))
+}
+
 fn matches(url: &Url) -> bool {
+    if prefixed(url).is_some() {
+        return true;
+    }
     if !crate::sites::plain(url) {
         return false;
     }
@@ -163,6 +176,7 @@ fn matches(url: &Url) -> bool {
 }
 
 fn extract(http: &Http, url: Url) -> Events<'_> {
+    let url = prefixed(&url).unwrap_or(url);
     crate::sites::once(async move {
         let info = run(http, &url).await?;
         let key = info
@@ -324,6 +338,17 @@ mod tests {
 
     fn url(raw: &str) -> Url {
         Url::parse(raw).unwrap()
+    }
+
+    #[test]
+    fn prefixed_inputs_accept_any_http_page() {
+        let url = Url::parse("ytdl:https://example.org/video/1").unwrap();
+        assert!(matches(&url));
+        assert_eq!(
+            prefixed(&url).unwrap().as_str(),
+            "https://example.org/video/1"
+        );
+        assert!(!matches(&Url::parse("ytdl:file:///etc/passwd").unwrap()));
     }
 
     #[test]

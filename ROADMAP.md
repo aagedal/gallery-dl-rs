@@ -1612,6 +1612,10 @@ code), `oauth:deviantart`, `oauth:reddit`, `oauth:mastodon:INSTANCE`
 receive the callback on `localhost:6414` (`extractor.oauth.host`/`port`), and
 print the token with the configuration key to set. Tokens are never cached.
 
+**Implemented special inputs, 2026-10-28:** `recursive:URL`/`r:URL` (also
+`file://` documents) queues every URL found, and `ytdl:URL` hands any HTTP(S)
+page to the yt-dlp site (metadata from `yt-dlp -J --flat-playlist`).
+
 ### Companion yt-dlp-rs integration
 
 Prefer an optional Rust library adapter once yt-dlp-rs has a stable, consumable
