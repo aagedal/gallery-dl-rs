@@ -208,7 +208,13 @@ async fn only_selected_existing_media_receive_metadata_and_archive_records() {
         binary(root.path(), &backend)
             .arg("-D")
             .arg(&saved)
-            .args(["-f", "{filename}", "--range", "2", "--write-metadata"])
+            .args([
+                "-f",
+                "{filename}.{extension}",
+                "--range",
+                "2",
+                "--write-metadata",
+            ])
             .arg("--download-archive")
             .arg(&archive)
             .arg("https://instagram.com/p/test/"),

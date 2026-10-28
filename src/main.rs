@@ -215,6 +215,13 @@ struct Args {
     /// Number of seconds to wait after skipping a file download
     #[arg(long, value_name = "SECONDS", value_parser = parse_sleep)]
     sleep_skip: Option<gallery_dl_rs::sleep::SleepRange>,
+    /// Replace restricted filename characters with underscores: VALUE is
+    /// 'unix', 'windows', 'ascii', 'ascii+', 'auto', or a set of characters
+    #[arg(long, value_name = "VALUE")]
+    restrict_filenames: Option<String>,
+    /// Use Windows filename restrictions (same as --restrict-filenames windows)
+    #[arg(long)]
+    windows_filenames: bool,
     /// Username to login with
     #[arg(short = 'u', long, value_name = "USER")]
     username: Option<String>,
@@ -2471,6 +2478,15 @@ async fn resolved_settings(
             Arc::make_mut(site_options.get_or_insert_with(Default::default))
                 .insert(key.into(), value.clone().into());
         }
+    }
+    let mut path_options = config.globals().clone();
+    if let Some(value) = &args.restrict_filenames {
+        path_options.insert("path-restrict".into(), value.clone().into());
+    } else if args.windows_filenames {
+        path_options.insert("path-restrict".into(), "windows".into());
+    }
+    if let Some(options) = gallery_dl_rs::path_options::PathOptions::parse(&path_options)? {
+        options.install();
     }
     let defaults = ConfigOptions {
         base_directory: Some(PathBuf::from("downloads")),

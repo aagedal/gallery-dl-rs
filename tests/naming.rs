@@ -91,7 +91,7 @@ fn native_post_names_ignore_signed_transport_urls() {
         .unwrap();
     assert_eq!(template.render(&item).unwrap(), expected);
     assert_eq!(
-        FilenameTemplate::parse("{filename}")
+        FilenameTemplate::parse("{filename}.{extension}")
             .unwrap()
             .render(&item)
             .unwrap(),
@@ -136,7 +136,7 @@ fn missing_fields_fail_instead_of_inventing_names() {
             .is_err()
     );
     assert!(
-        FilenameTemplate::parse("{filename}")
+        FilenameTemplate::parse("{filename}.{extension}")
             .unwrap()
             .render(&item)
             .is_ok()
@@ -196,7 +196,7 @@ fn templates_reject_paths_and_arbitrary_expressions() {
 fn substitutions_and_escaped_literals_are_safe_basenames() {
     let mut item = media();
     item.metadata.as_mut().unwrap().username = Some("../../C:\\evil/\n雪".into());
-    let name = FilenameTemplate::parse("{{{username}}}_{filename}")
+    let name = FilenameTemplate::parse("{{{username}}}_{filename}.{extension}")
         .unwrap()
         .render(&item)
         .unwrap();
@@ -221,7 +221,7 @@ fn substitutions_and_escaped_literals_are_safe_basenames() {
     }
     item.filename = "..".into();
     assert!(
-        FilenameTemplate::parse("{filename}")
+        FilenameTemplate::parse("{filename}.{extension}")
             .unwrap()
             .render(&item)
             .is_err()
@@ -232,7 +232,7 @@ fn substitutions_and_escaped_literals_are_safe_basenames() {
 fn long_names_keep_the_complete_extension_within_byte_limit() {
     let mut item = media();
     item.filename = format!("{}.jpeg", "雪a".repeat(200));
-    let name = FilenameTemplate::parse("{filename}")
+    let name = FilenameTemplate::parse("{filename}.{extension}")
         .unwrap()
         .render(&item)
         .unwrap();
@@ -250,13 +250,13 @@ fn long_names_keep_the_complete_extension_within_byte_limit() {
     );
     item.filename = format!("a.{}", "x".repeat(240));
     assert!(
-        FilenameTemplate::parse("{filename}")
+        FilenameTemplate::parse("{filename}.{extension}")
             .unwrap()
             .render(&item)
             .is_err()
     );
     item.filename = format!("aaaa.{}", "x".repeat(238));
-    let name = FilenameTemplate::parse("{filename}")
+    let name = FilenameTemplate::parse("{filename}.{extension}")
         .unwrap()
         .render(&item)
         .unwrap();
@@ -266,7 +266,7 @@ fn long_names_keep_the_complete_extension_within_byte_limit() {
 #[test]
 fn truncation_cannot_create_reserved_windows_stems() {
     let mut item = media();
-    let template = FilenameTemplate::parse("{filename}").unwrap();
+    let template = FilenameTemplate::parse("{filename}.{extension}").unwrap();
     for (stem, extension_length, expected_stem) in [
         ("CONextra", 236, "_CO"),
         ("COM1extra", 235, "_COM"),
@@ -513,7 +513,7 @@ fn conditional_templates_select_the_first_matching_filter() {
             ("index >= 2".into(), "late_{index}.{extension}".into()),
             ("username == 'alice'".into(), "alice.{extension}".into()),
         ],
-        Some("{filename}"),
+        Some("{filename}.{extension}"),
     )
     .unwrap();
     let mut item = media();

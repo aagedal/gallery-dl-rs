@@ -290,7 +290,7 @@ async fn selected_post_files_alone_receive_archive_and_sidecars() {
             .arg(&archive)
             .args([
                 "-f",
-                "{filename}",
+                "{filename}.{extension}",
                 "--write-metadata",
                 "--post-range",
                 "2",

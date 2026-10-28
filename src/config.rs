@@ -544,8 +544,14 @@ pub fn parse_option(option: &str) -> Result<CliOption> {
     })
 }
 
+/// Process-wide upstream settings read from the root or `extractor` scope
+/// (the `extractor` value wins), applied once rather than per category.
+pub const GLOBAL_KEYS: &[&str] = &["path-restrict", "path-replace", "path-remove", "path-strip"];
+
 #[derive(Clone, Debug, Default)]
 pub struct Config {
+    /// Values of [`GLOBAL_KEYS`].
+    globals: serde_json::Map<String, Value>,
     global: Options,
     extractor: Options,
     categories: BTreeMap<String, Options>,
@@ -1240,6 +1246,21 @@ impl Config {
                 }
             }
         }
+        let mut globals = serde_json::Map::new();
+        if let Some(object) = original.as_object_mut() {
+            for key in GLOBAL_KEYS {
+                if let Some(value) = object.remove(*key) {
+                    globals.insert((*key).into(), value);
+                }
+            }
+            if let Some(extractor) = object.get_mut("extractor").and_then(Value::as_object_mut) {
+                for key in GLOBAL_KEYS {
+                    if let Some(value) = extractor.remove(*key) {
+                        globals.insert((*key).into(), value);
+                    }
+                }
+            }
+        }
         let stripped = serde_json::to_vec(&original)
             .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
         let root: RawRoot = serde_json::from_slice(&stripped)
@@ -1628,6 +1649,7 @@ impl Config {
             })
             .collect::<Result<_>>()?;
         Ok(Self {
+            globals,
             global,
             extractor: defaults,
             categories,
@@ -1695,6 +1717,11 @@ impl Config {
         };
         Ok(resolved)
     }
+    /// Process-wide settings ([`GLOBAL_KEYS`]).
+    pub fn globals(&self) -> &serde_json::Map<String, Value> {
+        &self.globals
+    }
+
     pub fn parent_keywords(&self) -> &[String] {
         &self.parent_keywords
     }

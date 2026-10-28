@@ -1552,6 +1552,17 @@ extractor handles. Registry sites honor `sleep-request`, `sleep-retries` and
 files. `-v`, `-w`, `--no-part`, `--chunk-size`, `--no-colors`, `--no-input`
 and `--config-ignore` are accepted for compatibility.
 
+**Implemented path cleaning options, 2026-10-28:** `path-restrict` (auto,
+unix, windows, windows+, ascii, ascii+, character sets or mappings),
+`path-replace`, `path-remove` and `path-strip` are read process-wide from the
+root or `extractor` scope or `-o`, with `--restrict-filenames VALUE` and
+`--windows-filenames`. Separators and NUL are always replaced. Without them,
+native filename templates keep the conservative ASCII cleaning. `{filename}`
+now excludes the extension for every extractor, as upstream.
+**Remaining divergences:** the default base directory (`downloads` versus
+upstream `./gallery-dl/`) and direct links (`direct/<digest>_NAME` versus
+upstream `directlink` with `{domain}`, `{path}`, `{query}` and `{fragment}`).
+
 ### Companion yt-dlp-rs integration
 
 Prefer an optional Rust library adapter once yt-dlp-rs has a stable, consumable

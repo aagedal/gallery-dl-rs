@@ -1765,7 +1765,7 @@ fn fallback_configuration_controls_actual_download_attempts() {
             .arg(&saved)
             .args([
                 "-f",
-                "{filename}",
+                "{filename}.{extension}",
                 "--retries=0",
                 "https://x.com/person/status/1",
             ])

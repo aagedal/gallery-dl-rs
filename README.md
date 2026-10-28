@@ -2037,7 +2037,7 @@ order after the file, and are validated like file settings. Options under
       "filename": "{post_id}_{media_id}.{extension}"
     },
     "direct": {
-      "filename": "{filename}"
+      "filename": "{filename}.{extension}"
     }
   }
 }
@@ -2086,7 +2086,7 @@ files use the Rust archive format.
 
 Like upstream, `filename` may be an object mapping filter expressions to
 templates and `directory` an object mapping them to component lists, e.g.
-`{"filename": {"media_type == 'video'": "{post_id}.{extension}", "": "{filename}"}}`.
+`{"filename": {"media_type == 'video'": "{post_id}.{extension}", "": "{filename}.{extension}"}}`.
 Conditions are tried in file order with the `--filter` evaluator; the first match
 wins, then the `""` entry, then the default name or category folder. Condition
 errors (such as missing keys) fail that file. A plain value or CLI flag in a
@@ -2366,7 +2366,7 @@ available from upstream.
   `{height_original}`, `{duration}`, `{bitrate}`, `{media_type}`/`{type}`,
   `{sensitive_flags}`, and `{source_id}`/`{source_username}`; X adds
   `{tweet_id}`, `{retweet_id}`, and `{quote_id}`, and Facebook adds `{id}`.
-  Outside boorus, `{filename}` includes the extension. `{url}` is
+  As upstream, `{filename}` excludes the extension. `{url}` is
   unavailable so signed transport URLs cannot leak into paths.
   Fields use gallery-dl's replacement-field syntax: `.key`/`[key]`, `[index]`,
   and `[start:stop]` accessors; `{a|b|'literal'}` alternatives; the `!l`, `!u`,

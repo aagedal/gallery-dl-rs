@@ -388,7 +388,7 @@ async fn filtered_downloads_create_neither_metadata_nor_archive_records() {
             .arg(&saved)
             .args([
                 "-f",
-                "{filename}",
+                "{filename}.{extension}",
                 "--date-before=3",
                 "--date-after=1",
                 "--write-metadata",
