@@ -140,7 +140,7 @@ async fn browser_cookies_override_missing_configured_cookie_files() {
     }
     assert_eq!(std::fs::read(&db).unwrap(), original);
     assert_eq!(std::fs::read_dir(&profile).unwrap().count(), 1);
-    assert!(!root.path().join("downloads").exists());
+    assert!(!root.path().join("gallery-dl").exists());
 }
 
 #[tokio::test]
@@ -335,7 +335,7 @@ async fn configured_browser_arrays_import_relative_profiles_with_optional_placeh
         original
     );
     assert_eq!(std::fs::read_dir(profile).unwrap().count(), 1);
-    assert!(!root.path().join("downloads").exists());
+    assert!(!root.path().join("gallery-dl").exists());
 }
 
 #[tokio::test]

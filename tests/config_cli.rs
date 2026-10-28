@@ -117,7 +117,7 @@ async fn category_destinations_and_filenames_anchor_to_config_directory() {
     assert!(result.stdout.is_empty());
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert_eq!(stderr.matches("skipped ").count(), 5);
-    assert!(!cwd.join("downloads").exists());
+    assert!(!cwd.join("gallery-dl").exists());
     assert!(!settings.join("base").exists());
 }
 
@@ -208,11 +208,11 @@ async fn archives_open_only_for_relevant_categories_and_cli_paths_override_confi
             "twitter":{"archive":"missing-parent/twitter.sqlite"}
         }}),
     );
-    touch(&root.path().join("downloads/direct/cli.jpg"));
+    touch(&root.path().join("gallery-dl/direct/cli.jpg"));
     let mut command = binary(root.path(), &cfg);
     command.args([
         "--destination",
-        "downloads",
+        "gallery-dl",
         "--filename",
         "cli.jpg",
         "--download-archive",
@@ -422,7 +422,7 @@ async fn configured_retry_count_is_used_and_explicit_default_looking_cli_value_w
         );
         assert_eq!(server.count(), if override_cli { 3 } else { 2 });
         assert_eq!(
-            root.path().join("downloads/direct/result.jpg").exists(),
+            root.path().join("gallery-dl/direct/result.jpg").exists(),
             override_cli
         );
     }
@@ -450,7 +450,7 @@ async fn fractional_configured_timeout_is_applied_and_explicit_sixty_seconds_win
             String::from_utf8_lossy(&result.stderr)
         );
         assert_eq!(server.count(), 1);
-        let path = root.path().join("downloads/direct/result.jpg");
+        let path = root.path().join("gallery-dl/direct/result.jpg");
         assert_eq!(path.exists(), override_cli);
         if override_cli {
             assert_eq!(std::fs::read(path).unwrap(), b"abc");

@@ -58,7 +58,7 @@ struct Args {
     /// Download URLs found in FILE; delete each successfully downloaded URL
     #[arg(short = 'x', long = "input-file-delete", value_name = "FILE")]
     input_file_delete: Vec<PathBuf>,
-    /// Output root (default: downloads)
+    /// Output root (default: ./gallery-dl/)
     #[arg(short, long)]
     destination: Option<PathBuf>,
     /// Exact download directory, overriding configured folder components
@@ -3470,7 +3470,8 @@ async fn resolved_settings(
         .and_then(serde_json::Value::as_bool)
         != Some(false);
     let defaults = ConfigOptions {
-        base_directory: Some(PathBuf::from("downloads")),
+        // Upstream `base-directory` default.
+        base_directory: Some(PathBuf::from("gallery-dl")),
         retries: Some(downloader_number("retries").map_or(2, |retries| retries.min(10.0) as u8)),
         timeout: Some(
             downloader_number("timeout")

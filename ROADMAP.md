@@ -1563,9 +1563,10 @@ root or `extractor` scope or `-o`, with `--restrict-filenames VALUE` and
 native filename templates kept the conservative ASCII cleaning (since
 2026-10-28 `path-restrict` defaults to `auto`). `{filename}`
 now excludes the extension for every extractor, as upstream.
-**Remaining divergences:** the default base directory (`downloads` versus
-upstream `./gallery-dl/`) and direct links (`direct/<digest>_NAME` versus
+**Remaining divergences:** direct links (`direct/<digest>_NAME` versus
 upstream `directlink` with `{domain}`, `{path}`, `{query}` and `{fragment}`).
+The default base directory is `./gallery-dl/` like upstream (since
+2026-10-28; it was `downloads`).
 
 **Implemented output and configuration commands, 2026-10-28:** `-N/--print
 [EVENT:]FORMAT` and `--print-to-file [EVENT:]FORMAT FILE` configure metadata
@@ -1614,9 +1615,9 @@ lists) and `config-file` apply to yt-dlp downloads; `raw-options` cannot.
 `netrc` are also read from the root/`extractor` configuration scope.
 Upstream's `extension-map` applies to every extractor (default: `jpeg`,
 `jpe`, `jfif`, `jif` and `jfi` become `jpg`).
-**Remaining:** other `output` options (log formats, progress, colors), `downloader.http`/`ytdl` subsections, format-string archive paths,
-relative paths resolve against the configuration directory rather than the
-working directory, and the default base directory differs (`downloads`).
+**Remaining:** other `output` options (log formats, progress, colors), most
+`downloader.ytdl` options, format-string archive paths, and relative paths
+resolve against the configuration directory rather than the working directory.
 
 **Implemented OAuth helpers, 2026-10-28:** `oauth:pixiv` (PKCE with a pasted
 code), `oauth:deviantart`, `oauth:reddit`, `oauth:mastodon:INSTANCE`

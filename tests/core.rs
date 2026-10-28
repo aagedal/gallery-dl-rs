@@ -673,7 +673,7 @@ fn paths_cannot_escape_destination_and_do_not_collide() {
     first.category = "../../".into();
     first.filename = "../../etc/passwd".into();
     let second = media("https://example.com/other/a.jpg");
-    let root = Path::new("downloads");
+    let root = Path::new("gallery-dl");
     let path = download::destination(root, &first);
     assert!(path.starts_with(root));
     assert_eq!(path.components().count(), 3);

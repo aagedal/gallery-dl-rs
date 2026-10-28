@@ -570,7 +570,7 @@ mod cancellation {
         let script = waiting_backend(root.path(), "[]");
         let item = gallery_dl_rs::extract::direct(&gallery_dl_rs::extract::http_url(&url).unwrap())
             .unwrap();
-        let destination = root.path().join("downloads");
+        let destination = root.path().join("gallery-dl");
         let saved = gallery_dl_rs::download::destination(&destination, &item);
         let mut child = Running(Some(
             binary()
@@ -627,7 +627,7 @@ mod cancellation {
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
         let item = gallery_dl_rs::extract::direct(&gallery_dl_rs::extract::http_url(&url).unwrap())
             .unwrap();
-        let destination = root.path().join("downloads");
+        let destination = root.path().join("gallery-dl");
         let saved = gallery_dl_rs::download::destination(&destination, &item);
         let mut child = Running(Some(
             binary()
@@ -667,7 +667,7 @@ mod cancellation {
         let url = format!("http://{}/photo.jpg", listener.local_addr().unwrap());
         let root = tempfile::tempdir().unwrap();
         let script = waiting_backend(root.path(), "[]");
-        let destination = root.path().join("downloads");
+        let destination = root.path().join("gallery-dl");
         let child = Running(Some(
             binary()
                 .arg("-d")
