@@ -137,7 +137,9 @@ impl Archive {
             Some(identity) => Some(self.lock_identity(identity).await?),
             None => None,
         };
+        // Upstream `skip: false` also disables archive checks.
         if let Some(identity) = &identity
+            && !client.overwrite
             && self.contains(identity).await?
         {
             if let Some(generic) = &mut generic

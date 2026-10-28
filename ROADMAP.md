@@ -1536,8 +1536,11 @@ upstream's `exec` (string and list commands, `commands`, `async`, `output`,
 shortcuts are available. `--no-check-certificate`, `--source-address`, `-4` and
 `-6` apply to every native HTTP client and are forwarded to the compatibility
 backend. Repeated CLI options override earlier ones, as with argparse.
-**Remaining:** `compare` (needs `--no-skip`/`skip: false` overwrite support),
-`python` (no native equivalent), exec `archive`/`success`/`error` actions, and
+`--no-skip` and `skip: false` replace existing files (the previous file is
+kept until the replacement completes) and bypass archive checks; `skip`
+values `abort:N`, `terminate:N` and `exit:N` map to `-A`/`-T`. The `compare`
+processor (`action` replace/enumerate, `shallow`) is supported.
+**Remaining:** compare `equal`, `skip: enumerate`, `python` (no native equivalent), exec `archive`/`success`/`error` actions, and
 bzip2/lzma zip compression.
 
 **Implemented input, auth and pacing options, 2026-10-28:** input files accept

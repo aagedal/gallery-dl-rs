@@ -222,6 +222,9 @@ struct Args {
     /// Use Windows filename restrictions (same as --restrict-filenames windows)
     #[arg(long)]
     windows_filenames: bool,
+    /// Do not skip downloads; overwrite existing files
+    #[arg(long)]
+    no_skip: bool,
     /// Username to login with
     #[arg(short = 'u', long, value_name = "USER")]
     username: Option<String>,
@@ -552,6 +555,28 @@ async fn run(args: Args) -> Result<()> {
         ));
     }
     let settings = resolved_settings(&args, &[]).await?;
+    // Upstream `skip`: false replaces files; "abort:N", "terminate:N" and
+    // "exit:N" stop after N consecutive skipped files.
+    let mut args = args;
+    match SKIP_OPTION.get() {
+        Some(serde_json::Value::Bool(false)) => args.no_skip = true,
+        Some(serde_json::Value::String(value)) => {
+            let (mode, limit) = value.split_once(':').unwrap_or((value, ""));
+            let limit = limit
+                .split(':')
+                .next()
+                .and_then(|n| n.parse::<u64>().ok())
+                .filter(|n| *n > 0);
+            match mode {
+                "abort" => args.abort = args.abort.or(limit),
+                "terminate" | "exit" => args.terminate = args.terminate.or(limit),
+                "enumerate" => return Err(error("skip: enumerate is not supported natively")),
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    let args = args;
     let inputs = Inputs::with_actions(
         args.urls.clone(),
         args.input_files
@@ -948,6 +973,7 @@ async fn run(args: Args) -> Result<()> {
     } else {
         let client = download::client(Duration::from_secs(60))?
             .with_resume(args.resume)
+            .with_overwrite(args.no_skip)
             .with_http_mtime(!args.no_mtime)
             .with_metadata_mtime(args.mtime.clone())
             .with_sleep(args.sleep)
@@ -2324,6 +2350,9 @@ impl Settings {
     }
 }
 
+/// The configured upstream `skip` value, read with the first settings.
+static SKIP_OPTION: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+
 /// Upstream's `--ugoira FMT` postprocessor presets.
 fn ugoira_postprocessor(format: &str) -> Result<serde_json::Value> {
     use serde_json::json;
@@ -2479,7 +2508,11 @@ async fn resolved_settings(
                 .insert(key.into(), value.clone().into());
         }
     }
+    if let Some(skip) = config.globals().get("skip") {
+        let _ = SKIP_OPTION.set(skip.clone());
+    }
     let mut path_options = config.globals().clone();
+    path_options.remove("skip");
     if let Some(value) = &args.restrict_filenames {
         path_options.insert("path-restrict".into(), value.clone().into());
     } else if args.windows_filenames {

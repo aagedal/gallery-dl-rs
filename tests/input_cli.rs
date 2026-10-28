@@ -319,3 +319,37 @@ fn inline_options_apply_per_url_and_delete_removes_successful_lines() {
         format!("{origin}/missing.jpg\n")
     );
 }
+
+#[test]
+fn no_skip_replaces_files_and_compare_enumerates_differing_downloads() {
+    let root = tempfile::tempdir().unwrap();
+    let out = root.path().join("out");
+    std::fs::create_dir_all(out.join("direct")).unwrap();
+    let existing = out.join("direct/a.jpg");
+    let run = |extra: &[&str]| {
+        let (origin, handle) = serve(1);
+        let output = binary()
+            .args(["--retries", "0", "-f", "{filename}.{extension}", "-d"])
+            .arg(&out)
+            .args(extra)
+            .arg(format!("{origin}/a.jpg"))
+            .output()
+            .unwrap();
+        handle.join().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    std::fs::write(&existing, b"old").unwrap();
+    run(&[
+        "--no-skip",
+        "-o",
+        r#"postprocessors=[{"name":"compare","action":"enumerate"}]"#,
+    ]);
+    assert_eq!(std::fs::read(&existing).unwrap(), b"old");
+    assert_eq!(std::fs::read(out.join("direct/a.1.jpg")).unwrap(), b"data");
+    run(&["--no-skip"]);
+    assert_eq!(std::fs::read(&existing).unwrap(), b"data");
+}

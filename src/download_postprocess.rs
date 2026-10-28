@@ -480,7 +480,7 @@ pub(crate) async fn download(
     mut prepared: Prepared,
 ) -> Result<Outcome> {
     build_source_path(root, options, template, &mut prepared, false)?;
-    if postprocess::regular_file(&prepared.path)? {
+    if !client.overwrite && postprocess::regular_file(&prepared.path)? {
         let converted = skip(client, root, media, options, template, &mut prepared).await?;
         return Ok(converted.unwrap_or(Outcome::Skipped(prepared.path)));
     }
@@ -499,7 +499,7 @@ pub(crate) async fn download(
     )
     .await?;
     // Upstream `_file_recheck`: a renamed destination may already exist.
-    if prepared.path != pending && postprocess::regular_file(&prepared.path)? {
+    if !client.overwrite && prepared.path != pending && postprocess::regular_file(&prepared.path)? {
         let converted = skip(client, root, media, options, template, &mut prepared).await?;
         return Ok(converted.unwrap_or(Outcome::Skipped(prepared.path)));
     }
@@ -709,7 +709,7 @@ pub(crate) async fn download(
         }
         primary.0 = prepared.path.clone();
     } else if !prepared.delete && !outputs.iter().any(|(path, _, _)| path == &prepared.path) {
-        publish(&hook_input, &prepared.path, false)?;
+        publish(&hook_input, &prepared.path, client.overwrite)?;
     }
     for (path, temporary, replace) in outputs {
         if let Some(temporary) = temporary {
@@ -916,6 +916,14 @@ async fn run_path_processor(
                 config.run(hook, &prepared.media, &prepared.keywords, &prepared.path)?
             {
                 prepared.path = path;
+            }
+        }
+        Processor::Compare(config) => {
+            if postprocess::regular_file(&prepared.path)? {
+                match config.run(&prepared.path, input) {
+                    postprocess::compare::Comparison::Equal => prepared.delete = true,
+                    postprocess::compare::Comparison::Publish(path) => prepared.path = path,
+                }
             }
         }
         Processor::Ugoira(_)

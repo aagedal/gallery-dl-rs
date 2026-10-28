@@ -42,6 +42,8 @@ pub struct DownloadClient {
     ytdl: Option<std::sync::Arc<Path>>,
     /// Session cookies forwarded to yt-dlp.
     ytdl_cookies: Option<std::sync::Arc<crate::cookies::YtdlCookies>>,
+    /// Upstream `skip: false`: download and replace existing files.
+    pub(crate) overwrite: bool,
 }
 
 /// Per-attempt state shared between the attempt and its deadline. Throttling
@@ -224,6 +226,13 @@ impl DownloadClient {
         }
     }
 
+    /// Replace existing files instead of skipping them (`--no-skip`). The
+    /// previous file is kept until the replacement is complete.
+    pub fn with_overwrite(mut self, enabled: bool) -> Self {
+        self.overwrite = enabled;
+        self
+    }
+
     /// Retain validated partial HTTP downloads for retries and later invocations.
     pub fn with_resume(mut self, enabled: bool) -> Self {
         self.resume = enabled;
@@ -251,6 +260,7 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         rate: None,
         ytdl: Some(Path::new("yt-dlp").into()),
         ytdl_cookies: None,
+        overwrite: false,
     })
 }
 
@@ -480,6 +490,8 @@ pub async fn download_with_template(
             &selected,
         )
         .await?
+    } else if client.overwrite {
+        download_replacing(client, root, media, options, template).await?
     } else {
         download_media(client, root, media, options, template, None).await?
     };
@@ -504,6 +516,38 @@ pub async fn download_with_template(
             })?;
     }
     Ok(outcome)
+}
+
+/// Download over an existing destination: move it aside, then remove it
+/// after a successful download or restore it otherwise.
+async fn download_replacing(
+    client: &DownloadClient,
+    root: &Path,
+    media: &Media,
+    options: DownloadOptions<'_>,
+    template: Option<&FilenameTemplate>,
+) -> Result<Outcome> {
+    let path = destination_with_templates(root, media, template, options.directory)?;
+    let backup = if crate::postprocess::regular_file(&path)? {
+        let name = path
+            .file_name()
+            .ok_or_else(|| error("invalid media filename"))?
+            .to_string_lossy();
+        let backup = path.with_file_name(format!(".{name}.gdl-rs-replaced"));
+        std::fs::rename(&path, &backup)?;
+        Some(backup)
+    } else {
+        None
+    };
+    let result = download_media(client, root, media, options, template, None).await;
+    if let Some(backup) = backup {
+        if matches!(result, Ok(Outcome::Downloaded(_))) || path.exists() {
+            let _ = std::fs::remove_file(&backup);
+        } else {
+            std::fs::rename(&backup, &path)?;
+        }
+    }
+    result
 }
 
 pub(crate) async fn complete_original(

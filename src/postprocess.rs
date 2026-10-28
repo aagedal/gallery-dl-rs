@@ -38,6 +38,8 @@ impl FrameInput {
 pub(crate) mod archive;
 #[path = "postprocess_classify.rs"]
 pub mod classify;
+#[path = "postprocess_compare.rs"]
+pub mod compare;
 #[path = "postprocess_exec.rs"]
 pub mod exec;
 #[path = "postprocess_hash.rs"]
@@ -85,6 +87,7 @@ pub enum Processor {
     Directory,
     Zip(zipfile::ZipOptions),
     Rename(rename::RenameOptions),
+    Compare(compare::CompareOptions),
 }
 impl Processor {
     pub fn ugoira(&self) -> Option<&UgoiraOptions> {
@@ -221,10 +224,11 @@ impl Specification {
             "directory" => Processor::Directory,
             "zip" => Processor::Zip(zipfile::ZipOptions::parse(&options)?),
             "rename" => Processor::Rename(rename::RenameOptions::parse(&options)?),
+            "compare" => Processor::Compare(compare::CompareOptions::parse(&options)?),
             _ => {
                 return Err(error(
                     "unsupported native postprocessor; supported: ugoira, metadata, mtime, hash, \
-                     exec, classify, directory, zip, rename",
+                     exec, classify, directory, zip, rename, compare",
                 ));
             }
         };
@@ -240,6 +244,8 @@ impl Specification {
         };
         let events = if matches!(processor, Processor::Ugoira(_)) {
             Vec::new()
+        } else if matches!(processor, Processor::Compare(_)) {
+            vec![Hook::File]
         } else if matches!(processor, Processor::Classify(_)) {
             // Upstream classify and zip register fixed hooks and ignore `event`.
             vec![Hook::Prepare]
@@ -802,7 +808,8 @@ impl Postprocessors {
                 Processor::Classify(_)
                 | Processor::Directory
                 | Processor::Zip(_)
-                | Processor::Rename(_) => {}
+                | Processor::Rename(_)
+                | Processor::Compare(_) => {}
             }
             if hook == Hook::Finalize
                 && let Processor::Metadata(options) = &spec.options
@@ -874,7 +881,8 @@ impl Postprocessors {
                 Processor::Classify(_)
                 | Processor::Directory
                 | Processor::Zip(_)
-                | Processor::Rename(_) => {}
+                | Processor::Rename(_)
+                | Processor::Compare(_) => {}
             }
             if hook == Hook::Finalize
                 && let Processor::Metadata(options) = &spec.options

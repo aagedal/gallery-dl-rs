@@ -546,7 +546,13 @@ pub fn parse_option(option: &str) -> Result<CliOption> {
 
 /// Process-wide upstream settings read from the root or `extractor` scope
 /// (the `extractor` value wins), applied once rather than per category.
-pub const GLOBAL_KEYS: &[&str] = &["path-restrict", "path-replace", "path-remove", "path-strip"];
+pub const GLOBAL_KEYS: &[&str] = &[
+    "path-restrict",
+    "path-replace",
+    "path-remove",
+    "path-strip",
+    "skip",
+];
 
 #[derive(Clone, Debug, Default)]
 pub struct Config {
