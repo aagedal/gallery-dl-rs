@@ -1685,8 +1685,10 @@ collections, tags, avatar, banner, watching and fxdeviantart; Facebook
 extensions. **Remaining:** Newgrounds audio/movies/games/favorites/search
 (the site now serves an "NG Guard" browser check), VSCO collection/spaces/
 avatar/video (HTTP 403 here), ArtStation albums/collections/likes/search/
-challenges (Cloudflare), DeviantArt scraps/search/journals/statuses/stash/
-watch (Eclipse API, literature or login), Danbooru media assets, Pixiv
+challenges (Cloudflare), DeviantArt scraps/search/statuses/stash/
+watch (Eclipse API or login); journals and literature are saved as `.htm`
+from `deviation/content` (simpler than upstream's journal template; not yet
+verified live because DeviantArt rate-limited this host), Danbooru media assets, Pixiv
 unlisted works, Imgur `/user/me`, MangaDex feed/follows and 500px liked
 (login), Facebook `/info`.
 

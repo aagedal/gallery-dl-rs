@@ -101,6 +101,8 @@ pub enum Target {
     Banner(String),
     /// `USER/watching`: watched users, queued as user children.
     Following(String),
+    /// `USER/journal/`, `USER/posts[/journals]`: the user's journals.
+    Journals(String),
 }
 
 /// Upstream `util.b36decode`.
@@ -188,6 +190,12 @@ pub fn target(url: &Url) -> Result<Target> {
         return Err(unsupported());
     }
     match rest {
+        ["journal", slug] if numeric_id(slug).is_some() => {
+            return Ok(Target::DeviationId(
+                numeric_id(slug).unwrap_or_default().to_owned(),
+            ));
+        }
+        ["journal"] | ["posts"] | ["posts", "journals"] => return Ok(Target::Journals(user)),
         ["avatar", ..] => return Ok(Target::Avatar(user)),
         ["banner" | "background", ..] => return Ok(Target::Banner(user)),
         ["watching", ..] => return Ok(Target::Following(user)),
@@ -559,8 +567,58 @@ impl DeviantArt {
                 .await
                 .ok();
         }
-        let mut media = parse_deviation(deviation, download.as_ref())?;
+        let mut media = match parse_deviation(deviation, download.as_ref()) {
+            Some(media) => media,
+            None => self.journal(deviation).await?,
+        };
         self.network.apply_media(&mut media);
+        Some(media)
+    }
+
+    /// Literature and journals (upstream `journals: "html"`): the
+    /// `deviation/content` HTML in a minimal page, saved as `.htm`.
+    async fn journal(&self, deviation: &Value) -> Option<Media> {
+        deviation.get("excerpt")?;
+        let uuid = string(deviation, "deviationid").filter(|id| valid_uuid(id))?;
+        let mut endpoint = self.api("deviation/content");
+        endpoint.query_pairs_mut().append_pair("deviationid", uuid);
+        let content = self.get(&endpoint).await.ok()?;
+        let html = content.get("html").and_then(Value::as_str)?;
+        let title = string(deviation, "title").unwrap_or_default();
+        let escape = |text: &str| {
+            text.replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+                .replace('"', "&quot;")
+        };
+        let css = content
+            .get("css")
+            .and_then(Value::as_str)
+            .map(|css| format!("<style>{css}</style>"))
+            .unwrap_or_default();
+        let page = format!(
+            "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<title>{}</title>\n{css}\n</head>\n<body>\n<h1>{}</h1>\n{html}\n</body>\n</html>\n",
+            escape(title),
+            escape(title),
+        );
+        let url = string(deviation, "url")
+            .and_then(|url| Url::parse(url).ok())
+            .unwrap_or_else(|| self.root.clone());
+        // Reuse the deviation metadata parser with a placeholder file
+        // source; the URL and job are replaced below.
+        let mut media = parse_deviation(
+            &{
+                let mut fake = deviation.clone();
+                fake["content"] = serde_json::json!({
+                    "src": "https://images-wixmp-ed30a86b8c4ca887773594c2.wixmp.com/journal.htm"
+                });
+                fake
+            },
+            None,
+        )?;
+        media.url = url;
+        media.job = MediaJob::InlineText { data: page };
+        media.filename = format!("{uuid}.htm");
         Some(media)
     }
 
@@ -603,6 +661,7 @@ impl DeviantArt {
         let offset = state.offset.take().unwrap_or(0);
         let path = match (&state.folder, state.kind) {
             (_, "browse/tags") => "browse/tags".to_owned(),
+            (_, "user/profile/posts") => "user/profile/posts".to_owned(),
             (Some(folder), kind) => format!("{kind}/{folder}"),
             (None, kind) => format!("{kind}/all"),
         };
@@ -632,6 +691,12 @@ impl DeviantArt {
             state.offset = page.next.filter(|next| *next > offset);
         }
         for deviation in &page.results {
+            // Profile posts also contain status updates; keep journals.
+            if state.kind == "user/profile/posts"
+                && !string(deviation, "url").is_some_and(|url| url.contains("/journal/"))
+            {
+                continue;
+            }
             if let Some(media) = self.media(deviation).await {
                 state.pending.extend(group(vec![media], "deviantart"));
             }
@@ -838,6 +903,7 @@ impl DeviantArt {
                 return self.once_events(async move { self.banner(&user).await });
             }
             Target::Following(user) => return self.following(user),
+            Target::Journals(user) => ("user/profile/posts", user, None),
             Target::Tag(tag) => ("browse/tags", tag, None),
             Target::Favorites { user, folder } => ("collections", user, folder),
             Target::Gallery(user) => ("gallery", user, None),
@@ -1116,6 +1182,18 @@ mod tests {
             t("https://www.deviantart.com/shimoda7/about#watching"),
             Target::Following("shimoda7".into())
         );
+        assert_eq!(
+            t("https://www.deviantart.com/shimoda7/journal/ARTility-583755752"),
+            Target::DeviationId("583755752".into())
+        );
+        for raw in [
+            "https://www.deviantart.com/shimoda7/journal/",
+            "https://shimoda7.deviantart.com/journal/?catpath=/",
+            "https://www.deviantart.com/shimoda7/posts/",
+            "https://www.deviantart.com/shimoda7/posts/journals/",
+        ] {
+            assert_eq!(t(raw), Target::Journals("shimoda7".into()), "{raw}");
+        }
     }
 
     #[test]

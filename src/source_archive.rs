@@ -193,6 +193,7 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
             crate::deviantart::Target::Avatar(_) => "a_{_username}_{index}",
             crate::deviantart::Target::Banner(_) => "b_{index}",
             crate::deviantart::Target::Following(_) => "",
+            crate::deviantart::Target::Journals(_) => "j_{_username}_{index}.{extension}",
             crate::deviantart::Target::Gallery(_) => {
                 if path.split('/').any(|part| part == "gallery") {
                     "g_{_username}_{index}.{extension}"
@@ -538,8 +539,7 @@ mod tests {
             for_url(&Url::parse("https://example.invalid/not-a-native-route").unwrap()).is_none()
         );
         assert!(
-            for_url(&Url::parse("https://www.flickr.com/photos/example/stats").unwrap())
-                .is_none()
+            for_url(&Url::parse("https://www.flickr.com/photos/example/stats").unwrap()).is_none()
         );
         assert!(for_url(&Url::parse("https://user:PRIVATE@imgur.com/abcde").unwrap()).is_none());
     }
