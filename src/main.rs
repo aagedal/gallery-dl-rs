@@ -1492,6 +1492,30 @@ async fn run(args: Args) -> Result<()> {
                     .iter()
                     .find_map(|key| GLOBAL_OPTIONS.get()?.get(*key)?.as_str().map(str::to_owned)),
             )
+            .with_progress({
+                // Upstream shows progress only in terminal output modes.
+                use std::io::IsTerminal;
+                let terminal = std::io::stdout().is_terminal()
+                    && std::io::stderr().is_terminal()
+                    && !args.quiet
+                    && GLOBAL_OPTIONS
+                        .get()
+                        .and_then(|g| g.get("output")?.get("mode"))
+                        .is_none_or(|m| {
+                            m.as_str().is_some_and(|m| {
+                                matches!(m, "auto" | "terminal" | "term" | "color")
+                            })
+                        });
+                match downloader_option("progress") {
+                    _ if !terminal => None,
+                    None => Some(Duration::from_secs(3)),
+                    Some(serde_json::Value::Number(n)) => n
+                        .as_f64()
+                        .filter(|s| *s >= 0.0)
+                        .map(Duration::from_secs_f64),
+                    Some(_) => None,
+                }
+            })
             .with_no_download(args.no_download)
             .with_http_mtime(!args.no_mtime)
             .with_metadata_mtime(args.mtime.clone())

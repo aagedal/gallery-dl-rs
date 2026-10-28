@@ -58,6 +58,9 @@ pub struct DownloadClient {
     pub(crate) validate_html: bool,
     /// Upstream `retry-codes`: further HTTP status codes to retry.
     pub(crate) retry_codes: std::sync::Arc<[u16]>,
+    /// Upstream `downloader.progress`: show progress on standard error for
+    /// downloads that take longer than this.
+    pub(crate) progress: Option<Duration>,
     /// Upstream `part-directory`: where incomplete downloads are written.
     pub(crate) part_directory: Option<std::sync::Arc<Path>>,
     /// Upstream `skip: "enumerate"`: save under `NAME.N.EXT` next to
@@ -337,6 +340,12 @@ impl DownloadClient {
         self
     }
 
+    /// Show download progress after this delay (`downloader.progress`).
+    pub fn with_progress(mut self, delay: Option<Duration>) -> Self {
+        self.progress = delay;
+        self
+    }
+
     /// Write incomplete downloads to this directory (`part-directory`).
     pub fn with_part_directory(mut self, directory: Option<PathBuf>) -> Self {
         self.part_directory = directory.map(Into::into);
@@ -413,6 +422,7 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         validate_html: true,
         retry_codes: std::sync::Arc::new([]),
         part_directory: None,
+        progress: None,
         enumerate: false,
         no_download: false,
     })
@@ -432,6 +442,65 @@ fn content_disposition_filename(value: &str) -> Option<String> {
         .trim()
         .trim_matches('"');
     (!raw.is_empty()).then(|| crate::sites::unescape(raw))
+}
+
+/// Upstream `util.format_value`: `1234567` → `1.23M`.
+fn format_value(value: u64) -> String {
+    let text = value.to_string();
+    if text.len() < 4 {
+        return text;
+    }
+    let index = text.len() - 4;
+    let offset = (text.len() - 1) % 3 + 1;
+    format!(
+        "{}.{}{}",
+        &text[..offset],
+        &text[offset..offset + 2],
+        "kMGTPEZY".as_bytes()[index / 3] as char
+    )
+}
+
+/// With concurrent downloads, one download at a time owns the progress line.
+#[derive(Default)]
+struct ProgressOwner(std::cell::Cell<bool>);
+
+static PROGRESS_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+impl ProgressOwner {
+    fn claim(&self) -> bool {
+        if !self.0.get()
+            && PROGRESS_BUSY
+                .compare_exchange(
+                    false,
+                    true,
+                    std::sync::atomic::Ordering::AcqRel,
+                    std::sync::atomic::Ordering::Acquire,
+                )
+                .is_ok()
+        {
+            self.0.set(true);
+        }
+        self.0.get()
+    }
+}
+
+impl Drop for ProgressOwner {
+    fn drop(&mut self) {
+        if self.0.get() {
+            eprint!("\r\x1b[K");
+            PROGRESS_BUSY.store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
+}
+
+/// Upstream `TerminalOutput.progress` on standard error.
+fn progress_line(total: Option<u64>, received: u64, elapsed: Duration) {
+    let rate = (received as f64 / elapsed.as_secs_f64().max(0.001)) as u64;
+    let (done, speed) = (format_value(received), format_value(rate));
+    match total.filter(|total| *total > 0) {
+        Some(total) => eprint!("\r{:>3}% {done:>7}B {speed:>7}B/s ", received * 100 / total),
+        None => eprint!("\r{done:>7}B {speed:>7}B/s "),
+    }
 }
 
 pub fn safe_component(value: &str) -> String {
@@ -1413,6 +1482,9 @@ async fn attempt_download(
     let mut received = 0u64;
     let check_placeholder = kemono_txt_resource(media);
     let mut prefix = Vec::new();
+    let started = std::time::Instant::now();
+    let mut reported = None::<std::time::Instant>;
+    let progress_owner = ProgressOwner::default();
     loop {
         io.set_remote(true);
         let chunk = stream.next().await;
@@ -1422,6 +1494,14 @@ async fn attempt_download(
         received = received
             .checked_add(chunk.len() as u64)
             .ok_or_else(|| terminal("media response exceeds size limit"))?;
+        if let Some(delay) = client.progress
+            && started.elapsed() >= delay
+            && reported.is_none_or(|at| at.elapsed() >= Duration::from_secs(1))
+            && progress_owner.claim()
+        {
+            reported = Some(std::time::Instant::now());
+            progress_line(expected, received, started.elapsed());
+        }
         if expected.is_some_and(|expected| received > expected) {
             return Err(terminal("media body exceeds declared length"));
         }
@@ -2094,5 +2174,16 @@ mod content_disposition_tests {
             Some("été.gif")
         );
         assert_eq!(name("attachment"), None);
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    #[test]
+    fn formats_values_like_upstream() {
+        assert_eq!(super::format_value(999), "999");
+        assert_eq!(super::format_value(1234), "1.23k");
+        assert_eq!(super::format_value(1234567), "1.23M");
+        assert_eq!(super::format_value(98765432), "98.76M");
     }
 }

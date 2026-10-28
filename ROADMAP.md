@@ -1625,7 +1625,10 @@ Completed and skipped files are reported on standard output per
 `output.mode` (`auto`, `pipe`, `terminal`, `color`, `null` or custom
 `success`/`skip` formats; `output.colors`, `NO_COLOR`, `output.skip`)
 instead of `downloaded`/`skipped` lines on standard error.
-**Remaining:** log formats, `output.shorten`, download progress, most
+Downloads running longer than `downloader.progress` seconds (default 3)
+show upstream's `PERCENT SIZE RATE` line on standard error in terminal
+output modes (one download at a time owns the line).
+**Remaining:** log formats, `output.shorten`, most
 `downloader.ytdl` options, and relative paths
 resolve against the configuration directory rather than the working directory.
 
