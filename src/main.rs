@@ -753,6 +753,24 @@ async fn run(args: Args) -> Result<()> {
     if !args.print.is_empty() {
         args.quiet = true;
     }
+    if let Some(downloader) = globals
+        .and_then(|g| g.get("downloader"))
+        .and_then(serde_json::Value::as_object)
+    {
+        if args.limit_rate.is_none()
+            && let Some(rate) = downloader.get("rate")
+        {
+            // A "MIN-MAX" range uses its upper bound.
+            let text = match rate {
+                serde_json::Value::String(text) => text.rsplit('-').next().unwrap_or("").to_owned(),
+                other => other.to_string(),
+            };
+            args.limit_rate = parse_bytes(&text).ok();
+        }
+        if downloader.get("mtime") == Some(&serde_json::Value::Bool(false)) {
+            args.no_mtime = true;
+        }
+    }
     match globals.and_then(|g| g.get("skip")) {
         Some(serde_json::Value::Bool(false)) => args.no_skip = true,
         Some(serde_json::Value::String(value)) => {
@@ -2813,7 +2831,13 @@ async fn resolved_settings(
                 .insert(key.into(), value.clone().into());
         }
     }
-    let _ = GLOBAL_OPTIONS.set(config.globals().clone());
+    let _ = GLOBAL_OPTIONS.set({
+        let mut globals = config.globals().clone();
+        if let Some(downloader) = config.sections().get("downloader") {
+            globals.insert("downloader".into(), downloader.clone());
+        }
+        globals
+    });
     // Upstream `config2("whitelist-tags", "tags-whitelist")`, then blacklist.
     let global = |key: &str| {
         config
@@ -2856,10 +2880,29 @@ async fn resolved_settings(
     if let Some(options) = gallery_dl_rs::path_options::PathOptions::parse(&path_options)? {
         options.install();
     }
+    // Upstream `downloader` section defaults, below extractor settings.
+    let downloader = config
+        .sections()
+        .get("downloader")
+        .and_then(serde_json::Value::as_object);
+    let downloader_number = |key: &str| {
+        downloader
+            .and_then(|d| d.get(key))
+            .and_then(serde_json::Value::as_f64)
+            .filter(|value| *value >= 0.0)
+    };
+    let downloader_verify = downloader
+        .and_then(|d| d.get("verify"))
+        .and_then(serde_json::Value::as_bool)
+        != Some(false);
     let defaults = ConfigOptions {
         base_directory: Some(PathBuf::from("downloads")),
-        retries: Some(2),
-        timeout: Some(Duration::from_secs(60)),
+        retries: Some(downloader_number("retries").map_or(2, |retries| retries.min(10.0) as u8)),
+        timeout: Some(
+            downloader_number("timeout")
+                .filter(|timeout| *timeout > 0.0)
+                .map_or(Duration::from_secs(60), Duration::from_secs_f64),
+        ),
         username,
         password,
         site_options,
@@ -3126,7 +3169,7 @@ async fn resolved_settings(
         let post_selection = (post_range.is_some() || post_filter.is_some() || tags.is_some())
             .then(|| PostSelection::new(post_range, post_filter).with_tags(tags.clone()));
         let network = NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?
-            .with_insecure(args.no_check_certificate)
+            .with_insecure(args.no_check_certificate || !downloader_verify)
             .with_geo_bypass(args.xff.as_deref())?
             .with_source_address(args.source_address.or_else(|| {
                 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};

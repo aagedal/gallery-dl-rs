@@ -2076,12 +2076,17 @@ extraction without creating configured destinations or opening archives.
 The CLI also accepts fractional `--timeout` seconds; zero, non-finite values, and
 timeouts outside the monotonic clock's range or precision are rejected.
 
-Files are limited to 1 MiB. Unknown settings/categories, duplicate keys, null settings
+Files are limited to 1 MiB. Like upstream, unknown settings are ignored by
+dedicated extractors and passed to registry sites, inheriting from the root
+and `extractor` scopes; the `downloader` section's `rate`, `retries`,
+`timeout`, `verify` and `mtime` apply, and `output`/`cache` are ignored.
+Credentials (`username`, `password`, `api-key`, tokens, client IDs) remain
+confined to the categories that support them. Duplicate keys, null settings
 (except the optional browser-array placeholders described above),
 unsupported types, executable hooks, and unsupported conditional values fail
-explicitly. Native processor events are described below. Processor directory
-options support home/environment expansion without shell execution; the other
-native configuration paths remain literal. Filenames use the native template subset described below; archive
+explicitly. Native processor events are described below. `base-directory`,
+`archive`, cookie files and processor directories support `~` and
+environment variable expansion without shell execution. Filenames use the native template subset described below; archive
 files use the Rust archive format.
 
 Like upstream, `filename` may be an object mapping filter expressions to

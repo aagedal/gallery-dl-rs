@@ -496,9 +496,9 @@ async fn date_configuration_preserves_source_bounds_precedence_and_private_schem
     }
     std::fs::remove_file(root.path().join("backend.log")).unwrap();
     for contents in [
-        json!({"date-before":"2024-02-30", "private":"PRIVATE-COOKIE-DETAIL"}),
-        json!({"date-before":"2024-01-01T12:00:00+24:00", "private":"PRIVATE-COOKIE-DETAIL"}),
-        json!({"date-before":"10", "date-after":"10", "private":"PRIVATE-COOKIE-DETAIL"}),
+        json!({"date-before":"2024-02-30", "retries":"PRIVATE-COOKIE-DETAIL"}),
+        json!({"date-before":"2024-01-01T12:00:00+24:00", "retries":"PRIVATE-COOKIE-DETAIL"}),
+        json!({"date-before":"10", "date-after":"10", "retries":"PRIVATE-COOKIE-DETAIL"}),
     ] {
         std::fs::write(&config, serde_json::to_vec(&contents).unwrap()).unwrap();
         let result = output(

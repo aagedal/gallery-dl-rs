@@ -559,8 +559,111 @@ pub const GLOBAL_KEYS: &[&str] = &[
     "whitelist-tags",
 ];
 
-#[derive(Clone, Debug, Default)]
+/// Field names (after renaming) of a `Deserialize` struct, captured from
+/// serde's generated `deserialize_struct` call.
+fn struct_fields<T: serde::de::DeserializeOwned>() -> &'static [&'static str] {
+    use serde::de::{Error, Visitor, value::Error as E};
+    struct Capture(std::cell::Cell<&'static [&'static str]>);
+    impl<'de> Deserializer<'de> for &Capture {
+        type Error = E;
+        fn deserialize_any<V: Visitor<'de>>(self, _: V) -> std::result::Result<V::Value, E> {
+            Err(E::custom("capture"))
+        }
+        fn deserialize_struct<V: Visitor<'de>>(
+            self,
+            _: &'static str,
+            fields: &'static [&'static str],
+            _: V,
+        ) -> std::result::Result<V::Value, E> {
+            self.0.set(fields);
+            Err(E::custom("capture"))
+        }
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+            bytes byte_buf option unit unit_struct newtype_struct seq tuple
+            tuple_struct map enum identifier ignored_any
+        }
+    }
+    let capture = Capture(std::cell::Cell::new(&[]));
+    let _ = T::deserialize(&capture);
+    capture.0.get()
+}
+
+/// Move keys of `object` outside `known` into a map: upstream ignores
+/// options it does not know, and site options inherit like its
+/// `config.interpolate`.
+fn take_unknown(
+    object: &mut serde_json::Map<String, Value>,
+    known: &[&str],
+) -> serde_json::Map<String, Value> {
+    // Credentials stay confined to their categories: they remain in place so
+    // that typed decoding rejects them outside a supported scope.
+    const CONFINED: &[&str] = &[
+        "username",
+        "password",
+        "api-key",
+        "api-server",
+        "access-token",
+        "refresh-token",
+        "client-id",
+        "client-secret",
+        "user-id",
+    ];
+    let unknown: Vec<String> = object
+        .keys()
+        .filter(|key| !known.contains(&key.as_str()) && !CONFINED.contains(&key.as_str()))
+        .cloned()
+        .collect();
+    unknown
+        .into_iter()
+        .filter_map(|key| object.remove_entry(&key))
+        .collect()
+}
+
+/// Categories with dedicated native extractors and typed scopes.
+const DEDICATED_CATEGORIES: &[&str] = &[
+    "instagram",
+    "twitter",
+    "facebook",
+    "imgur",
+    "bluesky",
+    "reddit",
+    "danbooru",
+    "e621",
+    "gelbooru",
+    "safebooru",
+    "mastodon",
+    "mastodon.social",
+    "pawoo",
+    "baraag",
+    "kemono",
+    "coomer",
+    "pixeldrain",
+    "catbox",
+    "imgbox",
+    "postimg",
+    "tumblr",
+    "pixiv",
+    "pixiv-novel",
+    "deviantart",
+    "flickr",
+    "wallhaven",
+    "artstation",
+    "pinterest",
+    "newgrounds",
+    "furaffinity",
+    "weasyl",
+    "vsco",
+    "direct",
+];
+
+/// Upstream top-level sections other than `extractor` and `postprocessor`.
+pub const SECTIONS: &[&str] = &["downloader", "output", "cache"];
+
+#[derive(Clone, Default)]
 pub struct Config {
+    /// Upstream `downloader`, `output` and `cache` sections.
+    sections: serde_json::Map<String, Value>,
     /// Values of [`GLOBAL_KEYS`].
     globals: serde_json::Map<String, Value>,
     global: Options,
@@ -568,6 +671,19 @@ pub struct Config {
     categories: BTreeMap<String, Options>,
     classes: BTreeMap<(String, String), Options>,
     parent_keywords: Vec<String>,
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("sections", &"[redacted]")
+            .field("globals", &"[redacted]")
+            .field("global", &self.global)
+            .field("extractor", &self.extractor)
+            .field("categories", &self.categories)
+            .field("classes", &self.classes)
+            .finish_non_exhaustive()
+    }
 }
 
 // Separate structs deliberately avoid serde flatten: duplicate and unknown
@@ -1272,11 +1388,41 @@ impl Config {
                 }
             }
         }
+        let mut sections = serde_json::Map::new();
+        let mut root_extra = serde_json::Map::new();
+        let mut extractor_extra = serde_json::Map::new();
+        if let Some(object) = original.as_object_mut() {
+            for section in SECTIONS {
+                if let Some(value) = object.remove(*section) {
+                    sections.insert((*section).into(), value);
+                }
+            }
+            let mut known = struct_fields::<RawRoot>().to_vec();
+            known.push("extractor");
+            root_extra = take_unknown(object, &known);
+            if let Some(extractor) = object.get_mut("extractor").and_then(Value::as_object_mut) {
+                extractor_extra = take_unknown(extractor, struct_fields::<RawExtractor>());
+                let options = struct_fields::<RawOptions>();
+                for category in DEDICATED_CATEGORIES {
+                    let Some(fields) = extractor.get_mut(*category).and_then(Value::as_object_mut)
+                    else {
+                        continue;
+                    };
+                    let extra = take_unknown(fields, options);
+                    if !extra.is_empty() {
+                        let entry = site_options
+                            .entry(*category)
+                            .or_insert_with(|| std::sync::Arc::new(Default::default()));
+                        std::sync::Arc::make_mut(entry).extend(extra);
+                    }
+                }
+            }
+        }
         let stripped = serde_json::to_vec(&original)
             .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
         let root: RawRoot = serde_json::from_slice(&stripped)
             .map_err(|_| error("invalid native configuration JSON or unsupported option"))?;
-        let global = RawOptions {
+        let mut global = RawOptions {
             tag: None,
             artist: None,
             artist_search: None,
@@ -1369,7 +1515,7 @@ impl Config {
         }
         .resolve(directory, &parent_keywords)?;
         let extractor = root.extractor;
-        let defaults = RawOptions {
+        let mut defaults = RawOptions {
             tag: None,
             artist: None,
             artist_search: None,
@@ -1461,6 +1607,12 @@ impl Config {
             timeout: extractor.timeout,
         }
         .resolve(directory, &parent_keywords)?;
+        if !root_extra.is_empty() {
+            global.site_options = Some(std::sync::Arc::new(root_extra));
+        }
+        if !extractor_extra.is_empty() {
+            defaults.site_options = Some(std::sync::Arc::new(extractor_extra));
+        }
         let mut categories = BTreeMap::new();
         for (name, mut settings) in [
             ("instagram", extractor.instagram),
@@ -1660,6 +1812,7 @@ impl Config {
             })
             .collect::<Result<_>>()?;
         Ok(Self {
+            sections,
             globals,
             global,
             extractor: defaults,
@@ -1728,6 +1881,11 @@ impl Config {
         };
         Ok(resolved)
     }
+    /// Upstream `downloader`, `output` and `cache` sections.
+    pub fn sections(&self) -> &serde_json::Map<String, Value> {
+        &self.sections
+    }
+
     /// Process-wide settings ([`GLOBAL_KEYS`]).
     pub fn globals(&self) -> &serde_json::Map<String, Value> {
         &self.globals
@@ -2597,8 +2755,8 @@ fn cookie_source(field: Field, directory: &Path) -> Result<(Option<PathBuf>, Opt
         {
             return Err(invalid());
         }
-        let profile =
-            path(Field(Some(values[1].clone())), directory, "cookies")?.ok_or_else(invalid)?;
+        let profile = path_with(Field(Some(values[1].clone())), directory, "cookies", false)?
+            .ok_or_else(invalid)?;
         // Keep configuration and the CLI's explicit profile grammar aligned.
         let profile_text = profile.to_str().ok_or_else(invalid)?;
         crate::browser::FirefoxProfile::parse(&format!("firefox:{profile_text}"))
@@ -2610,25 +2768,38 @@ fn cookie_source(field: Field, directory: &Path) -> Result<(Option<PathBuf>, Opt
 }
 
 fn path(field: Field, directory: &Path, name: &str) -> Result<Option<PathBuf>> {
+    path_with(field, directory, name, true)
+}
+
+/// A local path; `expand` applies upstream's `~` and environment variable
+/// expansion first, otherwise such values are rejected.
+fn path_with(field: Field, directory: &Path, name: &str, expand: bool) -> Result<Option<PathBuf>> {
     let Some(value) = field.0 else {
         return Ok(None);
     };
     let invalid = || {
         error(format!(
-            "native configuration {name} must be a nonempty literal path without expansion"
+            "native configuration {name} must be a nonempty local path"
         ))
     };
     let value = value.as_str().ok_or_else(invalid)?;
+    // Like upstream `util.expand_path`: `~` and environment variables.
+    let value = if expand {
+        crate::postprocess::ugoira::expanded(value)
+    } else if value.starts_with('~') || value.contains('$') || value.contains(['{', '}']) {
+        return Err(invalid());
+    } else {
+        value.to_owned()
+    };
     if value.is_empty()
         || value.chars().any(char::is_control)
         || value.starts_with('~')
-        || value.contains('$')
         || value.contains(['{', '}'])
         || value.contains("://")
     {
         return Err(invalid());
     }
-    let value = Path::new(value);
+    let value = Path::new(&value);
     Ok(Some(if value.is_absolute() {
         value.into()
     } else {

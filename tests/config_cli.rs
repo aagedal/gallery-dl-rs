@@ -239,7 +239,7 @@ async fn archives_open_only_for_relevant_categories_and_cli_paths_override_confi
 async fn unsupported_config_fails_before_output_and_does_not_echo_private_input() {
     let root = tempfile::tempdir().unwrap();
     for value in [
-        serde_json::json!({"PRIVATE_KEY":"PRIVATE_VALUE"}),
+        serde_json::json!({"timeout":"PRIVATE_VALUE"}),
         serde_json::json!({"extractor":{"filename":"{PRIVATE_VALUE[}"}}),
     ] {
         let cfg = config(root.path(), value);
@@ -550,8 +550,12 @@ async fn default_native_configuration_is_discovered_and_can_be_ignored() {
     let xdg = root.path().join("xdg");
     std::fs::create_dir_all(xdg.join("gallery-dl-rs")).unwrap();
     std::fs::create_dir_all(&home).unwrap();
-    // An unknown setting proves the file was loaded, because parsing rejects it.
-    std::fs::write(xdg.join("gallery-dl-rs/config.json"), br#"{"bogus":1}"#).unwrap();
+    // An invalid setting proves the file was loaded, because parsing rejects it.
+    std::fs::write(
+        xdg.join("gallery-dl-rs/config.json"),
+        br#"{"retries":"bogus"}"#,
+    )
+    .unwrap();
     let run = |extra: &[&str], vars: &[(&str, &Path)]| {
         let mut command = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"));
         command
@@ -581,7 +585,7 @@ async fn default_native_configuration_is_discovered_and_can_be_ignored() {
     );
     // Without XDG_CONFIG_HOME, ~/.config is searched, then ~/.gallery-dl-rs.conf.
     success(&output(&mut run(&[], &[])).await);
-    std::fs::write(home.join(".gallery-dl-rs.conf"), br#"{"bogus":1}"#).unwrap();
+    std::fs::write(home.join(".gallery-dl-rs.conf"), br#"{"retries":"bogus"}"#).unwrap();
     assert!(!output(&mut run(&[], &[])).await.status.success());
     // An explicit environment path takes precedence; explicit flags bypass discovery.
     let valid = config(root.path(), serde_json::json!({"retries": 1}));
