@@ -56,7 +56,7 @@ fn malformed_lines_and_missing_files_report_failure_and_continue_privately() {
         .arg(&path)
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(4));
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
         "https://example.com/a.jpg\n"
@@ -196,7 +196,7 @@ fn file_only_native_initialization_failure_keeps_later_direct_input() {
         .arg(path)
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(4));
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
         "https://example.com/image.jpg\n"
@@ -222,7 +222,9 @@ fn file_only_download_uses_category_destination_metadata_and_archive() {
     .unwrap();
     let inputs = root.path().join("urls.txt");
     std::fs::write(&inputs, format!("{url}\n")).unwrap();
+    // Relative configuration paths resolve against the working directory.
     let output = binary()
+        .current_dir(root.path())
         .args(["--write-metadata", "--native-config"])
         .arg(&config)
         .arg("-i")
@@ -246,6 +248,7 @@ fn file_only_download_uses_category_destination_metadata_and_archive() {
     assert_eq!(count, 1);
     std::fs::remove_file(&saved).unwrap();
     let output = binary()
+        .current_dir(root.path())
         .args(["--native-config"])
         .arg(config)
         .arg("-i")
@@ -306,7 +309,7 @@ fn inline_options_apply_per_url_and_delete_removes_successful_lines() {
         .output()
         .unwrap();
     handle.join().unwrap();
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(4));
     assert!(root.path().join("out/direct/custom.jpg").is_file());
     assert_eq!(
         std::fs::read_dir(root.path().join("out/direct"))

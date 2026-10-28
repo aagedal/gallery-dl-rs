@@ -175,7 +175,7 @@ fn proxy_basic_auth_is_private_from_inspection_and_metadata() {
         .args([
             "--proxy",
             &proxy_url,
-            "-j",
+            "--dump-media-json",
             "http://origin.invalid/image.jpg",
         ])
         .output()
@@ -260,8 +260,8 @@ fn effective_user_agent_changes_request_identity_but_preserves_social_archive_id
     assert_ne!(first_media.identity(), second_media.identity());
     assert_ne!(first_media.archive_key(), second_media.archive_key());
     assert_ne!(
-        download::destination(std::path::Path::new("downloads"), first_media.as_ref()),
-        download::destination(std::path::Path::new("downloads"), &second_media)
+        download::destination(std::path::Path::new("gallery-dl"), first_media.as_ref()),
+        download::destination(std::path::Path::new("gallery-dl"), &second_media)
     );
     assert!(media.headers.is_empty());
     let mut social = media.clone();

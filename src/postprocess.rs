@@ -54,6 +54,8 @@ pub mod metadata;
 pub mod mtime;
 #[path = "postprocess_objects.rs"]
 pub(crate) mod objects;
+#[path = "postprocess_python.rs"]
+pub mod python;
 #[path = "postprocess_rename.rs"]
 pub mod rename;
 #[path = "postprocess_template.rs"]
@@ -87,6 +89,7 @@ pub enum Processor {
     Mtime(mtime::MtimeOptions),
     Hash(hash::HashOptions),
     Exec(exec::ExecOptions),
+    Python(python::PythonOptions),
     Classify(classify::ClassifyOptions),
     /// Re-evaluate the directory format with the current keywords.
     Directory,
@@ -224,7 +227,8 @@ impl Specification {
             "metadata" => Processor::Metadata(metadata::MetadataOptions::parse(&options, base)?),
             "mtime" => Processor::Mtime(mtime::MtimeOptions::parse(&options)?),
             "hash" => Processor::Hash(hash::HashOptions::parse(&options)?),
-            "exec" => Processor::Exec(exec::ExecOptions::parse(&options)?),
+            "exec" => Processor::Exec(exec::ExecOptions::parse(&options, base)?),
+            "python" => Processor::Python(python::PythonOptions::parse(&options, base)?),
             "classify" => Processor::Classify(classify::ClassifyOptions::parse(&options)?),
             "directory" => Processor::Directory,
             "zip" => Processor::Zip(zipfile::ZipOptions::parse(&options)?),
@@ -233,7 +237,7 @@ impl Specification {
             _ => {
                 return Err(error(
                     "unsupported native postprocessor; supported: ugoira, metadata, mtime, hash, \
-                     exec, classify, directory, zip, rename, compare",
+                     exec, python, classify, directory, zip, rename, compare",
                 ));
             }
         };
@@ -798,7 +802,7 @@ impl Postprocessors {
                         .as_ref()
                         .map(|name| name.to_string_lossy().into_owned());
                     options
-                        .run(
+                        .run_archived(
                             context,
                             exec::ExecPaths {
                                 path: paths.realpath.as_deref(),
@@ -806,7 +810,14 @@ impl Postprocessors {
                                 directory: Some(&paths.directory),
                                 filename: filename.as_deref(),
                             },
+                            media,
+                            root,
                         )
+                        .await?
+                }
+                Processor::Python(options) => {
+                    options
+                        .run_archived(context, media, root, &paths.directory)
                         .await?
                 }
                 // Path-changing processors act on file hooks only.
@@ -874,13 +885,20 @@ impl Postprocessors {
                 Processor::Hash(options) => rebuild |= options.run(context, path).await?,
                 Processor::Exec(options) => {
                     options
-                        .run(
+                        .run_archived(
                             context,
                             exec::ExecPaths {
                                 path: Some(path),
                                 ..Default::default()
                             },
+                            media,
+                            root,
                         )
+                        .await?
+                }
+                Processor::Python(options) => {
+                    options
+                        .run_archived(context, media, root, path.parent().unwrap_or(root))
                         .await?
                 }
                 Processor::Classify(_)

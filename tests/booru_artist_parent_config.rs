@@ -186,7 +186,7 @@ fn cli_loads_class_scoped_templates_with_a_parent_key_declared_in_another_scope(
         String::from_utf8(output.stdout).unwrap().trim(),
         "https://example.invalid/file.jpg"
     );
-    assert!(!root.path().join("downloads").exists());
+    assert!(!root.path().join("gallery-dl").exists());
 }
 
 #[test]

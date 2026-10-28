@@ -38,12 +38,13 @@ fn metadata_is_opt_in_and_conflicts_with_inspection_modes() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(output.stdout.is_empty());
+    // The skipped file is reported on standard output as `# PATH`.
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("# "));
     assert_eq!(
         std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
         2
     );
-    for mode in ["-j", "-g"] {
+    for mode in ["--dump-media-json", "-g"] {
         let output = binary()
             .args(["--write-metadata", mode, url])
             .output()
@@ -111,7 +112,7 @@ fn partial_input_failure_keeps_successful_results_and_returns_failure() {
 fn json_inspection_keeps_input_order_and_deduplicates_after_failures() {
     let output = binary()
         .args([
-            "-j",
+            "--dump-media-json",
             "https://example.com/b.jpg",
             "https://example.com/page",
             "https://example.com/a.jpg",
@@ -119,11 +120,38 @@ fn json_inspection_keeps_input_order_and_deduplicates_after_failures() {
         ])
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(4));
     let items: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(items.as_array().unwrap().len(), 2);
     assert_eq!(items[0]["url"], "https://example.com/b.jpg");
     assert_eq!(items[1]["url"], "https://example.com/a.jpg");
+}
+
+#[test]
+fn dump_json_prints_upstream_messages() {
+    let output = binary()
+        .args(["-j", "https://example.com/dir/a%C3%A9.JPG"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    // `output.ascii` defaults to true.
+    assert!(stdout.is_ascii() && stdout.contains("\\u00e9"), "{stdout}");
+    let messages: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(messages[0][0], 2);
+    assert_eq!(messages[1][0], 3);
+    assert_eq!(messages[1][1], "https://example.com/dir/a%C3%A9.JPG");
+    let file = &messages[1][2];
+    assert_eq!(file["filename"], "a\u{e9}");
+    assert_eq!(file["extension"], "jpg");
+    assert_eq!(file["path"], "dir");
+    assert!(
+        file.as_object()
+            .unwrap()
+            .keys()
+            .all(|k| !k.starts_with('_'))
+    );
+    assert!(messages[0][1].get("filename").is_none());
 }
 
 #[test]
@@ -197,7 +225,7 @@ fn native_mode_still_lists_direct_links_without_backend() {
 #[test]
 fn manifests_are_inspectable_but_not_downloaded() {
     let url = "http://127.0.0.1:1/stream.M3U8?token=example";
-    let output = binary().args(["-j", url]).output().unwrap();
+    let output = binary().args(["--dump-media-json", url]).output().unwrap();
     assert!(output.status.success());
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(json[0]["job"]["kind"], "manifest");
@@ -543,7 +571,7 @@ mod cancellation {
         let script = waiting_backend(root.path(), "[]");
         let item = gallery_dl_rs::extract::direct(&gallery_dl_rs::extract::http_url(&url).unwrap())
             .unwrap();
-        let destination = root.path().join("downloads");
+        let destination = root.path().join("gallery-dl");
         let saved = gallery_dl_rs::download::destination(&destination, &item);
         let mut child = Running(Some(
             binary()
@@ -579,10 +607,12 @@ mod cancellation {
         std::fs::write(root.path().join("backend.release"), b"").unwrap();
         wait_until(|| child.0.as_mut().unwrap().try_wait().unwrap().is_some());
         let output = child.0.take().unwrap().wait_with_output().unwrap();
-        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.status.code(), Some(16));
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("2 operation(s) failed"), "{stderr}");
-        assert_eq!(stderr.matches("downloaded ").count(), 1, "{stderr}");
+        // Downloaded files are reported on standard output, like upstream.
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(stdout.lines().count(), 1, "{stdout}");
         // Duplicate input must not even issue another request after extraction fails.
         assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
     }
@@ -600,7 +630,7 @@ mod cancellation {
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
         let item = gallery_dl_rs::extract::direct(&gallery_dl_rs::extract::http_url(&url).unwrap())
             .unwrap();
-        let destination = root.path().join("downloads");
+        let destination = root.path().join("gallery-dl");
         let saved = gallery_dl_rs::download::destination(&destination, &item);
         let mut child = Running(Some(
             binary()
@@ -624,7 +654,7 @@ mod cancellation {
         wait_until(|| child.0.as_mut().unwrap().try_wait().unwrap().is_some());
         let output = child.0.take().unwrap().wait_with_output().unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.status.code(), Some(4));
         assert!(
             stderr.contains("need yt-dlp or yt-dlp-rs on PATH"),
             "{stderr}"
@@ -640,7 +670,7 @@ mod cancellation {
         let url = format!("http://{}/photo.jpg", listener.local_addr().unwrap());
         let root = tempfile::tempdir().unwrap();
         let script = waiting_backend(root.path(), "[]");
-        let destination = root.path().join("downloads");
+        let destination = root.path().join("gallery-dl");
         let child = Running(Some(
             binary()
                 .arg("-d")
@@ -807,7 +837,7 @@ fn native_twitter_reports_authentication_without_launching_backend_and_continues
             ])
             .output()
             .unwrap();
-        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.status.code(), Some(4));
         assert_eq!(
             String::from_utf8(output.stdout).unwrap(),
             "https://example.com/image.jpg\n"
@@ -859,7 +889,7 @@ fn native_session_initialization_failure_does_not_block_unrelated_direct_inputs(
             ])
             .output()
             .unwrap();
-        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.status.code(), Some(4));
         assert_eq!(
             String::from_utf8(output.stdout).unwrap(),
             "https://example.com/image.jpg\n"
@@ -1361,7 +1391,7 @@ fn social_dedup_preserves_distinct_files_and_request_context_across_inputs() {
             .env("SOCIAL_ROWS", &fixture)
             .arg("--extractor-command")
             .arg(&script)
-            .args(["-j", source, other_source])
+            .args(["--dump-media-json", source, other_source])
             .output()
             .unwrap();
         assert!(
@@ -1831,7 +1861,7 @@ fn compatibility_community_archives_keep_scoped_files_distinct_from_ordinary_pos
         .arg("--extractor-command")
         .arg(&backend)
         .args([
-            "-j",
+            "--dump-media-json",
             "https://x.com/i/communities/42",
             "https://x.com/i/communities",
         ])

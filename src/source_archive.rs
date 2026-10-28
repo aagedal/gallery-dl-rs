@@ -174,14 +174,29 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
         let format = match target {
             crate::imgur::Target::Image(_) => "{id}",
             crate::imgur::Target::Album(_) => "{album[id]}_{id}",
-            crate::imgur::Target::Gallery(_) => "",
+            crate::imgur::Target::Gallery(_) | crate::imgur::Target::Listing(_) => "",
         };
         return Some(descriptor("imgur", format));
     }
     if let Ok(target) = crate::deviantart::target(url) {
         let format = match target {
             crate::deviantart::Target::Folder { .. } => "F_{folder[uuid]}_{index}.{extension}",
-            crate::deviantart::Target::Deviation { .. } => "g_{_username}_{index}.{extension}",
+            crate::deviantart::Target::Deviation { .. }
+            | crate::deviantart::Target::DeviationId(_) => "g_{_username}_{index}.{extension}",
+            crate::deviantart::Target::Favorites { folder: None, .. } => {
+                "f_{_username}_{index}.{extension}"
+            }
+            crate::deviantart::Target::Favorites { .. } => {
+                "C_{collection[uuid]}_{index}.{extension}"
+            }
+            crate::deviantart::Target::Tag(_) => "T_{search_tags}_{index}.{extension}",
+            crate::deviantart::Target::Avatar(_) => "a_{_username}_{index}",
+            crate::deviantart::Target::Banner(_) => "b_{index}",
+            crate::deviantart::Target::Following(_) => "",
+            crate::deviantart::Target::Journals(_) => "j_{_username}_{index}.{extension}",
+            crate::deviantart::Target::Stash(..) => "{index}.{extension}",
+            crate::deviantart::Target::Statuses(_) => "S_{_username}_{index}.{extension}",
+            crate::deviantart::Target::Watch { .. } => "g_{_username}_{index}.{extension}",
             crate::deviantart::Target::Gallery(_) => {
                 if path.split('/').any(|part| part == "gallery") {
                     "g_{_username}_{index}.{extension}"
@@ -197,6 +212,11 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
             crate::flickr::Target::Photo { .. } => "{id}",
             crate::flickr::Target::Album { .. } => "a_{album[id]}_{id}",
             crate::flickr::Target::User { .. } => "u_{user[nsid]}_{id}",
+            crate::flickr::Target::Albums { .. } => "",
+            crate::flickr::Target::Favorites { .. } => "f_{user[nsid]}_{id}",
+            crate::flickr::Target::Gallery { .. } => "g_{gallery[id]}_{id}",
+            crate::flickr::Target::Group { .. } => "G_{group[nsid]}_{id}",
+            crate::flickr::Target::Search { .. } => "s_{search}_{id}",
         };
         return Some(descriptor("flickr", format));
     }
@@ -237,6 +257,7 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
         use crate::imagehosts::Target;
         let (category, format) = match target {
             Target::PixeldrainFile(_) | Target::PixeldrainList(..) => ("pixeldrain", "{id}"),
+            Target::PixeldrainFolder(_) => ("pixeldrain", "{path}_{num}"),
             Target::CatboxAlbum(_) => ("catbox", "{album_id}_{filename}"),
             Target::ImgboxImage(_) => ("imgbox", "{image_key}"),
             Target::ImgboxGallery(_) => ("imgbox", "{gallery_key}_{image_key}"),
@@ -271,6 +292,8 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
                 };
             let format = match target {
                 crate::booru::Target::Post { .. } => "{id}",
+                crate::booru::Target::Random { .. } => "t_{search_tags}_{id}",
+                crate::booru::Target::MediaAsset { .. } => "m{id}",
                 crate::booru::Target::Tags { .. } => {
                     crate::booru::source_search_tags(site, url)?;
                     "t_{search_tags}_{id}"
@@ -520,8 +543,7 @@ mod tests {
             for_url(&Url::parse("https://example.invalid/not-a-native-route").unwrap()).is_none()
         );
         assert!(
-            for_url(&Url::parse("https://www.flickr.com/photos/example/favorites").unwrap())
-                .is_none()
+            for_url(&Url::parse("https://www.flickr.com/photos/example/stats").unwrap()).is_none()
         );
         assert!(for_url(&Url::parse("https://user:PRIVATE@imgur.com/abcde").unwrap()).is_none());
     }

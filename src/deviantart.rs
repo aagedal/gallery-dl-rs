@@ -89,6 +89,36 @@ pub enum Target {
         id: String,
         name: Option<String>,
     },
+    /// A bare deviation ID (`/view/ID`, `fav.me/dB36`, `view.php?id=`).
+    DeviationId(String),
+    /// `USER/favourites[/all]`, or one collection folder.
+    Favorites {
+        user: String,
+        folder: Option<(String, Option<String>)>,
+    },
+    Tag(String),
+    Avatar(String),
+    Banner(String),
+    /// `USER/watching`: watched users, queued as user children.
+    Following(String),
+    /// `USER/journal/`, `USER/posts[/journals]`: the user's journals.
+    Journals(String),
+    /// `watch/deviations` (`notifications/watch`) or `watch/posts`: needs a
+    /// `refresh-token`.
+    Watch {
+        posts: bool,
+    },
+    /// `USER/posts/statuses`: shared deviations and status texts.
+    Statuses(String),
+    /// A Sta.sh item or folder; `true` for legacy `sta.sh` links.
+    Stash(String, bool),
+}
+
+/// Upstream `util.b36decode`.
+fn base36(text: &str) -> Option<u64> {
+    (!text.is_empty() && text.len() <= 12)
+        .then(|| u64::from_str_radix(text, 36).ok())
+        .flatten()
 }
 
 /// Whether a URL is a DeviantArt page handled by this extractor.
@@ -114,6 +144,65 @@ pub fn target(url: &Url) -> Result<Target> {
         .path_segments()
         .map(|s| s.filter(|s| !s.is_empty()).collect())
         .unwrap_or_default();
+    // Upstream also accepts the fxdeviantart.com embed mirror.
+    let host = host
+        .strip_suffix("fxdeviantart.com")
+        .map(|prefix| format!("{prefix}deviantart.com"))
+        .unwrap_or_else(|| host.to_owned());
+    let host = host.as_str();
+    if host == "sta.sh"
+        || matches!(host, "www.deviantart.com" | "deviantart.com")
+            && segments.first() == Some(&"stash")
+    {
+        let id = if host == "sta.sh" {
+            segments.first()
+        } else {
+            segments.get(1)
+        };
+        return id
+            .filter(|id| {
+                (1..=32).contains(&id.len())
+                    && id
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+            })
+            .map(|id| Target::Stash((*id).to_owned(), host == "sta.sh"))
+            .ok_or_else(unsupported);
+    }
+    if host == "fav.me" {
+        return match segments.as_slice() {
+            [code] => code
+                .strip_prefix('d')
+                .and_then(base36)
+                .map(|id| Target::DeviationId(id.to_string()))
+                .ok_or_else(unsupported),
+            _ => Err(unsupported()),
+        };
+    }
+    if matches!(host, "www.deviantart.com" | "deviantart.com") {
+        let digits =
+            |id: &str| (1..=20).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit());
+        match segments.as_slice() {
+            ["view" | "deviation", id] if digits(id) => {
+                return Ok(Target::DeviationId((*id).into()));
+            }
+            ["view.php" | "view-full.php"] => {
+                return url
+                    .query_pairs()
+                    .find(|(k, _)| k == "id")
+                    .map(|(_, v)| v.into_owned())
+                    .filter(|id| digits(id))
+                    .map(Target::DeviationId)
+                    .ok_or_else(unsupported);
+            }
+            ["tag", tag] => return Ok(Target::Tag(crate::sites::percent_decode(tag))),
+            ["watch", "deviations"] | ["notifications", "watch"] => {
+                return Ok(Target::Watch { posts: false });
+            }
+            ["watch", "posts"] => return Ok(Target::Watch { posts: true }),
+            _ => {}
+        }
+    }
     let (user, rest) = match host {
         "www.deviantart.com" | "deviantart.com" => match segments.split_first() {
             Some((user, rest)) if !RESERVED.contains(&user.to_ascii_lowercase().as_str()) => {
@@ -133,7 +222,34 @@ pub fn target(url: &Url) -> Result<Target> {
         return Err(unsupported());
     }
     match rest {
-        [] | ["gallery"] | ["gallery", "all"] => Ok(Target::Gallery(user)),
+        ["journal", slug] if numeric_id(slug).is_some() => {
+            return Ok(Target::DeviationId(
+                numeric_id(slug).unwrap_or_default().to_owned(),
+            ));
+        }
+        ["posts", "statuses"] => return Ok(Target::Statuses(user)),
+        ["journal"] | ["posts"] | ["posts", "journals"] => return Ok(Target::Journals(user)),
+        ["avatar", ..] => return Ok(Target::Avatar(user)),
+        ["banner" | "background", ..] => return Ok(Target::Banner(user)),
+        ["watching", ..] => return Ok(Target::Following(user)),
+        ["about"] if url.fragment() == Some("watching") => return Ok(Target::Following(user)),
+        // `?catpath=/` and `/all` select every favourite, like the bare page.
+        ["favourites"] | ["favourites", "all"] => {
+            return Ok(Target::Favorites { user, folder: None });
+        }
+        ["favourites", id, name, ..] => {
+            return Ok(Target::Favorites {
+                folder: Some((
+                    (*id).to_owned(),
+                    Some(crate::sites::percent_decode(name).to_ascii_lowercase()),
+                )),
+                user,
+            });
+        }
+        _ => {}
+    }
+    match rest {
+        [] | ["gallery"] | ["gallery", "all" | "recommended-for-you"] => Ok(Target::Gallery(user)),
         ["art", slug] if numeric_id(slug).is_some() => Ok(Target::Deviation {
             user,
             slug: slug.to_string(),
@@ -300,6 +416,7 @@ pub fn parse_page(body: &Value) -> Result<Page> {
 }
 
 pub struct DeviantArt {
+    refresh_token: Option<String>,
     client: Client,
     network: NetworkOptions,
     root: Url,
@@ -314,6 +431,8 @@ pub struct DeviantArt {
 
 struct ListingState {
     user: String,
+    /// The API listing: `gallery`, `collections` or `browse/tags`.
+    kind: &'static str,
     folder: Option<String>,
     offset: Option<u64>,
     pages: usize,
@@ -323,6 +442,7 @@ struct ListingState {
 impl DeviantArt {
     pub fn new(timeout: Duration) -> Result<Self> {
         Ok(Self {
+            refresh_token: None,
             client: NetworkOptions::default().client(USER_AGENT, timeout)?,
             network: NetworkOptions::default(),
             root: Url::parse("https://www.deviantart.com/").expect("static URL"),
@@ -344,6 +464,13 @@ impl DeviantArt {
     }
 
     /// Override upstream's public OAuth client.
+    /// Upstream `refresh-token` (from `oauth:deviantart`): act as the user,
+    /// needed for the `watch` views.
+    pub fn with_refresh_token(mut self, token: Option<&str>) -> Self {
+        self.refresh_token = token.filter(|t| !t.is_empty()).map(str::to_owned);
+        self
+    }
+
     pub fn with_credentials(mut self, id: Option<&str>, secret: Option<&str>) -> Self {
         if let Some(id) = id {
             self.client_id = id.into();
@@ -382,11 +509,18 @@ impl DeviantArt {
 
     async fn authenticate(&self) -> Result<String> {
         let endpoint = self.root.join("oauth2/token").expect("static path");
-        let body = url::form_urlencoded::Serializer::new(String::new())
-            .append_pair("grant_type", "client_credentials")
-            .append_pair("client_id", &self.client_id)
-            .append_pair("client_secret", &self.client_secret)
-            .finish();
+        let body = {
+            let mut form = url::form_urlencoded::Serializer::new(String::new());
+            match &self.refresh_token {
+                Some(token) => form
+                    .append_pair("grant_type", "refresh_token")
+                    .append_pair("refresh_token", token),
+                None => form.append_pair("grant_type", "client_credentials"),
+            };
+            form.append_pair("client_id", &self.client_id)
+                .append_pair("client_secret", &self.client_secret)
+                .finish()
+        };
         let reply = self
             .request(&endpoint, || {
                 self.client
@@ -482,19 +616,75 @@ impl DeviantArt {
                 .await
                 .ok();
         }
-        let mut media = parse_deviation(deviation, download.as_ref())?;
+        let mut media = match parse_deviation(deviation, download.as_ref()) {
+            Some(media) => media,
+            None => self.journal(deviation).await?,
+        };
         self.network.apply_media(&mut media);
         Some(media)
     }
 
-    async fn folder_uuid(&self, user: &str, id: &str, name: Option<&str>) -> Result<String> {
+    /// Literature and journals (upstream `journals: "html"`): the
+    /// `deviation/content` HTML in a minimal page, saved as `.htm`.
+    async fn journal(&self, deviation: &Value) -> Option<Media> {
+        deviation.get("excerpt")?;
+        let uuid = string(deviation, "deviationid").filter(|id| valid_uuid(id))?;
+        let mut endpoint = self.api("deviation/content");
+        endpoint.query_pairs_mut().append_pair("deviationid", uuid);
+        let content = self.get(&endpoint).await.ok()?;
+        let html = content.get("html").and_then(Value::as_str)?;
+        let title = string(deviation, "title").unwrap_or_default();
+        let escape = |text: &str| {
+            text.replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+                .replace('"', "&quot;")
+        };
+        let css = content
+            .get("css")
+            .and_then(Value::as_str)
+            .map(|css| format!("<style>{css}</style>"))
+            .unwrap_or_default();
+        let page = format!(
+            "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<title>{}</title>\n{css}\n</head>\n<body>\n<h1>{}</h1>\n{html}\n</body>\n</html>\n",
+            escape(title),
+            escape(title),
+        );
+        let url = string(deviation, "url")
+            .and_then(|url| Url::parse(url).ok())
+            .unwrap_or_else(|| self.root.clone());
+        // Reuse the deviation metadata parser with a placeholder file
+        // source; the URL and job are replaced below.
+        let mut media = parse_deviation(
+            &{
+                let mut fake = deviation.clone();
+                fake["content"] = serde_json::json!({
+                    "src": "https://images-wixmp-ed30a86b8c4ca887773594c2.wixmp.com/journal.htm"
+                });
+                fake
+            },
+            None,
+        )?;
+        media.url = url;
+        media.job = MediaJob::InlineText { data: page };
+        media.filename = format!("{uuid}.htm");
+        Some(media)
+    }
+
+    async fn folder_uuid(
+        &self,
+        kind: &str,
+        user: &str,
+        id: &str,
+        name: Option<&str>,
+    ) -> Result<String> {
         if valid_uuid(id) {
             return Ok(id.to_owned());
         }
         let wanted = name.map(slugify).unwrap_or_default();
         let mut offset = 0;
         for _ in 0..MAX_PAGES {
-            let mut endpoint = self.api("gallery/folders");
+            let mut endpoint = self.api(&format!("{kind}/folders"));
             endpoint
                 .query_pairs_mut()
                 .append_pair("username", user)
@@ -518,22 +708,71 @@ impl DeviantArt {
 
     async fn next_page(&self, state: &mut ListingState) -> Result<()> {
         let offset = state.offset.take().unwrap_or(0);
-        let path = match &state.folder {
-            Some(folder) => format!("gallery/{folder}"),
-            None => "gallery/all".into(),
+        let path = match (&state.folder, state.kind) {
+            (_, "browse/tags") => "browse/tags".to_owned(),
+            (_, "user/profile/posts" | "statuses") => "user/profile/posts".to_owned(),
+            (_, kind @ ("browse/deviantsyouwatch" | "browse/posts/deviantsyouwatch")) => {
+                kind.to_owned()
+            }
+            (Some(folder), kind) => format!("{kind}/{folder}"),
+            (None, kind) => format!("{kind}/all"),
         };
         let mut endpoint = self.api(&path);
-        endpoint
-            .query_pairs_mut()
-            .append_pair("username", &state.user)
-            .append_pair("offset", &offset.to_string())
-            .append_pair("limit", PAGE_SIZE);
+        {
+            let mut query = endpoint.query_pairs_mut();
+            if state.kind == "browse/tags" {
+                query.append_pair("tag", &state.user);
+            } else if state.kind.starts_with("browse/") {
+                // `deviantsyouwatch` lists the authenticated user's feed.
+            } else {
+                query.append_pair("username", &state.user);
+            }
+            query
+                .append_pair("offset", &offset.to_string())
+                // Collections allow at most 24 results per page.
+                .append_pair(
+                    "limit",
+                    if state.kind == "collections" {
+                        "24"
+                    } else {
+                        PAGE_SIZE
+                    },
+                );
+        }
         let page = parse_page(&self.get(&endpoint).await?)?;
         state.pages += 1;
         if state.pages < MAX_PAGES {
             state.offset = page.next.filter(|next| *next > offset);
         }
-        for deviation in &page.results {
+        if state.kind == "statuses" {
+            for status in &page.results {
+                if string(status, "url").is_some_and(|url| url.contains("/status-update/")) {
+                    for media in self.status_media(status, 0).await {
+                        state.pending.extend(group(vec![media], "deviantart"));
+                    }
+                }
+            }
+            return Ok(());
+        }
+        // Upstream `unpack`: watched posts wrap journals.
+        let unpacked: Vec<Value>;
+        let results = if state.kind == "browse/posts/deviantsyouwatch" {
+            unpacked = page
+                .results
+                .iter()
+                .filter_map(|item| item.get("journal").cloned())
+                .collect();
+            &unpacked
+        } else {
+            &page.results
+        };
+        for deviation in results {
+            // Profile posts also contain status updates; keep journals.
+            if state.kind == "user/profile/posts"
+                && !string(deviation, "url").is_some_and(|url| url.contains("/journal/"))
+            {
+                continue;
+            }
             if let Some(media) = self.media(deviation).await {
                 state.pending.extend(group(vec![media], "deviantart"));
             }
@@ -545,13 +784,341 @@ impl DeviantArt {
         crate::event::media_only(self.events(url))
     }
 
+    /// Upstream `process_status`: shared deviations and statuses, then the
+    /// status text itself (unless deleted) as an `.htm` file.
+    fn status_media<'a>(
+        &'a self,
+        status: &'a Value,
+        depth: u8,
+    ) -> futures_util::future::BoxFuture<'a, Vec<Media>> {
+        Box::pin(async move {
+            let mut out = Vec::new();
+            for item in status
+                .get("items")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if let Some(deviation) = item.get("deviation")
+                    && let Some(media) = self.media(deviation).await
+                {
+                    out.push(media);
+                }
+                if let Some(shared) = item.get("status").filter(|_| depth < 8) {
+                    out.extend(self.status_media(shared, depth + 1).await);
+                }
+            }
+            if status.get("is_deleted").and_then(Value::as_bool) == Some(true) {
+                return out;
+            }
+            let Some(id) = string(status, "statusid").filter(|id| valid_uuid(id)) else {
+                return out;
+            };
+            let body = string(status, "body").unwrap_or_default();
+            let url = string(status, "url")
+                .and_then(|url| Url::parse(url).ok())
+                .unwrap_or_else(|| self.root.clone());
+            let username = status
+                .get("author")
+                .and_then(|a| string(a, "username"))
+                .map(Into::into);
+            let timestamp = string(status, "ts").and_then(|ts| crate::date::parse_date(ts).ok());
+            let mut media = Media {
+                filename: format!("{id}.htm"),
+                job: MediaJob::InlineText {
+                    data: format!(
+                        "<!DOCTYPE html>\n<html>\n<head><meta charset=\"utf-8\"><title>Status Update</title></head>\n<body>\n{body}\n</body>\n</html>\n"
+                    ),
+                },
+                category: "deviantart".into(),
+                metadata: Some(PostMetadata {
+                    post_id: id.to_owned(),
+                    media_id: id.to_owned(),
+                    username,
+                    caption: Some("Status Update".into()),
+                    timestamp,
+                    index: 1,
+                    ..PostMetadata::default()
+                }),
+                url,
+                headers: BTreeMap::new(),
+                handoff: BTreeMap::new(),
+            };
+            self.network.apply_media(&mut media);
+            out.push(media);
+            out
+        })
+    }
+
+    /// `user/profile/NAME`.
+    async fn profile(&self, user: &str) -> Result<Value> {
+        self.get(&self.api(&format!("user/profile/{user}"))).await
+    }
+
+    fn once_events<'a, F>(&'a self, future: F) -> BoxStream<'a, Result<ExtractionEvent>>
+    where
+        F: std::future::Future<Output = Result<Vec<Media>>> + Send + 'a,
+    {
+        stream::once(future)
+            .map(|result| match result {
+                Ok(media) => stream::iter(
+                    media
+                        .into_iter()
+                        .flat_map(|media| group(vec![media], "deviantart"))
+                        .map(Ok),
+                )
+                .boxed(),
+                Err(e) => stream::once(async move { Err(e) }).boxed(),
+            })
+            .flatten()
+            .boxed()
+    }
+
+    /// Upstream `DeviantartAvatarExtractor`: the big avatar unless it is
+    /// DeviantArt's default.
+    async fn avatar(&self, user: &str) -> Result<Vec<Media>> {
+        let profile = self.profile(user).await?;
+        let author = profile.get("user").cloned().unwrap_or(Value::Null);
+        let Some(icon) = string(&author, "usericon") else {
+            return Ok(Vec::new());
+        };
+        if icon == "https://a.deviantart.net/avatars/default.gif" {
+            return Ok(Vec::new());
+        }
+        let index = icon.rsplit_once('?').map_or("0", |(_, index)| index);
+        let url = icon.replacen("/avatars/", "/avatars-big/", 1);
+        let url = Url::parse(&url).map_err(|_| error("DeviantArt returned an invalid avatar"))?;
+        let ext = extension(&url);
+        let id = format!("a_{}_{index}", user.to_ascii_lowercase());
+        let mut media = Media {
+            filename: format!("{id}.{ext}"),
+            job: MediaJob::DirectHttp,
+            category: "deviantart".into(),
+            metadata: Some(PostMetadata {
+                post_id: id.clone(),
+                media_id: id,
+                username: string(&author, "username").map(Into::into),
+                caption: Some("avatar".into()),
+                index: 1,
+                ..PostMetadata::default()
+            }),
+            url,
+            headers: BTreeMap::new(),
+            handoff: BTreeMap::new(),
+        };
+        self.network.apply_media(&mut media);
+        Ok(vec![media])
+    }
+
+    /// Upstream `DeviantartBackgroundExtractor`: the profile's cover deviation.
+    async fn banner(&self, user: &str) -> Result<Vec<Media>> {
+        let profile = self.profile(user).await?;
+        let Some(cover) = profile.pointer("/cover_deviation/cover_deviation") else {
+            return Ok(Vec::new());
+        };
+        Ok(self.media(cover).await.into_iter().collect())
+    }
+
+    /// GET a DeviantArt page, following redirects that stay on DeviantArt
+    /// (or sta.sh); returns the final URL and body.
+    async fn fetch_page(&self, mut page: Url) -> Result<(Url, Vec<u8>)> {
+        for _ in 0..5 {
+            let response = tokio::time::timeout(
+                self.timeout,
+                self.client
+                    .get(page.clone())
+                    .timeout(self.request_timeout)
+                    .send(),
+            )
+            .await
+            .map_err(|_| error("native DeviantArt extraction timed out"))?
+            .map_err(|_| error("DeviantArt request failed; check network access"))?;
+            let status = response.status();
+            if status.is_redirection() {
+                page = response
+                    .headers()
+                    .get(reqwest::header::LOCATION)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| page.join(v).ok())
+                    .filter(|next| {
+                        next.scheme() == "https"
+                            && next.host_str().is_some_and(|h| {
+                                h == "deviantart.com"
+                                    || h.ends_with(".deviantart.com")
+                                    || h == "sta.sh"
+                            })
+                    })
+                    .ok_or_else(|| error("DeviantArt responded with an unexpected redirect"))?;
+                continue;
+            }
+            if !status.is_success() {
+                return Err(status_error(status));
+            }
+            let body = response
+                .bytes()
+                .await
+                .map_err(|_| error("could not read DeviantArt response"))?;
+            return Ok((page, body.to_vec()));
+        }
+        Err(error("DeviantArt redirected too often"))
+    }
+
+    /// Upstream `DeviantartStashExtractor`: `0…` IDs are deviations; other
+    /// IDs are folders whose linked items are extracted recursively.
+    fn stash(&self, id: String, legacy: bool, depth: u8) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::once(async move {
+            let url = if legacy && id.starts_with('2') {
+                format!("https://sta.sh/{id}")
+            } else {
+                format!("https://www.deviantart.com/stash/{id}")
+            };
+            let (final_url, body) = self
+                .fetch_page(Url::parse(&url).map_err(|_| error("invalid stash ID"))?)
+                .await?;
+            let id = final_url
+                .path_segments()
+                .and_then(|mut s| s.next_back().map(str::to_owned))
+                .unwrap_or(id);
+            let page = String::from_utf8_lossy(&body).into_owned();
+            if id.starts_with('0')
+                && let Some(uuid) = page
+                    .split("//deviation/")
+                    .nth(1)
+                    .and_then(|rest| rest.get(..36))
+                    .filter(|uuid| valid_uuid(uuid))
+            {
+                let deviation = self.get(&self.api(&format!("deviation/{uuid}"))).await?;
+                let media = self.media(&deviation).await.into_iter().collect::<Vec<_>>();
+                return Ok::<_, crate::Error>(Err(media));
+            }
+            let mut seen = std::collections::HashSet::new();
+            let children: Vec<String> = page
+                .split("href=\"https://www.deviantart.com/stash/")
+                .skip(1)
+                .filter_map(|rest| rest.split('"').next())
+                .filter(|sid| {
+                    *sid != id
+                        && !sid.ends_with("#comments")
+                        && !sid.is_empty()
+                        && sid.bytes().all(|b| b.is_ascii_alphanumeric())
+                })
+                .filter(|sid| seen.insert(sid.to_string()))
+                .map(str::to_owned)
+                .collect();
+            Ok(Ok(children))
+        })
+        .map(move |result| match result {
+            Ok(Err(media)) => stream::iter(
+                media
+                    .into_iter()
+                    .flat_map(|media| group(vec![media], "deviantart"))
+                    .map(Ok),
+            )
+            .boxed(),
+            Ok(Ok(children)) if depth < 8 => stream::iter(children)
+                .flat_map(move |sid| self.stash(sid, false, depth + 1))
+                .boxed(),
+            Ok(Ok(_)) => stream::empty().boxed(),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
+    /// Upstream `DeviantartDeviationExtractor` for bare IDs: the page at
+    /// `/view/ID/` names the deviation's UUID.
+    async fn deviation_by_id(&self, id: &str) -> Result<Vec<Media>> {
+        // `/view/ID/` redirects to the deviation's canonical page.
+        let page = self
+            .root
+            .join(&format!("view/{id}/"))
+            .map_err(|_| error("invalid DeviantArt deviation"))?;
+        let (_, body) = self.fetch_page(page).await?;
+        let uuid = page_uuid(&String::from_utf8_lossy(&body))
+            .ok_or_else(|| error("DeviantArt deviation page contains no deviation UUID"))?;
+        let deviation = self.get(&self.api(&format!("deviation/{uuid}"))).await?;
+        let media = self.media(&deviation).await.ok_or_else(|| {
+            error(
+                "DeviantArt deviation has no downloadable image content (literature and journals are not supported)",
+            )
+        })?;
+        Ok(vec![media])
+    }
+
+    /// Upstream `DeviantartFollowingExtractor`: queue every watched user.
+    fn following(&self, user: String) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::try_unfold((Some(0u64), 0usize), move |(offset, pages)| {
+            let user = user.clone();
+            async move {
+                let Some(offset) = offset.filter(|_| pages < MAX_PAGES) else {
+                    return Ok(None);
+                };
+                let mut endpoint = self.api(&format!("user/friends/{user}"));
+                endpoint
+                    .query_pairs_mut()
+                    .append_pair("offset", &offset.to_string())
+                    .append_pair("limit", "50");
+                let page = parse_page(&self.get(&endpoint).await?)?;
+                let children: Vec<_> = page
+                    .results
+                    .iter()
+                    .filter_map(|friend| {
+                        let name = friend.get("user").and_then(|u| string(u, "username"))?;
+                        valid_user(name).then(|| name.to_owned())
+                    })
+                    .map(|name| {
+                        crate::event::child_job(
+                            crate::event::ChildMetadata::from_raw(
+                                "deviantart",
+                                "following",
+                                &serde_json::Map::new(),
+                            ),
+                            move || {
+                                let url = Url::parse(&format!("https://www.deviantart.com/{name}"))
+                                    .expect("validated user");
+                                self.events(&url)
+                            },
+                        )
+                    })
+                    .collect();
+                let next = page.next.filter(|next| *next > offset);
+                Ok::<_, crate::Error>(Some((stream::iter(children).flatten(), (next, pages + 1))))
+            }
+        })
+        .map(|result| match result {
+            Ok(events) => events.boxed(),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
     /// Emit one post boundary per deviation; galleries paginate lazily.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
         let target = match target(url) {
             Ok(target) => target,
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
         };
-        let (user, folder) = match target {
+        let (kind, user, folder) = match target {
+            Target::DeviationId(id) => {
+                return self.once_events(async move { self.deviation_by_id(&id).await });
+            }
+            Target::Avatar(user) => {
+                return self.once_events(async move { self.avatar(&user).await });
+            }
+            Target::Banner(user) => {
+                return self.once_events(async move { self.banner(&user).await });
+            }
+            Target::Following(user) => return self.following(user),
+            Target::Stash(id, legacy) => return self.stash(id, legacy, 0),
+            Target::Journals(user) => ("user/profile/posts", user, None),
+            Target::Statuses(user) => ("statuses", user, None),
+            Target::Watch { posts: false } => ("browse/deviantsyouwatch", String::new(), None),
+            Target::Watch { posts: true } => ("browse/posts/deviantsyouwatch", String::new(), None),
+            Target::Tag(tag) => ("browse/tags", tag, None),
+            Target::Favorites { user, folder } => ("collections", user, folder),
+            Target::Gallery(user) => ("gallery", user, None),
+            Target::Folder { user, id, name } => ("gallery", user, Some((id, name))),
             Target::Deviation { user, slug } => {
                 return stream::once(async move {
                     let uuid = self.page_uuid(&user, &slug).await?;
@@ -572,10 +1139,9 @@ impl DeviantArt {
                 .flatten()
                 .boxed();
             }
-            Target::Gallery(user) => (user, None),
-            Target::Folder { user, id, name } => (user, Some((id, name))),
         };
         let state = ListingState {
+            kind,
             user,
             folder: None,
             offset: None,
@@ -587,7 +1153,10 @@ impl DeviantArt {
             if let Some((id, name)) = &folder
                 && state.folder.is_none()
             {
-                match self.folder_uuid(&state.user, id, name.as_deref()).await {
+                match self
+                    .folder_uuid(state.kind, &state.user, id, name.as_deref())
+                    .await
+                {
                     Ok(uuid) => state.folder = Some(uuid),
                     Err(e) => return Some((Err(e), None)),
                 }
@@ -772,6 +1341,97 @@ mod tests {
     }
 
     #[test]
+    fn classifies_upstream_url_variants() {
+        let t = |raw: &str| target(&Url::parse(raw).unwrap()).unwrap();
+        for raw in [
+            "https://www.deviantart.com/view/904858796/",
+            "https://www.deviantart.com/deviation/904858796",
+            "https://www.deviantart.com/view.php?id=904858796",
+            "https://www.fxdeviantart.com/view/904858796",
+        ] {
+            assert_eq!(t(raw), Target::DeviationId("904858796".into()), "{raw}");
+        }
+        assert_eq!(
+            t("https://fav.me/ddijrpu"),
+            Target::DeviationId(u64::from_str_radix("dijrpu", 36).unwrap().to_string())
+        );
+        for raw in [
+            "https://www.deviantart.com/h3813067/favourites/",
+            "https://www.deviantart.com/h3813067/favourites/all",
+            "https://www.deviantart.com/h3813067/favourites/?catpath=/",
+            "https://h3813067.deviantart.com/favourites/",
+        ] {
+            assert_eq!(
+                t(raw),
+                Target::Favorites {
+                    user: "h3813067".into(),
+                    folder: None
+                },
+                "{raw}"
+            );
+        }
+        assert_eq!(
+            t("https://www.deviantart.com/pencilshadings/favourites/70595441/3D-Favorites"),
+            Target::Favorites {
+                user: "pencilshadings".into(),
+                folder: Some(("70595441".into(), Some("3d-favorites".into())))
+            }
+        );
+        assert_eq!(
+            t("https://www.deviantart.com/tag/nature"),
+            Target::Tag("nature".into())
+        );
+        assert_eq!(
+            t("https://www.deviantart.com/shimoda7/avatar"),
+            Target::Avatar("shimoda7".into())
+        );
+        assert_eq!(
+            t("https://www.deviantart.com/gdldev/banner"),
+            Target::Banner("gdldev".into())
+        );
+        assert_eq!(
+            t("https://www.deviantart.com/shimoda7/about#watching"),
+            Target::Following("shimoda7".into())
+        );
+        assert_eq!(
+            t("https://www.deviantart.com/notifications/watch"),
+            Target::Watch { posts: false }
+        );
+        assert_eq!(
+            t("https://www.deviantart.com/watch/posts"),
+            Target::Watch { posts: true }
+        );
+        assert_eq!(
+            t("https://www.deviantart.com/t1na/posts/statuses"),
+            Target::Statuses("t1na".into())
+        );
+        assert_eq!(
+            t("https://www.deviantart.com/shimoda7/gallery/recommended-for-you"),
+            Target::Gallery("shimoda7".into())
+        );
+        assert_eq!(
+            t("https://sta.sh/215twi387vfj"),
+            Target::Stash("215twi387vfj".into(), true)
+        );
+        assert_eq!(
+            t("https://www.deviantart.com/stash/022c83odnaxc"),
+            Target::Stash("022c83odnaxc".into(), false)
+        );
+        assert_eq!(
+            t("https://www.deviantart.com/shimoda7/journal/ARTility-583755752"),
+            Target::DeviationId("583755752".into())
+        );
+        for raw in [
+            "https://www.deviantart.com/shimoda7/journal/",
+            "https://shimoda7.deviantart.com/journal/?catpath=/",
+            "https://www.deviantart.com/shimoda7/posts/",
+            "https://www.deviantart.com/shimoda7/posts/journals/",
+        ] {
+            assert_eq!(t(raw), Target::Journals("shimoda7".into()), "{raw}");
+        }
+    }
+
+    #[test]
     fn classifies_urls_and_finds_page_uuid() {
         let t = |raw: &str| target(&Url::parse(raw).unwrap());
         let art = Target::Deviation {
@@ -805,10 +1465,8 @@ mod tests {
         );
         for raw in [
             "https://www.deviantart.com/",
-            "https://www.deviantart.com/tag/cats",
             "https://www.deviantart.com/alice/art/no-id",
             "https://www.deviantart.com/alice/gallery/7",
-            "https://www.deviantart.com/alice/favourites",
             "https://www.deviantart.com:444/alice",
             "https://a.b.deviantart.com/",
             "https://www.deviantart.com.evil.example/alice",

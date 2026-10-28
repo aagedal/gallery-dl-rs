@@ -422,7 +422,10 @@ fn routes_social_hosts_without_lookalike_domains() {
             Some("newgrounds"),
         ),
         ("https://alice.newgrounds.com/art", Some("newgrounds")),
-        ("https://www.newgrounds.com/portal/view/1", None),
+        (
+            "https://www.newgrounds.com/portal/view/1",
+            Some("newgrounds"),
+        ),
         ("https://www.newgrounds.com/art", None),
         ("https://art.ngfiles.com/images/1/1_a.png", None),
         ("https://www.newgrounds.com.evil.example/art/view/a/b", None),
@@ -436,7 +439,10 @@ fn routes_social_hosts_without_lookalike_domains() {
             "https://www.furaffinity.net/scraps/alice/2/",
             Some("furaffinity"),
         ),
-        ("https://www.furaffinity.net/user/alice/", None),
+        (
+            "https://www.furaffinity.net/user/alice/",
+            Some("furaffinity"),
+        ),
         ("https://d.furaffinity.net/art/alice/1/1.alice_a.png", None),
         ("https://www.furaffinity.net.evil.example/view/42/", None),
         (
@@ -673,7 +679,7 @@ fn paths_cannot_escape_destination_and_do_not_collide() {
     first.category = "../../".into();
     first.filename = "../../etc/passwd".into();
     let second = media("https://example.com/other/a.jpg");
-    let root = Path::new("downloads");
+    let root = Path::new("gallery-dl");
     let path = download::destination(root, &first);
     assert!(path.starts_with(root));
     assert_eq!(path.components().count(), 3);

@@ -654,6 +654,66 @@ pub(crate) fn direct_keywords(url: &url::Url) -> Vec<(&'static str, String)> {
 pub(crate) fn context(media: &Media) -> BTreeMap<String, Value> {
     context_parts(&media.category, media.metadata.as_ref(), Some(media))
 }
+/// Upstream `extractor.category-map`: replacement category names, keyed by
+/// `category` or `category:subcategory` (the latter mapping to a
+/// `[category, subcategory]` pair).
+static CATEGORY_MAP: std::sync::OnceLock<serde_json::Map<String, serde_json::Value>> =
+    std::sync::OnceLock::new();
+
+/// Install `category-map` (an object, or `"compat"` for upstream's list of
+/// former category names).
+pub fn set_category_map(value: &serde_json::Value) {
+    let map = match value {
+        serde_json::Value::String(name) if name == "compat" => serde_json::json!({
+            "coomer": "coomerparty",
+            "kemono": "kemonoparty",
+            "turbo": "saint",
+            "naver-blog": "naver",
+            "naver-chzzk": "chzzk",
+            "naver-webtoon": "naverwebtoon",
+            "pixiv-novel": "pixiv",
+            "pixiv-novel:novel": ["pixiv", "novel"],
+            "pixiv-novel:user": ["pixiv", "novel-user"],
+            "pixiv-novel:series": ["pixiv", "novel-series"],
+            "pixiv-novel:bookmark": ["pixiv", "novel-bookmark"],
+        }),
+        value => value.clone(),
+    };
+    if let serde_json::Value::Object(map) = map {
+        let _ = CATEGORY_MAP.set(map);
+    }
+}
+
+fn map_category(values: &mut BTreeMap<String, Value>) {
+    let Some(map) = CATEGORY_MAP.get() else {
+        return;
+    };
+    let as_text = |value: Option<&Value>| match value {
+        Some(Value::String(text)) => Some(text.to_string()),
+        _ => None,
+    };
+    let Some(category) = as_text(values.get("category")) else {
+        return;
+    };
+    if !map.contains_key(&category) {
+        return;
+    }
+    let subcategory = as_text(values.get("subcategory")).unwrap_or_default();
+    match map.get(&format!("{category}:{subcategory}")) {
+        Some(serde_json::Value::Array(pair)) if pair.len() == 2 => {
+            if let (Some(c), Some(s)) = (pair[0].as_str(), pair[1].as_str()) {
+                values.insert("category".into(), text(c));
+                values.insert("subcategory".into(), text(s));
+            }
+        }
+        _ => {
+            if let Some(mapped) = map.get(&category).and_then(serde_json::Value::as_str) {
+                values.insert("category".into(), text(mapped));
+            }
+        }
+    }
+}
+
 fn context_parts(
     category: &str,
     post: Option<&crate::extract::PostMetadata>,
@@ -1492,6 +1552,7 @@ fn context_parts(
             }
         }
     }
+    map_category(&mut values);
     values
 }
 

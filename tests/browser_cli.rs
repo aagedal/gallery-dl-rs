@@ -65,7 +65,7 @@ async fn missing_profile_is_a_private_per_input_failure() {
         "https://example.com/image.jpg",
     ]))
     .await;
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(4));
     assert_eq!(output.stdout, b"https://example.com/image.jpg\n");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("initialization failed"), "{stderr}");
@@ -127,7 +127,7 @@ async fn browser_cookies_override_missing_configured_cookie_files() {
                 ]),
         )
         .await;
-        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.status.code(), Some(20));
         assert_eq!(output.stdout, b"https://example.com/image.jpg\n");
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("--extractor compatibility"), "{stderr}");
@@ -140,7 +140,7 @@ async fn browser_cookies_override_missing_configured_cookie_files() {
     }
     assert_eq!(std::fs::read(&db).unwrap(), original);
     assert_eq!(std::fs::read_dir(&profile).unwrap().count(), 1);
-    assert!(!root.path().join("downloads").exists());
+    assert!(!root.path().join("gallery-dl").exists());
 }
 
 #[tokio::test]
@@ -163,7 +163,7 @@ async fn file_and_stdin_only_inputs_initialize_browser_cookies_lazily() {
             .arg(&path),
     )
     .await;
-    assert_eq!(file.status.code(), Some(1));
+    assert_eq!(file.status.code(), Some(4));
     assert_eq!(file.stdout, b"https://example.com/image.jpg\n");
     assert!(String::from_utf8_lossy(&file.stderr).contains("initialization failed"));
 
@@ -189,7 +189,7 @@ async fn file_and_stdin_only_inputs_initialize_browser_cookies_lazily() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(stdin.status.code(), Some(1));
+    assert_eq!(stdin.status.code(), Some(4));
     assert_eq!(stdin.stdout, file.stdout);
     let stderr = String::from_utf8_lossy(&stdin.stderr);
     assert!(stderr.contains("initialization failed"), "{stderr}");
@@ -300,9 +300,9 @@ async fn configured_browser_arrays_import_relative_profiles_with_optional_placeh
     let original = std::fs::read(profile.join("cookies.sqlite")).unwrap();
     let config = settings.join("native.json");
     for browser in [
-        serde_json::json!(["firefox", "synthetic profile"]),
-        serde_json::json!(["firefox", "synthetic profile", null, null]),
-        serde_json::json!(["firefox", "synthetic profile", null, "none"]),
+        serde_json::json!(["firefox", "settings/synthetic profile"]),
+        serde_json::json!(["firefox", "settings/synthetic profile", null, null]),
+        serde_json::json!(["firefox", "settings/synthetic profile", null, "none"]),
     ] {
         native_config(
             &config,
@@ -322,7 +322,7 @@ async fn configured_browser_arrays_import_relative_profiles_with_optional_placeh
                 ]),
         )
         .await;
-        assert_eq!(result.status.code(), Some(1));
+        assert_eq!(result.status.code(), Some(20));
         assert_eq!(result.stdout, b"https://example.com/image.jpg\n");
         let stderr = String::from_utf8_lossy(&result.stderr);
         assert!(stderr.contains("--extractor compatibility"), "{stderr}");
@@ -335,7 +335,7 @@ async fn configured_browser_arrays_import_relative_profiles_with_optional_placeh
         original
     );
     assert_eq!(std::fs::read_dir(profile).unwrap().count(), 1);
-    assert!(!root.path().join("downloads").exists());
+    assert!(!root.path().join("gallery-dl").exists());
 }
 
 #[tokio::test]
@@ -374,7 +374,7 @@ async fn configured_file_and_browser_sources_replace_each_other_across_scopes() 
                 ]),
         )
         .await;
-        assert_eq!(result.status.code(), Some(1));
+        assert_eq!(result.status.code(), Some(16));
         let stderr = String::from_utf8_lossy(&result.stderr);
         assert!(stderr.contains("auth_token and ct0"), "{stderr}");
         assert!(!stderr.contains("initialization failed"), "{stderr}");
@@ -418,7 +418,7 @@ async fn explicit_cookie_file_and_browser_each_override_configured_browser_sourc
                 ]),
         )
         .await;
-        assert_eq!(result.status.code(), Some(1));
+        assert_eq!(result.status.code(), Some(20));
         let stderr = String::from_utf8_lossy(&result.stderr);
         assert!(stderr.contains("--extractor compatibility"), "{stderr}");
         assert!(stderr.contains("auth_token and ct0"), "{stderr}");
@@ -523,7 +523,6 @@ async fn malformed_configured_browser_arrays_fail_privately_before_input_process
 async fn compatibility_forwards_each_scoped_browser_profile_as_one_argument_without_cookie_file() {
     use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().unwrap();
-    let canonical = std::fs::canonicalize(root.path()).unwrap();
     let backend = root.path().join("fake backend");
     std::fs::write(&backend, b"#!/bin/sh\nprintf 'BEGIN\\n' >> \"$BROWSER_CLI_LOG\"\nprintf '%s\\n' \"$@\" >> \"$BROWSER_CLI_LOG\"\nprintf '%s' '[[3,\"https://example.com/image.jpg\",{}]]'\n").unwrap();
     std::fs::set_permissions(&backend, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -567,7 +566,8 @@ async fn compatibility_forwards_each_scoped_browser_profile_as_one_argument_with
             .unwrap();
         assert_eq!(
             arguments[browser + 1],
-            browser_spec(&canonical.join(profile))
+            // Like upstream, relative profiles are forwarded as written.
+            browser_spec(std::path::Path::new(profile))
         );
         assert!(!arguments.contains(&"--cookies"));
         assert!(!block.contains("private-missing"));
@@ -604,7 +604,7 @@ async fn configured_browser_profiles_initialize_independently_for_each_native_ca
             ]),
     )
     .await;
-    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(result.status.code(), Some(20));
     assert_eq!(result.stdout, b"https://example.com/image.jpg\n");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(

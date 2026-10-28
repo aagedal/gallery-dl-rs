@@ -158,9 +158,13 @@ async fn post_predicates_and_dates_precede_post_ranges_and_file_selection_follow
         "width >= 1000",
         "metadata['file']['width'] >= 1000",
     ] {
-        let result =
-            output(binary(root.path(), &backend).args(["-j", "--post-filter", predicate, FIRST]))
-                .await;
+        let result = output(binary(root.path(), &backend).args([
+            "--dump-media-json",
+            "--post-filter",
+            predicate,
+            FIRST,
+        ]))
+        .await;
         success(&result);
         assert_eq!(
             serde_json::from_slice::<Value>(&result.stdout).unwrap(),
@@ -253,8 +257,13 @@ async fn invalid_post_arguments_fail_privately_before_side_effects_and_zero_neve
         assert!(!archive.exists());
         assert!(!root.path().join("backend.log").exists());
     }
-    let result =
-        output(binary(root.path(), &backend).args(["-j", "--post-range", "0", FIRST])).await;
+    let result = output(binary(root.path(), &backend).args([
+        "--dump-media-json",
+        "--post-range",
+        "0",
+        FIRST,
+    ]))
+    .await;
     success(&result);
     assert_eq!(
         serde_json::from_slice::<Value>(&result.stdout).unwrap(),
@@ -380,7 +389,7 @@ async fn raw_media_without_boundaries_stays_compatible_until_post_selection_is_r
     let result =
         output(binary(root.path(), &backend).args(["-g", "--post-range", "1", FIRST, SECOND]))
             .await;
-    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(result.status.code(), Some(4));
     assert_eq!(urls(&result), [url("later-input")]);
     assert!(String::from_utf8_lossy(&result.stderr).contains("explicit post boundaries"));
     assert!(String::from_utf8_lossy(&result.stderr).contains("1 operation(s) failed"));

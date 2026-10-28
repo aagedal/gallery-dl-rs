@@ -69,7 +69,7 @@ printf '[[3,"https://cdn.example/%s.jpg",{"filename":"remote","extension":"jpg"}
 
 #[cfg(unix)]
 #[tokio::test]
-async fn category_destinations_and_filenames_anchor_to_config_directory() {
+async fn category_destinations_and_filenames_resolve_against_working_directory() {
     let root = tempfile::tempdir().unwrap();
     let settings = root.path().join("settings");
     let cwd = root.path().join("elsewhere");
@@ -94,8 +94,7 @@ async fn category_destinations_and_filenames_anchor_to_config_directory() {
         ("direct", "direct"),
     ] {
         touch(
-            &settings
-                .join(folder)
+            &cwd.join(folder)
                 .join(category)
                 .join(format!("{folder}.jpg")),
         );
@@ -114,18 +113,17 @@ async fn category_destinations_and_filenames_anchor_to_config_directory() {
         ]);
     let result = output(&mut command).await;
     success(&result);
-    assert!(result.stdout.is_empty());
-    let stderr = String::from_utf8_lossy(&result.stderr);
-    assert_eq!(stderr.matches("skipped ").count(), 5);
-    assert!(!cwd.join("downloads").exists());
-    assert!(!settings.join("base").exists());
+    // Skipped files are reported on standard output as `# PATH`.
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert_eq!(stdout.matches("# ").count(), 5, "{stdout}");
+    assert!(!cwd.join("gallery-dl").exists());
+    assert!(!cwd.join("base").exists() && !settings.join("base").exists());
 }
 
 #[cfg(unix)]
 #[tokio::test]
 async fn category_cookies_reach_backend_and_explicit_cli_cookie_overrides() {
     let root = tempfile::tempdir().unwrap();
-    let canonical = std::fs::canonicalize(root.path()).unwrap();
     let cfg = config(
         root.path(),
         serde_json::json!({"extractor": {
@@ -149,7 +147,8 @@ async fn category_cookies_reach_backend_and_explicit_cli_cookie_overrides() {
     let logs = std::fs::read_to_string(&log).unwrap();
     let blocks: Vec<_> = logs.split("BEGIN\n").skip(1).collect();
     for (block, name) in blocks.iter().zip(["ig.txt", "tw.txt", "default.txt"]) {
-        assert!(block.contains(&format!("--cookies\n{}\n", canonical.join(name).display())));
+        // Relative paths are forwarded as written, like upstream.
+        assert!(block.contains(&format!("--cookies\n{name}\n")), "{block}");
     }
     assert_eq!(blocks.len(), 3);
     std::fs::write(&log, b"").unwrap();
@@ -183,7 +182,7 @@ async fn inspection_never_opens_configured_archives_or_creates_destinations() {
             "twitter":{"archive":"other-missing-parent/history.sqlite"}
         }}),
     );
-    for mode in ["-g", "-j"] {
+    for mode in ["-g", "--dump-media-json"] {
         let mut command = binary(root.path(), &cfg);
         command.args([
             "--extractor",
@@ -208,11 +207,11 @@ async fn archives_open_only_for_relevant_categories_and_cli_paths_override_confi
             "twitter":{"archive":"missing-parent/twitter.sqlite"}
         }}),
     );
-    touch(&root.path().join("downloads/direct/cli.jpg"));
+    touch(&root.path().join("gallery-dl/direct/cli.jpg"));
     let mut command = binary(root.path(), &cfg);
     command.args([
         "--destination",
-        "downloads",
+        "gallery-dl",
         "--filename",
         "cli.jpg",
         "--download-archive",
@@ -422,7 +421,7 @@ async fn configured_retry_count_is_used_and_explicit_default_looking_cli_value_w
         );
         assert_eq!(server.count(), if override_cli { 3 } else { 2 });
         assert_eq!(
-            root.path().join("downloads/direct/result.jpg").exists(),
+            root.path().join("gallery-dl/direct/result.jpg").exists(),
             override_cli
         );
     }
@@ -450,7 +449,7 @@ async fn fractional_configured_timeout_is_applied_and_explicit_sixty_seconds_win
             String::from_utf8_lossy(&result.stderr)
         );
         assert_eq!(server.count(), 1);
-        let path = root.path().join("downloads/direct/result.jpg");
+        let path = root.path().join("gallery-dl/direct/result.jpg");
         assert_eq!(path.exists(), override_cli);
         if override_cli {
             assert_eq!(std::fs::read(path).unwrap(), b"abc");
@@ -488,15 +487,15 @@ async fn directory_config_cli_override_and_empty_list_choose_exact_parent() {
     );
     let configured = root.path().join("output/config/direct/custom.jpg");
     touch(&configured);
-    let result = output(binary(&elsewhere, &cfg).arg(url)).await;
+    let result = output(binary(root.path(), &cfg).arg(url)).await;
     success(&result);
     let exact = root.path().join("exact");
     touch(&exact.join("custom.jpg"));
-    success(&output(binary(&elsewhere, &cfg).arg("-D").arg(&exact).arg(url)).await);
+    success(&output(binary(root.path(), &cfg).arg("-D").arg(&exact).arg(url)).await);
     assert!(!exact.join("direct").exists());
     let custom = root.path().join("output/cli/direct/custom.jpg");
     touch(&custom);
-    let result = output(binary(&elsewhere, &cfg).args([
+    let result = output(binary(root.path(), &cfg).args([
         "--directory-template",
         "cli",
         "--directory-template",
@@ -512,7 +511,7 @@ async fn directory_config_cli_override_and_empty_list_choose_exact_parent() {
         serde_json::json!({"base-directory":"output", "directory":[], "filename":"at-base.jpg"}),
     );
     touch(&root.path().join("output/at-base.jpg"));
-    success(&output(binary(&elsewhere, &cfg).arg(url)).await);
+    success(&output(binary(root.path(), &cfg).arg(url)).await);
     assert!(!root.path().join("output/direct").exists());
 }
 
@@ -764,7 +763,7 @@ async fn mastodon_instance_scopes_preserve_credentials_metadata_and_distinct_arc
         .arg(mastodon_backend(root.path()))
         .env("CONFIG_TEST_LOG", &log)
         .args([
-            "-j",
+            "--dump-media-json",
             "https://mastodon.social/bookmarks",
             "https://pawoo.net/bookmarks",
             "https://baraag.net/bookmarks",
@@ -807,7 +806,7 @@ async fn mastodon_bookmark_date_filter_keeps_later_newer_posts() {
         .arg(mastodon_backend(root.path()))
         .env("CONFIG_TEST_LOG", root.path().join("backend.log"))
         .args([
-            "-j",
+            "--dump-media-json",
             "--date-after",
             "2024-01-01",
             "https://mastodon.social/bookmarks",
@@ -897,7 +896,7 @@ async fn date_selection_preserves_later_newer_bluesky_posts_and_unordered_pixiv_
                 .arg("--extractor-command")
                 .arg(&executable)
                 .args(extra)
-                .args(["-j", "--date-after", "2024-01-01", url]);
+                .args(["--dump-media-json", "--date-after", "2024-01-01", url]);
             let result = output(&mut command).await;
             success(&result);
             let items: Vec<serde_json::Value> = serde_json::from_slice(&result.stdout).unwrap();
@@ -1098,7 +1097,7 @@ printf '%s\n' '[[2,"",{"id":"1","user":"42","service":"patreon","date":"2020-01-
             command
                 .arg("--extractor-command")
                 .arg(&executable)
-                .args(["-j", "--date-after", "2024-01-01"])
+                .args(["--dump-media-json", "--date-after", "2024-01-01"])
                 .args(selection)
                 .arg(url);
             let result = output(&mut command).await;
@@ -1176,7 +1175,7 @@ printf '%s\n' '[[3,"https://kemono.cr/data/aa/bb/aabb.jpg",{"id":"7","user":"42"
     command
         .arg("--extractor-command")
         .arg(&executable)
-        .args(["-j", "https://kemono.cr/posts"]);
+        .args(["--dump-media-json", "https://kemono.cr/posts"]);
     let result = output(&mut command).await;
     success(&result);
     let items: Vec<serde_json::Value> = serde_json::from_slice(&result.stdout).unwrap();
@@ -1243,7 +1242,7 @@ printf '%s\n' '[[3,"https://kemono.cr/data/aa/bb/aabb.jpg",{"id":"7","user":"42"
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
     let mut command = binary(root.path(), &cfg);
     command.arg("--extractor-command").arg(&executable).args([
-        "-j",
+        "--dump-media-json",
         "--filter",
         "revision_count == 2",
         "https://kemono.cr/posts",
@@ -1651,7 +1650,8 @@ async fn pixiv_optional_enrichment_forwards_truthiness_only_to_illustrations() {
         for (url, supported) in [
             ("https://www.pixiv.net/artworks/42", true),
             ("https://www.pixivision.net/en/a/77", true),
-            ("https://www.pixiv.net/novel/show.php?id=42", false),
+            // `config-map` applies `pixiv` settings to `pixiv-novel`.
+            ("https://www.pixiv.net/novel/show.php?id=42", true),
             ("https://instagram.com/p/abc/", false),
         ] {
             let log = root.path().join("backend.log");

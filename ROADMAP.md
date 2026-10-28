@@ -618,7 +618,11 @@ downloads. Document compatibility differences as features land.
 posts via the public `post/v1` API, with shared retries, timeouts, network
 options and Retry-After cooldowns. The upstream boolean `mp4` option defaults
 to true; false preserves animated GIFs while leaving native video unchanged.
-Not yet: user profiles, favorites, subreddits, searches and tag listings.
+User profiles (`/user/NAME`), favorites and favorite folders, subreddits
+(`/r/NAME`), tags (`/t/NAME`) and searches queue their posts as album and
+image children through the v3 API (2026-10-28). `/user/me` and
+`/user/me/hidden` use the `accesstoken` cookie from `--cookies` (not verified
+without an account).
 
 **Implemented experimental native boorus:** Danbooru, e621/e926, Gelbooru and
 Safebooru posts, tag searches and pools, plus Danbooru favorite
@@ -1540,8 +1544,12 @@ backend. Repeated CLI options override earlier ones, as with argparse.
 kept until the replacement completes) and bypass archive checks; `skip`
 values `abort:N`, `terminate:N` and `exit:N` map to `-A`/`-T`. The `compare`
 processor (`action` replace/enumerate, `shallow`) is supported.
-**Remaining:** compare `equal`, `skip: enumerate`, `python` (no native equivalent), exec `archive`/`success`/`error` actions, and
-bzip2/lzma zip compression.
+`compression: bzip2` is supported (2026-10-28).
+The `python` processor runs `function` (`MODULE:NAME`, module name or file
+path) or `expression` (`mode: eval`) in an external `python3`
+(`$GALLERY_DL_PYTHON`), exchanging the keywords as JSON; `archive` works.
+`compression: lzma` writes LZMA (method 14) entries built natively and
+copied into the archive, readable by Python's `zipfile` (2026-10-28).
 
 **Implemented input, auth and pacing options, 2026-10-28:** input files accept
 upstream's `-KEY=VALUE` (next URL) and `-G KEY=VALUE` (all following URLs)
@@ -1560,11 +1568,13 @@ unix, windows, windows+, ascii, ascii+, character sets or mappings),
 `path-replace`, `path-remove` and `path-strip` are read process-wide from the
 root or `extractor` scope or `-o`, with `--restrict-filenames VALUE` and
 `--windows-filenames`. Separators and NUL are always replaced. Without them,
-native filename templates keep the conservative ASCII cleaning. `{filename}`
+native filename templates kept the conservative ASCII cleaning (since
+2026-10-28 `path-restrict` defaults to `auto`). `{filename}`
 now excludes the extension for every extractor, as upstream.
-**Remaining divergences:** the default base directory (`downloads` versus
-upstream `./gallery-dl/`) and direct links (`direct/<digest>_NAME` versus
+**Remaining divergences:** direct links (`direct/<digest>_NAME` versus
 upstream `directlink` with `{domain}`, `{path}`, `{query}` and `{fragment}`).
+The default base directory is `./gallery-dl/` like upstream (since
+2026-10-28; it was `downloads`).
 
 **Implemented output and configuration commands, 2026-10-28:** `-N/--print
 [EVENT:]FORMAT` and `--print-to-file [EVENT:]FORMAT FILE` configure metadata
@@ -1608,14 +1618,31 @@ Registry sites apply user `keywords`/`keywords-global` (with `keywords-eval`
 format strings), `metadata-url` and `metadata-version`; `cookies-update` with
 a path writes session cookies there (rewriting the input file with `true` is
 not supported). `downloader.ytdl` `format`, `cmdline-args` (whitespace-split strings or
-lists) and `config-file` apply to yt-dlp downloads; `raw-options` cannot.
+lists) and `config-file` apply to yt-dlp downloads; `forward-cookies: false`
+stops cookie forwarding, and common `raw-options` (quiet, subtitles,
+merge format, rate/retries, ...) are translated to yt-dlp flags.
 `sleep`, `sleep-extractor`, `sleep-skip`, `source-address`, `geo-bypass` and
 `netrc` are also read from the root/`extractor` configuration scope.
 Upstream's `extension-map` applies to every extractor (default: `jpeg`,
 `jpe`, `jfif`, `jif` and `jfi` become `jpg`).
-**Remaining:** other `output` options (log formats, progress, colors), `downloader.http`/`ytdl` subsections, format-string archive paths,
-relative paths resolve against the configuration directory rather than the
-working directory, and the default base directory differs (`downloads`).
+`output.progress` (default on, or a format string) prints
+`[CURRENT/TOTAL] URL` before each of several inputs.
+Completed and skipped files are reported on standard output per
+`output.mode` (`auto`, `pipe`, `terminal`, `color`, `null` or custom
+`success`/`skip` formats; `output.colors`, `NO_COLOR`, `output.skip`)
+instead of `downloaded`/`skipped` lines on standard error.
+Downloads running longer than `downloader.progress` seconds (default 3)
+show upstream's `PERCENT SIZE RATE` line on standard error in terminal
+output modes (one download at a time owns the line).
+Errors and warnings use upstream's `[NAME][LEVEL] MESSAGE` format
+(`output.log`: a format string or `{"format": ...}` with `{name}`,
+`{levelname}`, `{message}`, `{asctime}`).
+yt-dlp warnings and errors are relayed as `[ytdl][LEVEL]` messages
+(`logging`, deprecation warnings only with `deprecations: true`);
+`logging: false` shows yt-dlp's own output.
+`outtmpl` lets yt-dlp name the file (`default`: `%(title)s [%(id)s].%(ext)s`). Relative configuration paths resolve against the working
+directory like upstream (since 2026-10-28; they used to be anchored to the
+configuration file's directory).
 
 **Implemented OAuth helpers, 2026-10-28:** `oauth:pixiv` (PKCE with a pasted
 code), `oauth:deviantart`, `oauth:reddit`, `oauth:mastodon:INSTANCE`
@@ -1627,6 +1654,95 @@ print the token with the configuration key to set. Tokens are never cached.
 **Implemented special inputs, 2026-10-28:** `recursive:URL`/`r:URL` (also
 `file://` documents) queues every URL found, and `ytdl:URL` hands any HTTP(S)
 page to the yt-dlp site (metadata from `yt-dlp -J --flat-playlist`).
+
+**Implemented actions, archives and downloader options, 2026-10-28:**
+`skip: "enumerate"` saves next to existing files as `NAME.N.EXT`; compare
+`equal` (`abort`, `terminate`, `exit`, with `:N`) stops after consecutive
+equal files; exec `success`/`error` run upstream actions. The `actions`
+option runs actions for matching error and warning messages (download and
+extraction failures, exec warnings) with `print`, `status`, `level`, `exec`,
+`wait`, `keyword`, `raise`, `abort`, `terminate`, `restart` (as `abort`) and
+`exit`; `status` and `exit` set the exit status. `flag` and signal actions
+are not supported. `keywords-default` fills missing path keywords.
+Existing Python gallery-dl archives (an `archive` table of `entry` keys)
+are read and updated with upstream keys (category + `archive_fmt`); new
+archives keep the native schema. `archive-event` (`file`, `skip`, `after`;
+upstream archives default to `file`, native ones also record existing
+files), `archive-mode: memory` (written after a run without errors) and
+`skip-filter` are supported. Downloader `adjust-extensions` (file signature
+checks, default on), `validate-html`, `retry-codes` and `part-directory`
+apply. `-j/--dump-json` prints upstream's `[2, post]`/`[3, url, file]`
+message list (`output.private`, `num-to-str`, `jsonl`, `ascii`); the native
+media dump is the hidden `--dump-media-json`. `path-restrict` defaults to
+`auto` like upstream (only `/`, or Windows' reserved characters, are
+replaced). Exit codes follow upstream's
+bit flags: 4 for download and extraction errors, 8 for bot challenges, 16 for
+authentication, 32 for format errors, 64 for unsupported URLs and 128 for
+local file errors (extraction errors are classified by their messages).
+**Remaining divergences:** direct links keep `direct/<digest>_NAME` paths
+(request-identity separation) rather than `directlink/{domain}_{path}_NAME`;
+`metadata-extractor`, `parent-*`, `category-transfer`,
+`file-unique`/`child-unique`, `path-extended`/`path-convert`,
+`tls12: false` (TLS 1.3 only) and `truststore` (system certificates) apply
+to every native client; `ciphers` restricts connections to the listed
+suites (OpenSSL or IANA names that rustls implements: TLS 1.3 and ECDHE
+AEAD suites), while the `firefox`/`chrome` presets (fingerprint imitation)
+are ignored with a warning; `cookies-select` picks one
+source per run (`rotate` starts with the first);
+`proxy-env: false` disables environment proxies. `metadata-http` (root or
+`extractor` scope) exposes response headers, the Content-Disposition
+`filename`/`extension` and the Last-Modified `date` under the given keyword;
+the destination is rendered again after the response so filename templates
+can use them. (Upstream itself rejects
+replacement fields in string `archive` paths.) `config-map` (default: upstream's renamed categories, e.g.
+`kemonoparty` → `kemono`, `pixiv` → `pixiv-novel`) copies settings to new
+category names; `category-map` and `--compat` rename `category` (and
+`subcategory`) keywords, but configuration lookups keep the native names.
+
+**Implemented upstream default paths for dedicated extractors, 2026-10-28:**
+without `-f`/`-d` templates, Pixiv, Twitter/X, Instagram, Facebook, Bluesky,
+Reddit, Tumblr, Mastodon, Kemono/Coomer, Pinterest, ArtStation, Newgrounds,
+VSCO, Flickr, Imgur, DeviantArt, Fur Affinity, Weasyl, Wallhaven and the
+image hosts use upstream's directory and filename formats, mapped onto the
+native keywords (`post_id`, `media_id`, `username`, `caption`, `num`).
+Files lacking a required field, and direct links, keep the digest names.
+Exact keyword differences remain (e.g. DeviantArt's `{index}` is the UUID,
+Instagram omits the sidecar prefix, Reddit uses the user directory).
+
+**Implemented upstream URL coverage for dedicated extractors, 2026-10-28:**
+a sweep of every `#url` in upstream's `test/results` (excluding `#fail` and
+`#exception` cases) against `--extractor native -g` found 175 URLs the
+native extractors rejected. Added: Imgur user/favorite/favorite-folder/
+subreddit/tag/search listings and slug/thumbnail forms; Danbooru/e621
+`/post/show/ID`, `/posts/random`, e621 `/p/BASE32`, e621.cc and
+e621.anthro.fr, Gelbooru `redirect.php`; Twitter fx/vx/fixup/fixvx hosts;
+Pixiv touch./phixiv hosts, `/i/ID`, `/u/ID`, `member.php`, `#id=` and
+`pixiv.me`; Weasyl journals, journal, favorites, folders and `~` names;
+Wallhaven collections; Pixeldrain `/d/` filesystem folders (recursive);
+Flickr albums overview, favorites, galleries, groups and search; Fur
+Affinity folders, user dispatch, search, watchlist, `/msg/submissions` and
+mirror hosts; DeviantArt `/view/ID`, `fav.me`, `view.php`, favourites and
+collections, tags, avatar, banner, watching and fxdeviantart; Facebook
+`profile.php?id=ID/TAB` and `/info` (a file-less post carrying the profile
+for `post`-event postprocessors); `i.reddituploads.com`; remaining directlink
+extensions. Newgrounds audio/movie pages, user audio/movies/games
+listings, favorites, following and search were ported from upstream but
+only tested against local fixtures (the site serves an "NG Guard" browser
+check to this host). VSCO video (HLS via yt-dlp), avatar, collection and spaces
+views were ported the same way (VSCO returns HTTP 403 here).
+ArtStation albums, likes, collections, challenges, following, `artstn.co` links and the artwork page were ported too
+(Cloudflare blocks ArtStation here).
+**Remaining:** ArtStation search
+(CSRF-token POST API), DeviantArt scraps/search/
+(Eclipse API needing a CSRF session); DeviantArt `watch/deviations`,
+`notifications/watch` and `watch/posts` use the `refresh-token` from
+`oauth:deviantart` (unverified without an account); journals and literature are saved as `.htm`
+from `deviation/content` (simpler than upstream's journal template; not yet
+verified live because DeviantArt rate-limited this host), 500px liked (login;
+the native port uses the newer api-neo GraphQL schema, whose liked query is
+unknown without an account)
+MangaDex feed/follows log in with `username`/`password` (and optional
+`client-id`/`client-secret`), unverified without an account.
 
 ### Companion yt-dlp-rs integration
 

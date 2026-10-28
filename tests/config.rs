@@ -55,7 +55,7 @@ fn category_overrides_defaults_and_global_overrides_category() {
 }
 
 #[test]
-fn literal_paths_resolve_against_configuration_directory() {
+fn literal_paths_resolve_against_the_working_directory() {
     let absolute = directory().join("absolute/history.sqlite");
     let settings = parse(
         &serde_json::json!({"extractor": {
@@ -66,11 +66,8 @@ fn literal_paths_resolve_against_configuration_directory() {
     .unwrap()
     .resolve("instagram")
     .unwrap();
-    assert_eq!(
-        settings.base_directory,
-        Some(directory().join("../downloads"))
-    );
-    assert_eq!(settings.cookies, Some(directory().join("cookies.txt")));
+    assert_eq!(settings.base_directory, Some(PathBuf::from("../downloads")));
+    assert_eq!(settings.cookies, Some(PathBuf::from("cookies.txt")));
     assert_eq!(settings.archive, Some(absolute));
     assert!(Config::parse(b"{}", Path::new("relative")).is_err());
 }
@@ -83,7 +80,7 @@ fn browser_cookie_sources_replace_files_across_scopes_and_anchor_profiles() {
         assert!(selected.cookies.is_none());
         assert_eq!(
             selected.browser_cookies,
-            Some(directory().join("profiles").join(profile))
+            Some(PathBuf::from("profiles").join(profile))
         );
         let cli = selected.overlay(&Options {
             cookies: Some("cli.txt".into()),
@@ -101,7 +98,7 @@ fn browser_cookie_sources_replace_files_across_scopes_and_anchor_profiles() {
     );
     assert_eq!(
         config.resolve("facebook").unwrap().cookies,
-        Some(directory().join("default.txt"))
+        Some(PathBuf::from("default.txt"))
     );
     let config = parse(
         r#"{"extractor":{"cookies":["firefox","default-profile"],"twitter":{"cookies":"x.txt"}}}"#,
@@ -109,13 +106,13 @@ fn browser_cookie_sources_replace_files_across_scopes_and_anchor_profiles() {
     .unwrap();
     let selected = config.resolve("twitter").unwrap();
     assert!(selected.browser_cookies.is_none());
-    assert_eq!(selected.cookies, Some(directory().join("x.txt")));
+    assert_eq!(selected.cookies, Some(PathBuf::from("x.txt")));
     let global = parse(r#"{"cookies":["firefox","global-profile"],"extractor":{"cookies":"default.txt","twitter":{"cookies":"x.txt"}}}"#).unwrap();
     let selected = global.resolve("twitter").unwrap();
     assert!(selected.cookies.is_none());
     assert_eq!(
         selected.browser_cookies,
-        Some(directory().join("global-profile"))
+        Some(PathBuf::from("global-profile"))
     );
 }
 
@@ -158,7 +155,7 @@ fn browser_cookie_arrays_validate_every_scope_without_private_diagnostics() {
             .unwrap();
         assert_eq!(
             selected.browser_cookies,
-            Some(directory().join("private-profile"))
+            Some(PathBuf::from("private-profile"))
         );
         assert!(!format!("{selected:?}").contains("private-profile"));
     }
@@ -262,10 +259,8 @@ async fn file_loading_anchors_paths_and_enforces_size_limit() {
     tokio::fs::write(&path, br#"{"cookies":"cookies.txt"}"#)
         .await
         .unwrap();
-    let expected = tokio::fs::canonicalize(dir.path())
-        .await
-        .unwrap()
-        .join("cookies.txt");
+    // Like upstream, relative paths stay relative to the working directory.
+    let expected = PathBuf::from("cookies.txt");
     assert_eq!(
         Config::load(&path)
             .await
@@ -2868,7 +2863,7 @@ fn pixiv_tag_modes_are_sparse_inherited_and_independent_between_categories() {
     let cfg = parse(r#"{"extractor":{"tags":"translated","pixiv":{"tags":"original"}}}"#).unwrap();
     assert_eq!(
         cfg.resolve("pixiv-novel").unwrap().tags,
-        Some(TagMode::Translated)
+        Some(TagMode::Original)
     );
     let cfg = parse(r#"{"tags":"original","extractor":{"tags":"japanese","pixiv":{"tags":"translated"},"pixiv-novel":{"tags":"translated"}}}"#).unwrap();
     for category in ["pixiv", "pixiv-novel"] {
@@ -3113,7 +3108,7 @@ fn pixiv_ugoira_modes_override_original_with_false_and_null_without_scope_leaks(
     assert_eq!(pixiv.ugoira, Some(UgoiraMode::Original));
     assert_eq!(
         cfg.resolve("pixiv-novel").unwrap().ugoira,
-        Some(UgoiraMode::Zip)
+        Some(UgoiraMode::Original)
     );
     assert_eq!(
         pixiv
@@ -3214,8 +3209,11 @@ fn pixiv_enrichment_switches_are_scoped_and_explicit_null_clears_defaults() {
     }
     let cfg =
         parse(r#"{"extractor":{"pixiv":{"comments":true,"metadata-bookmark":true}}}"#).unwrap();
-    assert_eq!(cfg.resolve("pixiv-novel").unwrap().comments, None);
-    assert_eq!(cfg.resolve("pixiv-novel").unwrap().metadata_bookmark, None);
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().comments, Some(true));
+    assert_eq!(
+        cfg.resolve("pixiv-novel").unwrap().metadata_bookmark,
+        Some(true)
+    );
     assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
 }
 
@@ -3265,7 +3263,7 @@ fn metadata_switch_preserves_independent_pixiv_novel_scopes_and_explicit_null_cl
     assert_eq!(cfg.resolve("kemono").unwrap().metadata, Some(false));
     assert_eq!(cfg.resolve("coomer").unwrap().metadata, Some(true));
     let cfg = parse(r#"{"extractor":{"pixiv":{"metadata":true}}}"#).unwrap();
-    assert_eq!(cfg.resolve("pixiv-novel").unwrap().metadata, None);
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().metadata, Some(true));
     let cfg = parse(r#"{"metadata":null,"extractor":{"metadata":true,"pixiv":{"metadata":true},"pixiv-novel":{"metadata":true}}}"#).unwrap();
     for category in ["pixiv", "pixiv-novel", "kemono"] {
         let resolved = cfg.resolve(category).unwrap();
@@ -3359,7 +3357,7 @@ fn pixiv_captions_obey_hierarchy_null_clearing_and_independent_novel_scopes() {
     assert_eq!(pixiv.comments, Some(false));
     assert_eq!(pixiv.metadata, Some(false));
     assert_eq!(pixiv.metadata_bookmark, Some(true));
-    assert_eq!(cfg.resolve("pixiv-novel").unwrap().captions, None);
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().captions, Some(true));
     assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
 }
 
@@ -3433,7 +3431,7 @@ fn pixiv_sanity_preserves_null_clearing_hierarchy_and_independent_categories() {
     assert_eq!(pixiv.comments, Some(false));
     assert_eq!(pixiv.metadata, Some(false));
     assert_eq!(pixiv.metadata_bookmark, Some(true));
-    assert_eq!(cfg.resolve("pixiv-novel").unwrap().sanity, None);
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().sanity, Some(false));
     assert_eq!(cfg.resolve("direct").unwrap(), Options::default());
 }
 
@@ -3958,4 +3956,31 @@ async fn yaml_and_toml_configurations_load_by_extension_or_declaration() {
     gallery_dl_rs::config::set_format(&toml, gallery_dl_rs::config::Format::Toml);
     let config = Config::load(&toml).await.unwrap();
     assert_eq!(config.resolve("imgur").unwrap().mp4, Some(true));
+}
+
+#[test]
+fn config_map_applies_settings_of_renamed_categories() {
+    let cfg = parse(r#"{"extractor":{"kemonoparty":{"metadata":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("kemono").unwrap().metadata, Some(true));
+    // Settings of the new name win, and an empty map disables remapping.
+    let cfg =
+        parse(r#"{"extractor":{"kemonoparty":{"metadata":true},"kemono":{"metadata":false}}}"#)
+            .unwrap();
+    assert_eq!(cfg.resolve("kemono").unwrap().metadata, Some(false));
+    let cfg = parse(r#"{"extractor":{"config-map":{},"pixiv":{"metadata":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("pixiv-novel").unwrap().metadata, None);
+    let cfg =
+        parse(r#"{"extractor":{"config-map":{"old":"kemono"},"old":{"metadata":true}}}"#).unwrap();
+    assert_eq!(cfg.resolve("kemono").unwrap().metadata, Some(true));
+}
+
+#[test]
+fn cookies_select_picks_one_cookie_source() {
+    let cfg = parse(
+        r#"{"extractor":{"cookies-select":"rotate","instagram":{"cookies":["/a.txt","/b.txt"]}}}"#,
+    )
+    .unwrap();
+    let resolved = cfg.resolve("instagram").unwrap();
+    assert_eq!(resolved.cookies, Some("/a.txt".into()));
+    assert!(resolved.browser_cookies.is_none());
 }

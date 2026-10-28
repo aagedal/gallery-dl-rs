@@ -58,7 +58,7 @@ struct Args {
     /// Download URLs found in FILE; delete each successfully downloaded URL
     #[arg(short = 'x', long = "input-file-delete", value_name = "FILE")]
     input_file_delete: Vec<PathBuf>,
-    /// Output root (default: downloads)
+    /// Output root (default: ./gallery-dl/)
     #[arg(short, long)]
     destination: Option<PathBuf>,
     /// Exact download directory, overriding configured folder components
@@ -132,8 +132,17 @@ struct Args {
         conflicts_with = "dump_json"
     )]
     get_urls: bool,
-    /// Print extracted media as a JSON array without downloading
-    #[arg(short = 'j', long, visible_alias = "resolve-json", short_alias = 'J')]
+    /// Print JSON information (upstream message lists) without downloading
+    #[arg(
+        short = 'j',
+        long = "dump-json",
+        visible_alias = "resolve-json",
+        short_alias = 'J',
+        conflicts_with_all = ["get_urls", "dump_json"]
+    )]
+    dump_messages: bool,
+    /// Print the extracted native media jobs as a JSON array
+    #[arg(long = "dump-media-json", hide = true)]
     dump_json: bool,
     /// Save post metadata in a JSON sidecar beside each completed media file
     #[arg(long, conflicts_with_all = ["get_urls", "dump_json"])]
@@ -300,6 +309,9 @@ struct Args {
     /// Do not skip downloads; overwrite existing files
     #[arg(long)]
     no_skip: bool,
+    /// Upstream `skip: "enumerate"` (configuration only).
+    #[arg(skip)]
+    skip_enumerate: bool,
     /// Username to login with
     #[arg(short = 'u', long, value_name = "USER")]
     username: Option<String>,
@@ -736,15 +748,23 @@ async fn async_main(args: Args) {
             signal = tokio::signal::ctrl_c() => (signal.map_err(Into::into), true),
         }
     };
-    if let Err(e) = result {
-        eprintln!("error: {e}");
-        gallery_dl_rs::logfile::finish();
-        std::process::exit(1);
-    }
     if interrupted {
         eprintln!("cancelled");
         gallery_dl_rs::logfile::finish();
         std::process::exit(130);
+    }
+    let base = match result {
+        Err(e) => {
+            eprintln!("error: {e}");
+            1
+        }
+        Ok(()) => 0,
+    };
+    // `status` and `exit` actions change the exit status.
+    let status = gallery_dl_rs::actions::exit_status(base);
+    if status != 0 {
+        gallery_dl_rs::logfile::finish();
+        std::process::exit(status);
     }
 }
 
@@ -764,7 +784,8 @@ async fn run(args: Args) -> Result<()> {
         ));
     }
     if args.compat {
-        return Err(error("--compat (legacy category names) is not supported"));
+        // Takes precedence over a configured `category-map`.
+        gallery_dl_rs::filter::set_category_map(&serde_json::Value::String("compat".into()));
     }
     if args.cache_status
         || args.cache_show.is_some()
@@ -862,8 +883,7 @@ async fn run(args: Args) -> Result<()> {
         args.quiet = true;
     }
     // Upstream `output` section: files for logs, unsupported and failed
-    // URLs, `mode: null` and printing skipped files.
-    let mut print_skipped = true;
+    // URLs and `mode: null` (skipped files: see `gallery_dl_rs::output`).
     if let Some(output) = globals
         .and_then(|g| g.get("output"))
         .and_then(serde_json::Value::as_object)
@@ -895,9 +915,19 @@ async fn run(args: Args) -> Result<()> {
             }
             _ => {}
         }
-        if output.get("skip") == Some(&serde_json::Value::Bool(false)) {
-            print_skipped = false;
-        }
+    }
+    if let Some(value) = globals.and_then(|g| g.get("output")?.get("log")) {
+        gallery_dl_rs::actions::set_log_format(value);
+    }
+    if let Some(value) = globals.and_then(|g| g.get("category-map")) {
+        gallery_dl_rs::filter::set_category_map(value);
+    }
+    if let Some(value) = globals.and_then(|g| g.get("keywords-default")) {
+        gallery_dl_rs::naming::set_keywords_default(value.clone());
+    }
+    // Upstream `actions`: run actions for matching log messages.
+    if let Some(spec) = globals.and_then(|g| g.get("actions")) {
+        gallery_dl_rs::actions::install(gallery_dl_rs::actions::LogActions::parse(spec)?);
     }
     let global_sleep = |key: &str| {
         globals.and_then(|g| g.get(key)).and_then(|value| {
@@ -969,7 +999,7 @@ async fn run(args: Args) -> Result<()> {
             match mode {
                 "abort" => args.abort = args.abort.or(limit),
                 "terminate" | "exit" => args.terminate = args.terminate.or(limit),
-                "enumerate" => return Err(error("skip: enumerate is not supported natively")),
+                "enumerate" => args.skip_enumerate = true,
                 _ => {}
             }
         }
@@ -1037,29 +1067,30 @@ async fn run(args: Args) -> Result<()> {
     let mut seen = HashSet::new();
     // Pull one input at a time, retaining one parsed message and active downloads.
     // buffer_unordered below supplies backpressure when all download slots are full.
-    let job_configurations = std::sync::Arc::new(if args.dump_json || args.get_urls {
-        BTreeMap::new()
-    } else {
-        settings
-            .iter()
-            .filter_map(|(category, settings)| {
-                settings.postprocessors.as_ref().map(|processors| {
-                    (
-                        (*category).to_owned(),
-                        gallery_dl_rs::postprocess::jobs::JobConfiguration {
-                            processors: processors.clone(),
-                            root: settings.options.base_directory.clone().unwrap(),
-                            filename: settings.filename.clone(),
-                            directory: settings.directory.clone(),
-                            init: settings.options.init.unwrap_or(false),
-                        },
-                    )
+    let job_configurations =
+        std::sync::Arc::new(if args.dump_json || args.dump_messages || args.get_urls {
+            BTreeMap::new()
+        } else {
+            settings
+                .iter()
+                .filter_map(|(category, settings)| {
+                    settings.postprocessors.as_ref().map(|processors| {
+                        (
+                            (*category).to_owned(),
+                            gallery_dl_rs::postprocess::jobs::JobConfiguration {
+                                processors: processors.clone(),
+                                root: settings.options.base_directory.clone().unwrap(),
+                                filename: settings.filename.clone(),
+                                directory: settings.directory.clone(),
+                                init: settings.options.init.unwrap_or(false),
+                            },
+                        )
+                    })
                 })
-            })
-            .collect()
-    });
+                .collect()
+        });
     let job_configurations_for = |settings: &SettingsMap| {
-        std::sync::Arc::new(if args.dump_json || args.get_urls {
+        std::sync::Arc::new(if args.dump_json || args.dump_messages || args.get_urls {
             BTreeMap::new()
         } else {
             settings
@@ -1081,6 +1112,43 @@ async fn run(args: Args) -> Result<()> {
                 .collect()
         })
     };
+    // Upstream `output.progress`: `[CURRENT/TOTAL] URL` before each input
+    // when there is more than one (and not with -q). Standard input cannot
+    // be counted in advance, so it shows no progress.
+    let progress_format = match GLOBAL_OPTIONS
+        .get()
+        .and_then(|g| g.get("output"))
+        .and_then(|o| o.get("progress"))
+    {
+        None | Some(serde_json::Value::Bool(true)) => Some("[{current}/{total}] {url}".to_owned()),
+        Some(serde_json::Value::String(format)) => Some(format.clone()),
+        _ => None,
+    };
+    let progress_total = (!args.quiet && progress_format.is_some())
+        .then(|| {
+            let mut total = args.urls.len();
+            for path in args
+                .input_files
+                .iter()
+                .chain(&args.input_file_comment)
+                .chain(&args.input_file_delete)
+            {
+                if path.as_os_str() == "-" {
+                    return None;
+                }
+                let text = std::fs::read_to_string(path).ok()?;
+                total += text
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with('-'))
+                    .count();
+            }
+            Some(total)
+        })
+        .flatten()
+        .filter(|total| *total > 1);
+    let progress = progress_format.as_deref();
+    let progress_total = &progress_total;
     let media = inputs
         .items()
         .take_while(|_| std::future::ready(!terminated.load(std::sync::atomic::Ordering::Acquire)))
@@ -1088,6 +1156,7 @@ async fn run(args: Args) -> Result<()> {
         .then(|(index, item)| {
             let (args, option_settings, input_settings, input_origins) =
                 (&args, &option_settings, &input_settings, &input_origins);
+            let progress_total = *progress_total;
             async move {
                 let item = match item {
                     Ok(item) => item,
@@ -1095,6 +1164,17 @@ async fn run(args: Args) -> Result<()> {
                 };
                 if let Some(origin) = item.origin {
                     input_origins.borrow_mut().insert(index, origin);
+                }
+                if let Some(format) = progress
+                    && let Some(total) = progress_total
+                {
+                    eprintln!(
+                        "{}",
+                        format
+                            .replace("{current}", &(index + 1).to_string())
+                            .replace("{total}", &total.to_string())
+                            .replace("{url}", &item.url)
+                    );
                 }
                 if item.options.is_empty() {
                     return (index, Ok(item.url), None);
@@ -1235,6 +1315,7 @@ async fn run(args: Args) -> Result<()> {
                 }
                 Err(e) => stream::once(async move { Err(e) }).boxed(),
             };
+            let log_name = root_category.clone().unwrap_or_else(|| "gallery-dl".into());
             let input = input
                 .take_while(move |_| {
                     std::future::ready(
@@ -1257,7 +1338,27 @@ async fn run(args: Args) -> Result<()> {
                 std::future::ready(match result {
                     Ok(item) => Some((index, item)),
                     Err(e) => {
-                        eprintln!("extraction failed for input {}: {e}", index + 1);
+                        gallery_dl_rs::actions::fail(gallery_dl_rs::actions::classify(
+                            &e.to_string(),
+                        ));
+                        let message = format!("extraction failed for input {}: {e}", index + 1);
+                        match gallery_dl_rs::actions::log_as(
+                            &log_name,
+                            gallery_dl_rs::actions::ERROR,
+                            &message,
+                        )
+                        .err()
+                        .and_then(|e| gallery_dl_rs::Stop::of(&e))
+                        {
+                            Some(gallery_dl_rs::Stop::Abort) => {
+                                aborted
+                                    .lock()
+                                    .expect("abort state lock poisoned")
+                                    .insert(index);
+                            }
+                            Some(_) => terminated.store(true, std::sync::atomic::Ordering::Release),
+                            None => {}
+                        }
                         failed.set(failed.get() + 1);
                         failed_inputs.borrow_mut().insert(index);
                         None
@@ -1357,6 +1458,7 @@ async fn run(args: Args) -> Result<()> {
             ) {
                 Ok(path) => println!("# {}", path.display()),
                 Err(e) => {
+                    gallery_dl_rs::actions::fail(gallery_dl_rs::actions::code::FORMAT);
                     eprintln!("simulation failed: {e}");
                     failed.set(failed.get() + 1);
                 }
@@ -1365,6 +1467,8 @@ async fn run(args: Args) -> Result<()> {
     } else if args.dump_json {
         let media: Vec<_> = media.map(|(_, job)| job.media).collect().await;
         println!("{}", serde_json::to_string_pretty(&media)?);
+    } else if args.dump_messages {
+        dump_messages(media).await?;
     } else if args.get_urls {
         while let Some((_, item)) = media.next().await {
             println!("{}", item.media.url);
@@ -1373,6 +1477,53 @@ async fn run(args: Args) -> Result<()> {
         let client = download::client(Duration::from_secs(60))?
             .with_resume(args.resume)
             .with_overwrite(args.no_skip)
+            .with_enumerate(args.skip_enumerate)
+            .with_http_options(
+                downloader_option("adjust-extensions").is_none_or(|v| v != false),
+                downloader_option("validate-html").is_none_or(|v| v != false),
+                downloader_option("retry-codes")
+                    .or_else(|| GLOBAL_OPTIONS.get()?.get("retry-codes").cloned())
+                    .and_then(|v| v.as_array().cloned())
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|code| code.as_u64()?.try_into().ok())
+                    .collect(),
+            )
+            .with_part_directory(
+                downloader_option("part-directory")
+                    .as_ref()
+                    .and_then(serde_json::Value::as_str)
+                    .map(gallery_dl_rs::postprocess::expand_path),
+            )
+            .with_metadata_http(
+                ["metadata-http", "http-metadata"]
+                    .iter()
+                    .find_map(|key| GLOBAL_OPTIONS.get()?.get(*key)?.as_str().map(str::to_owned)),
+            )
+            .with_progress({
+                // Upstream shows progress only in terminal output modes.
+                use std::io::IsTerminal;
+                let terminal = std::io::stdout().is_terminal()
+                    && std::io::stderr().is_terminal()
+                    && !args.quiet
+                    && GLOBAL_OPTIONS
+                        .get()
+                        .and_then(|g| g.get("output")?.get("mode"))
+                        .is_none_or(|m| {
+                            m.as_str().is_some_and(|m| {
+                                matches!(m, "auto" | "terminal" | "term" | "color")
+                            })
+                        });
+                match downloader_option("progress") {
+                    _ if !terminal => None,
+                    None => Some(Duration::from_secs(3)),
+                    Some(serde_json::Value::Number(n)) => n
+                        .as_f64()
+                        .filter(|s| *s >= 0.0)
+                        .map(Duration::from_secs_f64),
+                    Some(_) => None,
+                }
+            })
             .with_no_download(args.no_download)
             .with_http_mtime(!args.no_mtime)
             .with_metadata_mtime(args.mtime.clone())
@@ -1380,8 +1531,23 @@ async fn run(args: Args) -> Result<()> {
             .with_rate_limit(args.limit_rate)
             .with_ytdl((!args.no_ytdl).then_some(ytdl_command(&args)))
             .with_ytdl_cookies(ytdl_cookies(&args));
+        // Upstream `output.mode`: report files on standard output.
+        let output = gallery_dl_rs::output::Output::new(
+            GLOBAL_OPTIONS
+                .get()
+                .and_then(|g| g.get("output"))
+                .and_then(serde_json::Value::as_object),
+            args.quiet,
+        );
         let aborted = &aborted;
         let terminated = &terminated;
+        let skip_filter = GLOBAL_OPTIONS
+            .get()
+            .and_then(|g| g.get("skip-filter"))
+            .and_then(serde_json::Value::as_str)
+            .map(gallery_dl_rs::filter::FilterExpression::parse)
+            .transpose()?;
+        let skip_filter = &skip_filter;
         let results = media
             .map(|(index, job)| {
                 let gallery_dl_rs::postprocess::jobs::JobMedia { media: item, scope } = job;
@@ -1437,7 +1603,15 @@ async fn run(args: Args) -> Result<()> {
                         match archive {
                             Some((cell, path)) => {
                                 let archive = cell
-                                    .get_or_init(|| Archive::open(path))
+                                    .get_or_init(|| async {
+                                        let globals = GLOBAL_OPTIONS.get();
+                                        Archive::open(path).await.map(|archive| {
+                                            archive.with_options(
+                                                globals.and_then(|g| g.get("archive-event")),
+                                                globals.and_then(|g| g.get("archive-mode")),
+                                            )
+                                        })
+                                    })
                                     .await
                                     .as_ref()
                                     .map_err(|e| {
@@ -1472,7 +1646,12 @@ async fn run(args: Args) -> Result<()> {
                     {
                         scope.fail();
                     }
-                    (index, Some(result))
+                    // Upstream `skip-filter`: only matching skipped files
+                    // count toward abort/terminate limits.
+                    let counted = skip_filter
+                        .as_ref()
+                        .is_none_or(|filter| filter.matches(&item).unwrap_or(false));
+                    (index, Some((result, counted)))
                 }
             })
             .buffer_unordered(args.jobs as usize);
@@ -1480,13 +1659,17 @@ async fn run(args: Args) -> Result<()> {
         let mut skipped = 0u64;
         let mut input_skipped = BTreeMap::<usize, u64>::new();
         while let Some((index, result)) = results.next().await {
-            let Some(result) = result else { continue };
+            let Some((result, counted)) = result else {
+                continue;
+            };
             let input = input_skipped.entry(index).or_default();
-            if matches!(
-                result,
-                Ok(ArchiveOutcome::Completed(Outcome::Skipped(_))
-                    | ArchiveOutcome::AlreadyArchived)
-            ) {
+            if counted
+                && matches!(
+                    result,
+                    Ok(ArchiveOutcome::Completed(Outcome::Skipped(_))
+                        | ArchiveOutcome::AlreadyArchived)
+                )
+            {
                 skipped += 1;
                 *input += 1;
             } else if matches!(
@@ -1509,14 +1692,10 @@ async fn run(args: Args) -> Result<()> {
             }
             match result {
                 Ok(ArchiveOutcome::Completed(Outcome::Downloaded(path))) => {
-                    if !args.quiet {
-                        eprintln!("downloaded {}", path.display());
-                    }
+                    output.success(&path.to_string_lossy());
                 }
                 Ok(ArchiveOutcome::Completed(Outcome::Skipped(path))) => {
-                    if !args.quiet && print_skipped {
-                        eprintln!("skipped {}", path.display())
-                    }
+                    output.skip(&path.to_string_lossy());
                     if let Some(sleep) = &args.sleep_skip {
                         sleep.wait().await;
                     }
@@ -1525,8 +1704,49 @@ async fn run(args: Args) -> Result<()> {
                     eprintln!("filtered media: {reason}")
                 }
                 Ok(ArchiveOutcome::AlreadyArchived) => eprintln!("skipped archived media"),
+                Err(e) if gallery_dl_rs::Stop::of(&e).is_some() => {
+                    match gallery_dl_rs::Stop::of(&e) {
+                        Some(gallery_dl_rs::Stop::Abort) => {
+                            aborted
+                                .lock()
+                                .expect("abort state lock poisoned")
+                                .insert(index);
+                        }
+                        _ => {
+                            terminated.store(true, std::sync::atomic::Ordering::Release);
+                        }
+                    }
+                    if !args.quiet {
+                        eprintln!("{e}");
+                    }
+                }
                 Err(e) => {
-                    eprintln!("download failed: {e}");
+                    gallery_dl_rs::actions::fail(
+                        if e.downcast_ref::<std::io::Error>()
+                            .is_some_and(|e| e.kind() != std::io::ErrorKind::Other)
+                        {
+                            gallery_dl_rs::actions::code::OS
+                        } else {
+                            gallery_dl_rs::actions::code::HTTP
+                        },
+                    );
+                    match gallery_dl_rs::actions::log_as(
+                        "download",
+                        gallery_dl_rs::actions::ERROR,
+                        &format!("download failed: {e}"),
+                    )
+                    .err()
+                    .and_then(|e| gallery_dl_rs::Stop::of(&e))
+                    {
+                        Some(gallery_dl_rs::Stop::Abort) => {
+                            aborted
+                                .lock()
+                                .expect("abort state lock poisoned")
+                                .insert(index);
+                        }
+                        Some(_) => terminated.store(true, std::sync::atomic::Ordering::Release),
+                        None => {}
+                    }
                     failed.set(failed.get() + 1);
                     failed_inputs.borrow_mut().insert(index);
                 }
@@ -1537,6 +1757,22 @@ async fn run(args: Args) -> Result<()> {
                 // Stop new work while draining active files and finalization hooks.
                 eprintln!("stopping after {skipped} consecutive skipped files");
             }
+        }
+    }
+    // Upstream `archive-mode: memory` writes its keys at the end of a run
+    // without errors.
+    let extra: Vec<_> = extra_archives
+        .lock()
+        .expect("archive map lock poisoned")
+        .values()
+        .copied()
+        .collect();
+    for cell in archives.values().chain(extra).filter(|_| failed.get() == 0) {
+        if let Some(Ok(archive)) = cell.get()
+            && let Err(e) = archive.finalize().await
+        {
+            eprintln!("download archive update failed: {e}");
+            failed.set(failed.get() + 1);
         }
     }
     if let Some(path) = &args.cookies_export {
@@ -1947,8 +2183,13 @@ fn extract_input<'a>(
                     let native = extractors
                         .imgur
                         .get_or_init(|| async {
+                            let cookies = extractors
+                                .cookie_jar(configured, "imgur.com")
+                                .await
+                                .unwrap_or_default();
                             gallery_dl_rs::imgur::Imgur::new(backend.timeout).and_then(|native| {
                                 native
+                                    .with_cookies(cookies)
                                     .with_mp4(options.mp4.unwrap_or(true))
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
@@ -2329,6 +2570,7 @@ fn extract_input<'a>(
                                             options.client_id.as_deref(),
                                             options.client_secret.as_deref(),
                                         )
+                                        .with_refresh_token(options.refresh_token.as_deref())
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -2883,6 +3125,128 @@ fn print_extractor_info(
     Ok(())
 }
 
+/// Upstream `DataJob` output: `[2, POST]` before each post's files and
+/// `[3, URL, FILE]` for every file. `output.private` keeps `_` keys,
+/// `output.num-to-str` turns numbers into strings, `output.jsonl` prints one
+/// message per line and `output.ascii` (default true) escapes non-ASCII.
+async fn dump_messages(
+    media: impl futures_util::Stream<Item = (usize, gallery_dl_rs::postprocess::jobs::JobMedia)>,
+) -> Result<()> {
+    use serde_json::{Value, json};
+    let output = GLOBAL_OPTIONS
+        .get()
+        .and_then(|g| g.get("output"))
+        .and_then(Value::as_object);
+    let flag = |key: &str, default: bool| {
+        output
+            .and_then(|o| o.get(key))
+            .map_or(default, |v| !matches!(v, Value::Null | Value::Bool(false)))
+    };
+    let (private, num_to_str, jsonl, ascii) = (
+        flag("private", false),
+        flag("num-to-str", false),
+        flag("jsonl", false),
+        flag("ascii", true),
+    );
+    fn numbers_to_strings(value: &mut Value) {
+        match value {
+            Value::Number(n) => *value = Value::String(n.to_string()),
+            Value::Array(values) => values.iter_mut().for_each(numbers_to_strings),
+            Value::Object(map) => map.values_mut().for_each(numbers_to_strings),
+            _ => {}
+        }
+    }
+    let encode = |value: &Value, pretty: bool| -> String {
+        let text = if pretty {
+            serde_json::to_string_pretty(value)
+        } else {
+            serde_json::to_string(value)
+        }
+        .unwrap_or_default();
+        if !ascii {
+            return text;
+        }
+        let mut out = String::with_capacity(text.len());
+        for c in text.chars() {
+            if c.is_ascii() {
+                out.push(c);
+            } else {
+                let mut buffer = [0u16; 2];
+                for unit in c.encode_utf16(&mut buffer) {
+                    out.push_str(&format!("\\u{unit:04x}"));
+                }
+            }
+        }
+        out
+    };
+    let mut messages = Vec::new();
+    let emit = |message: Value, messages: &mut Vec<Value>| {
+        if jsonl {
+            println!("{}", encode(&message, false));
+        } else {
+            messages.push(message);
+        }
+    };
+    let mut previous: Option<(usize, String, String)> = None;
+    tokio::pin!(media);
+    while let Some((index, job)) = media.next().await {
+        let item = &job.media;
+        let mut keywords =
+            gallery_dl_rs::postprocess::public_keywords(&gallery_dl_rs::postprocess::context(item));
+        // `exts_*` are filter helpers, not keywords.
+        keywords.retain(|key, _| !key.starts_with("exts_") && (private || !key.starts_with('_')));
+        let mut file = Value::Object(keywords.clone());
+        let post_id = item
+            .metadata
+            .as_ref()
+            .map(|m| m.post_id.clone())
+            .unwrap_or_default();
+        let post = (index, item.category.clone(), post_id);
+        if previous.as_ref() != Some(&post) || post.2.is_empty() && item.metadata.is_none() {
+            let mut directory = keywords;
+            for key in ["filename", "extension", "name"] {
+                directory.remove(key);
+            }
+            let mut directory = Value::Object(directory);
+            if num_to_str {
+                numbers_to_strings(&mut directory);
+            }
+            emit(json!([2, directory]), &mut messages);
+            previous = Some(post);
+        }
+        if num_to_str {
+            numbers_to_strings(&mut file);
+        }
+        emit(json!([3, item.url.as_str(), file]), &mut messages);
+    }
+    if !jsonl {
+        // Like upstream's `sort_keys=True`.
+        fn sorted(value: Value) -> Value {
+            match value {
+                Value::Array(values) => Value::Array(values.into_iter().map(sorted).collect()),
+                Value::Object(map) => {
+                    let mut entries: Vec<_> = map.into_iter().collect();
+                    entries.sort_by(|a, b| a.0.cmp(&b.0));
+                    Value::Object(entries.into_iter().map(|(k, v)| (k, sorted(v))).collect())
+                }
+                value => value,
+            }
+        }
+        println!("{}", encode(&sorted(Value::Array(messages)), true));
+    }
+    Ok(())
+}
+
+/// A `downloader.http.KEY` or `downloader.KEY` setting.
+fn downloader_option(key: &str) -> Option<serde_json::Value> {
+    let downloader = GLOBAL_OPTIONS.get()?.get("downloader")?;
+    downloader
+        .get("http")
+        .and_then(|http| http.get(key))
+        .or_else(|| downloader.get(key))
+        .cloned()
+}
+
 /// Upstream `PrintAction`: a metadata postprocessor writing FORMAT.
 fn print_postprocessor(value: &str, file: Option<&str>) -> Option<serde_json::Value> {
     const EVENTS: &[&str] = &[
@@ -3176,6 +3540,10 @@ async fn resolved_settings(
     } else if args.windows_filenames {
         path_options.insert("path-restrict".into(), "windows".into());
     }
+    // Like upstream, `path-restrict` defaults to `auto`.
+    path_options
+        .entry("path-restrict")
+        .or_insert_with(|| "auto".into());
     if let Some(options) = gallery_dl_rs::path_options::PathOptions::parse(&path_options)? {
         options.install();
     }
@@ -3195,7 +3563,8 @@ async fn resolved_settings(
         .and_then(serde_json::Value::as_bool)
         != Some(false);
     let defaults = ConfigOptions {
-        base_directory: Some(PathBuf::from("downloads")),
+        // Upstream `base-directory` default.
+        base_directory: Some(PathBuf::from("gallery-dl")),
         retries: Some(downloader_number("retries").map_or(2, |retries| retries.min(10.0) as u8)),
         timeout: Some(
             downloader_number("timeout")
@@ -3507,8 +3876,21 @@ async fn resolved_settings(
             .transpose()?;
         let post_selection = (post_range.is_some() || post_filter.is_some() || tags.is_some())
             .then(|| PostSelection::new(post_range, post_filter).with_tags(tags.clone()));
-        let network = NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?
+        // Upstream `proxy-env: false`: ignore proxy environment variables
+        // (an empty proxy disables proxy discovery).
+        let proxy = options.proxy.clone().or_else(|| {
+            (config.globals().get("proxy-env") == Some(&serde_json::Value::Bool(false)))
+                .then(String::new)
+        });
+        let network = NetworkOptions::new(proxy, options.user_agent.clone())?
             .with_insecure(args.no_check_certificate || !downloader_verify)
+            .with_ciphers(config.globals().get("ciphers"))?
+            .with_tls(
+                config.globals().get("tls12") != Some(&serde_json::Value::Bool(false)),
+                config.globals().get("truststore").is_some_and(|v| {
+                    !matches!(v, serde_json::Value::Null | serde_json::Value::Bool(false))
+                }),
+            )
             .with_geo_bypass(geo_bypass.as_deref())?
             .with_source_address(source_address.or_else(|| {
                 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};

@@ -42,6 +42,7 @@ pub static SITE: Site = Site {
         &USER_IMAGES,
         &USER_VIDEOS,
         &USER_COLLECTIONS,
+        &GENERATED,
     ],
     api_key: true,
     cookies: None,
@@ -87,6 +88,12 @@ static SEARCH_IMAGES: Route = Route::new("search-images", FILENAME, DIRECTORY, A
 static MODELS: Route = Route::new("models", FILENAME, DIRECTORY, ARCHIVE);
 static IMAGES: Route = Route::new("images", FILENAME, DIRECTORY, ARCHIVE);
 static VIDEOS: Route = Route::new("videos", FILENAME, DIRECTORY, ARCHIVE);
+static GENERATED: Route = Route::new(
+    "generated",
+    "{filename}.{extension}",
+    &["{category}", "generated"],
+    "{file[uuid]}",
+);
 static POSTS: Route = Route::new("posts", FILENAME, DIRECTORY, ARCHIVE);
 static USER: Route = Route::new("user", FILENAME, DIRECTORY, ARCHIVE);
 static USER_MODELS: Route = Route::new("user-models", FILENAME, DIRECTORY, ARCHIVE);
@@ -123,6 +130,8 @@ enum Target {
     UserImages(String, Option<String>),
     UserVideos(String, Option<String>),
     UserCollections(String, Option<String>),
+    /// `/generate`: the logged-in user's generated images (needs `api-key`).
+    Generated,
 }
 
 fn id(text: &str) -> Option<i64> {
@@ -166,6 +175,7 @@ fn target(url: &Url) -> Option<Target> {
                 version,
             });
         }
+        ["generate", ..] => return Some(Target::Generated),
         ["images", image, ..] if id(image).is_some() => return Some(Target::Image(id(image)?)),
         ["collections", c, ..] if id(c).is_some() => return Some(Target::Collection(id(c)?)),
         ["posts", post, ..] if id(post).is_some() => return Some(Target::Post(id(post)?)),
@@ -793,6 +803,59 @@ where
     })
 }
 
+/// Upstream `CivitaiGeneratedExtractor`: every image of every step of the
+/// user's generations (`orchestrator.queryGeneratedImages`).
+fn generated_flow(http: &Http) -> Events<'_> {
+    if http.api_key().is_none() {
+        return crate::sites::fail(error("civitai generated images need an api-key"));
+    }
+    let params = object(json!({"ascending": false, "tags": ["gen"], "authed": true}));
+    trpc_paginate(
+        http,
+        "orchestrator.queryGeneratedImages",
+        params,
+        None,
+        move |generations| {
+            let mut events = Vec::new();
+            for mut generation in generations {
+                let steps = generation
+                    .get_mut("steps")
+                    .map(Value::take)
+                    .and_then(|v| v.as_array().cloned())
+                    .unwrap_or_default();
+                let mut info = object(generation);
+                let ts = iso(info.get("createdAt"));
+                info.insert("date".into(), date_value(ts));
+                let mut items = Vec::new();
+                for step in steps {
+                    let mut step = object(step);
+                    let images = step
+                        .shift_remove("images")
+                        .and_then(|v| v.as_array().cloned())
+                        .unwrap_or_default();
+                    for image in images {
+                        let Some(url) = image
+                            .get("url")
+                            .and_then(Value::as_str)
+                            .and_then(|u| Url::parse(u).ok())
+                        else {
+                            continue;
+                        };
+                        let mut data = step.clone();
+                        data.extend(info.clone());
+                        data.insert("file".into(), image);
+                        items.push(Item::new(url, data));
+                    }
+                }
+                if !items.is_empty() {
+                    events.push(file_events(http, &GENERATED, items));
+                }
+            }
+            Ok(chain(events))
+        },
+    )
+}
+
 fn chain<'a>(parts: Vec<Events<'a>>) -> Events<'a> {
     stream::iter(parts).flatten().boxed()
 }
@@ -1274,6 +1337,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                     None => crate::sites::events(Vec::new()),
                 })
             }),
+            Target::Generated => generated_flow(http),
             Target::Collection(id) => collection_flow(http, cfg, id),
             Target::Post(id) => post_events(http, &POST, cfg, json!({"id": id})),
             Target::Tag(tag) => {
@@ -1431,13 +1495,13 @@ mod tests {
             t("https://civitai.com/user/w/collections"),
             Some(Target::UserCollections(..))
         ));
+        assert_eq!(t("https://civitai.com/generate"), Some(Target::Generated));
         for raw in [
             "https://civitai.com/",
             "https://civitai.com/models/",
             "https://civitai.com/search/models",
             "https://civitai.com/user/w/images?section=reactions",
             "https://civitai.com/user/w/videos?section=reactions",
-            "https://civitai.com/generate",
             "https://civitai.com/user/w/unknown",
             "https://civitai.com.evil.com/models/1",
             "https://evilcivitai.com/models/1",

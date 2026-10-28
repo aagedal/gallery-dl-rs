@@ -885,6 +885,7 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
         ("imgur.com", "imgur"),
         ("reddit.com", "reddit"),
         ("redd.it", "reddit"),
+        ("reddituploads.com", "reddit"),
         ("danbooru.donmai.us", "danbooru"),
         ("hijiribe.donmai.us", "danbooru"),
         ("sonohara.donmai.us", "danbooru"),
@@ -892,11 +893,18 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
         ("donmai.moe", "danbooru"),
         ("e621.net", "e621"),
         ("e926.net", "e621"),
+        // Upstream `E621FrontendExtractor` sites and the e621.cc mirror.
+        ("e621.cc", "e621"),
+        ("e621.anthro.fr", "e621"),
         ("gelbooru.com", "gelbooru"),
         ("safebooru.org", "safebooru"),
         ("imgur.io", "imgur"),
         ("twitter.com", "twitter"),
         ("x.com", "twitter"),
+        ("fxtwitter.com", "twitter"),
+        ("vxtwitter.com", "twitter"),
+        ("fixupx.com", "twitter"),
+        ("fixvx.com", "twitter"),
     ] {
         if host == domain || host.ends_with(&format!(".{domain}")) {
             return Some(category);
@@ -911,8 +919,10 @@ pub fn direct(url: &Url) -> Option<Media> {
     let manifest = manifest_protocol(url);
     if manifest.is_none()
         && ![
-            "jpg", "jpeg", "png", "gif", "webp", "avif", "heic", "bmp", "svg", "mp4", "webm",
-            "mov", "m4v", "mkv", "mp3", "ogg", "wav", "zip", "pdf",
+            // Upstream `DirectlinkExtractor` extensions.
+            "jpg", "jpeg", "jpe", "png", "gif", "webp", "avif", "heic", "bmp", "svg", "psd", "mp4",
+            "webm", "mov", "m4v", "mkv", "mp3", "ogg", "ogm", "ogv", "wav", "opus", "zip", "rar",
+            "7z", "pdf", "swf",
         ]
         .contains(&extension.to_ascii_lowercase().as_str())
     {

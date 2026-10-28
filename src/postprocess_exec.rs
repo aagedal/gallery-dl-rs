@@ -22,6 +22,12 @@ pub struct ExecOptions {
     output: bool,
     verbose: bool,
     session: bool,
+    /// Upstream `success`/`error`: actions run after each command.
+    success: Option<crate::actions::Actions>,
+    failure: Option<crate::actions::Actions>,
+    /// Upstream `archive`: skip files this command already processed.
+    archive: Option<std::sync::Arc<super::archive::ArchiveConfig>>,
+    archive_session: std::sync::Arc<tokio::sync::OnceCell<Option<super::archive::ArchiveSession>>>,
 }
 impl std::fmt::Debug for ExecOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -120,7 +126,7 @@ pub fn substitute(command: &str, paths: &ExecPaths<'_>) -> String {
 }
 
 impl ExecOptions {
-    pub fn parse(options: &Map<String, Value>) -> Result<Self> {
+    pub fn parse(options: &Map<String, Value>, base: &Path) -> Result<Self> {
         let commands = match options.get("commands").filter(|v| truthy(v)) {
             Some(Value::Array(commands)) if commands.len() <= 64 => {
                 commands.iter().map(command).collect::<Result<Vec<_>>>()?
@@ -132,13 +138,15 @@ impl ExecOptions {
                     .ok_or_else(|| error("exec requires a command"))?,
             )?],
         };
-        for key in ["archive", "success", "error"] {
-            if options.get(key).is_some_and(truthy) {
-                return Err(error(format!(
-                    "exec option '{key}' is not supported natively"
-                )));
-            }
-        }
+        let archive = super::archive::ArchiveConfig::parse(options, base)?
+            .map(|config| std::sync::Arc::new(config.with_marker("_EXEC_")));
+        let actions = |key: &str| {
+            options
+                .get(key)
+                .filter(|v| !v.is_null())
+                .map(crate::actions::Actions::parse)
+                .transpose()
+        };
         let flag = |key: &str, default: bool| options.get(key).map_or(default, truthy);
         Ok(Self {
             // Upstream only honors `async` for a single command.
@@ -146,12 +154,77 @@ impl ExecOptions {
             output: flag("output", true),
             verbose: flag("verbose", true),
             session: flag("session", false),
+            archive,
+            archive_session: Default::default(),
+            success: actions("success")?,
+            failure: actions("error")?,
             commands,
         })
     }
 
     /// Run each command in order, stopping after the first non-zero exit.
     /// Like upstream, a failing command logs a warning instead of failing the file.
+    /// The archive session, opened for the first file like upstream.
+    async fn archive_session(
+        &self,
+        context: &Map<String, Value>,
+        media: &crate::extract::Media,
+        root: &Path,
+        directory: &Path,
+    ) -> Option<&super::archive::ArchiveSession> {
+        let config = self.archive.as_ref()?;
+        self.archive_session
+            .get_or_init(|| async {
+                let descriptor = crate::source_archive::for_media(media);
+                let category = descriptor
+                    .as_ref()
+                    .map(|d| d.category.clone())
+                    .unwrap_or_else(|| media.category.clone());
+                match config
+                    .open(
+                        &category,
+                        descriptor.as_ref().map(|d| d.format.as_str()),
+                        context,
+                        root,
+                        directory,
+                    )
+                    .await
+                {
+                    Ok(session) => Some(session),
+                    Err(failure) => {
+                        eprintln!("warning: failed to open exec archive: {failure}");
+                        None
+                    }
+                }
+            })
+            .await
+            .as_ref()
+    }
+
+    /// [`ExecOptions::run`] with archive checks for `media`.
+    pub async fn run_archived(
+        &self,
+        context: &mut Map<String, Value>,
+        paths: ExecPaths<'_>,
+        media: &crate::extract::Media,
+        root: &Path,
+    ) -> Result<()> {
+        let directory = paths
+            .directory
+            .map(Path::to_path_buf)
+            .or_else(|| paths.path.and_then(Path::parent).map(Path::to_path_buf))
+            .unwrap_or_else(|| root.to_path_buf());
+        let Some(session) = self.archive_session(context, media, root, &directory).await else {
+            return self.run(context, paths).await;
+        };
+        let check = session.check(context).await?;
+        if check.hit {
+            return Ok(());
+        }
+        self.run(context, paths).await?;
+        session.add(context).await
+    }
+
     pub async fn run(&self, context: &mut Map<String, Value>, paths: ExecPaths<'_>) -> Result<()> {
         if self.commands.iter().any(|c| matches!(c, Command::Args(_))) {
             context.insert("_directory".into(), paths.directory().into());
@@ -220,11 +293,21 @@ impl ExecOptions {
             }
             let status = child.wait().await?;
             if !status.success() {
-                eprintln!(
-                    "warning: '{display}' returned with non-zero exit status ({})",
-                    status.code().unwrap_or(-1)
-                );
+                crate::actions::log_as(
+                    "postprocessor.exec",
+                    crate::actions::WARNING,
+                    &format!(
+                        "'{display}' returned with non-zero exit status ({})",
+                        status.code().unwrap_or(-1)
+                    ),
+                )?;
+                if let Some(actions) = &self.failure {
+                    actions.run(Some(context)).await?;
+                }
                 break;
+            }
+            if let Some(actions) = &self.success {
+                actions.run(Some(context)).await?;
             }
         }
         Ok(())
@@ -237,7 +320,7 @@ mod tests {
     use serde_json::json;
 
     fn options(value: Value) -> ExecOptions {
-        ExecOptions::parse(value.as_object().unwrap()).unwrap()
+        ExecOptions::parse(value.as_object().unwrap(), Path::new("/")).unwrap()
     }
 
     #[test]
@@ -286,12 +369,28 @@ mod tests {
         assert_eq!(context["_filename"], "media file.jpg");
     }
 
+    #[tokio::test]
+    async fn error_actions_stop_extraction() {
+        let exec = options(json!({"command": "false", "error": "terminate"}));
+        let failure = exec.run(&mut Map::new(), ExecPaths::default()).await;
+        assert_eq!(
+            crate::Stop::of(&failure.unwrap_err()),
+            Some(crate::Stop::Terminate)
+        );
+        let exec = options(json!({"command": "true", "success": "keyword done 1"}));
+        let mut context = Map::new();
+        exec.run(&mut context, ExecPaths::default()).await.unwrap();
+        assert_eq!(context["done"], 1);
+    }
+
     #[test]
     fn rejects_unsupported_options_and_missing_commands() {
-        let parse = |v: Value| ExecOptions::parse(v.as_object().unwrap());
+        let parse = |v: Value| ExecOptions::parse(v.as_object().unwrap(), Path::new("/"));
         assert!(parse(json!({})).is_err());
         assert!(parse(json!({"command": []})).is_err());
-        assert!(parse(json!({"command": "x", "archive": "a.db"})).is_err());
+        assert!(parse(json!({"command": "x", "archive": "a.db"})).is_ok());
         assert!(parse(json!({"command": "x", "async": true})).is_ok());
+        assert!(parse(json!({"command": "x", "error": "abort", "success": ["print ok"]})).is_ok());
+        assert!(parse(json!({"command": "x", "error": "nonsense"})).is_err());
     }
 }

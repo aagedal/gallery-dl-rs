@@ -147,17 +147,19 @@ async fn archive_persists_and_concurrent_connections_record_idempotently() {
 #[tokio::test]
 async fn incompatible_archives_are_rejected_without_altering_their_contents() {
     let root = tempfile::tempdir().unwrap();
+    // Python gallery-dl archives are used as they are.
     let foreign = root.path().join("python.sqlite3");
     let connection = Connection::open(&foreign).unwrap();
     connection.execute_batch("CREATE TABLE archive (entry TEXT PRIMARY KEY); INSERT INTO archive VALUES ('existing');").unwrap();
-    assert!(
-        Archive::open(&foreign)
-            .await
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("not interchangeable")
-    );
+    let python = Archive::open(&foreign).await.unwrap();
+    assert!(python.is_upstream());
+    assert!(python.contains("existing").await.unwrap());
+    let other = root.path().join("other.sqlite3");
+    Connection::open(&other)
+        .unwrap()
+        .execute_batch("CREATE TABLE things (id INTEGER)")
+        .unwrap();
+    assert!(Archive::open(&other).await.is_err());
     let value: String = connection
         .query_row("SELECT entry FROM archive", [], |r| r.get(0))
         .unwrap();
@@ -382,7 +384,7 @@ fn cli_archive_is_opt_in_persistent_and_conflicts_with_inspection() {
     let second = run();
     assert!(second.status.success());
     assert!(String::from_utf8_lossy(&second.stderr).contains("skipped archived media"));
-    for mode in ["-j", "-g"] {
+    for mode in ["--dump-media-json", "-g"] {
         let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
             .arg("--download-archive")
             .arg(root.path().join("must-not-exist.sqlite3"))
@@ -472,8 +474,8 @@ fn cli_does_not_deduplicate_a_failed_representation_by_its_stable_id() {
         .output()
         .unwrap();
     handle.join().unwrap();
-    assert_eq!(output.status.code(), Some(1)); // first job still reports its error
-    assert!(String::from_utf8_lossy(&output.stderr).contains("downloaded"));
+    assert_eq!(output.status.code(), Some(4)); // first job still reports its error
+    assert!(!String::from_utf8_lossy(&output.stdout).trim().is_empty());
     assert_eq!(records(&path), 1);
 }
 
@@ -588,7 +590,7 @@ fn cli_native_names_skip_without_overwriting_and_repair_metadata() {
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
     assert!(!invalid_archive.exists());
-    for mode in ["-j", "-g"] {
+    for mode in ["--dump-media-json", "-g"] {
         let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
             .args([mode, "-f", "{filename}", "https://example.com/a.jpg"])
             .output()

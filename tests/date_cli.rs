@@ -329,7 +329,7 @@ async fn after_boundary_terminates_unfinished_backend_and_resets_for_next_input(
     );
     let result =
         output(binary(root.path(), &backend).args(["-g", "--date-after=10", FIRST, SECOND])).await;
-    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(result.status.code(), Some(4));
     assert_eq!(
         urls(&result),
         [
@@ -353,7 +353,9 @@ async fn json_normalizes_backend_datetime_and_leaves_unknown_dates_empty() {
         ],
         &[],
     );
-    let result = output(binary(root.path(), &backend).args(["-j", "--date-before=2", FIRST])).await;
+    let result =
+        output(binary(root.path(), &backend).args(["--dump-media-json", "--date-before=2", FIRST]))
+            .await;
     success(&result);
     let items: Value = serde_json::from_slice(&result.stdout).unwrap();
     let timestamps: Vec<_> = items

@@ -24,6 +24,9 @@ use std::{
 use tokio::io::AsyncWriteExt;
 pub use ytdl::{YtdlOptions, executable as ytdl_executable, module_command as ytdl_module_command};
 
+type HeaderCapture =
+    std::sync::Arc<std::sync::Mutex<Option<serde_json::Map<String, serde_json::Value>>>>;
+
 /// Clones share the HTTP connection pool and per-origin rate-limit cooldowns.
 #[derive(Clone)]
 pub struct DownloadClient {
@@ -36,6 +39,10 @@ pub struct DownloadClient {
     mtime_http: bool,
     mtime_field: Option<String>,
     response_mtime: Option<std::sync::Arc<std::sync::Mutex<Option<SystemTime>>>>,
+    /// Response headers captured for `metadata-http`.
+    pub(crate) response_headers: Option<HeaderCapture>,
+    /// Upstream `metadata-http`: keyword receiving the response headers.
+    pub(crate) metadata_http: Option<std::sync::Arc<str>>,
     sleep: Option<crate::sleep::SleepRange>,
     /// Maximum body bytes per second for each download.
     rate: Option<u64>,
@@ -45,6 +52,20 @@ pub struct DownloadClient {
     ytdl_cookies: Option<std::sync::Arc<crate::cookies::YtdlCookies>>,
     /// Upstream `skip: false`: download and replace existing files.
     pub(crate) overwrite: bool,
+    /// Upstream `adjust-extensions`: correct extensions from file signatures.
+    pub(crate) adjust_extensions: bool,
+    /// Upstream `validate-html`: reject HTML responses for media files.
+    pub(crate) validate_html: bool,
+    /// Upstream `retry-codes`: further HTTP status codes to retry.
+    pub(crate) retry_codes: std::sync::Arc<[u16]>,
+    /// Upstream `downloader.progress`: show progress on standard error for
+    /// downloads that take longer than this.
+    pub(crate) progress: Option<Duration>,
+    /// Upstream `part-directory`: where incomplete downloads are written.
+    pub(crate) part_directory: Option<std::sync::Arc<Path>>,
+    /// Upstream `skip: "enumerate"`: save under `NAME.N.EXT` next to
+    /// existing files instead of skipping them.
+    pub(crate) enumerate: bool,
     /// Upstream `download: false`: run hooks without fetching files.
     pub(crate) no_download: bool,
 }
@@ -127,7 +148,76 @@ fn set_mtime(file: &std::fs::File, time: Option<SystemTime>) -> std::io::Result<
 }
 
 impl DownloadClient {
+    /// Upstream `util.extract_headers`: every header (in title case), plus
+    /// `filename`/`extension` from Content-Disposition and `date` from
+    /// Last-Modified.
+    fn capture_headers(&self, headers: &HeaderMap) {
+        let Some(capture) = &self.response_headers else {
+            return;
+        };
+        let mut data = serde_json::Map::new();
+        for (name, value) in headers {
+            let Ok(value) = value.to_str() else { continue };
+            let title = name
+                .as_str()
+                .split('-')
+                .map(|part| {
+                    let mut chars = part.chars();
+                    chars
+                        .next()
+                        .map(|c| c.to_ascii_uppercase().to_string() + chars.as_str())
+                        .unwrap_or_default()
+                })
+                .collect::<Vec<_>>()
+                .join("-");
+            data.insert(title, value.into());
+        }
+        if let Some(name) = headers
+            .get(reqwest::header::CONTENT_DISPOSITION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(content_disposition_filename)
+        {
+            let (stem, extension) = match name.rsplit_once('.') {
+                Some((stem, ext)) if !stem.is_empty() => (stem.to_owned(), ext.to_lowercase()),
+                _ => (name.clone(), String::new()),
+            };
+            data.insert("filename".into(), stem.into());
+            data.insert("extension".into(), extension.into());
+        }
+        if let Some(date) = headers
+            .get(reqwest::header::LAST_MODIFIED)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| httpdate::parse_http_date(v).ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .and_then(|d| time::OffsetDateTime::from_unix_timestamp(d.as_secs() as i64).ok())
+        {
+            data.insert(
+                "date".into(),
+                format!(
+                    "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                    date.year(),
+                    date.month() as u8,
+                    date.day(),
+                    date.hour(),
+                    date.minute(),
+                    date.second()
+                )
+                .into(),
+            );
+        }
+        if let Ok(mut slot) = capture.lock() {
+            *slot = Some(data);
+        }
+    }
+
+    /// Set the `metadata-http` keyword name.
+    pub fn with_metadata_http(mut self, name: Option<String>) -> Self {
+        self.metadata_http = name.filter(|n| !n.is_empty()).map(Into::into);
+        self
+    }
+
     fn capture_http_mtime(&self, headers: &HeaderMap) {
+        self.capture_headers(headers);
         if let Some(capture) = &self.response_mtime
             && let Ok(mut timestamp) = capture.lock()
         {
@@ -236,6 +326,48 @@ impl DownloadClient {
         self
     }
 
+    /// Upstream downloader `adjust-extensions`, `validate-html` and
+    /// `retry-codes`.
+    pub fn with_http_options(
+        mut self,
+        adjust_extensions: bool,
+        validate_html: bool,
+        retry_codes: Vec<u16>,
+    ) -> Self {
+        self.adjust_extensions = adjust_extensions;
+        self.validate_html = validate_html;
+        self.retry_codes = retry_codes.into();
+        self
+    }
+
+    /// Show download progress after this delay (`downloader.progress`).
+    pub fn with_progress(mut self, delay: Option<Duration>) -> Self {
+        self.progress = delay;
+        self
+    }
+
+    /// Write incomplete downloads to this directory (`part-directory`).
+    pub fn with_part_directory(mut self, directory: Option<PathBuf>) -> Self {
+        self.part_directory = directory.map(Into::into);
+        self
+    }
+
+    /// Save next to existing files as `NAME.1.EXT`, `NAME.2.EXT`, ...
+    /// (upstream `skip: "enumerate"`).
+    pub fn with_enumerate(mut self, enabled: bool) -> Self {
+        self.enumerate = enabled;
+        self
+    }
+
+    /// The first destination without an existing file: `path` itself, or
+    /// with `skip: "enumerate"` the first free `NAME.N.EXT`.
+    pub(crate) fn free_path(&self, path: PathBuf) -> PathBuf {
+        if !self.enumerate || std::fs::symlink_metadata(&path).is_err() {
+            return path;
+        }
+        enumerated_path(&path)
+    }
+
     /// Run preparation hooks but do not fetch files (`download: false`).
     pub fn with_no_download(mut self, enabled: bool) -> Self {
         self.no_download = enabled;
@@ -247,6 +379,20 @@ impl DownloadClient {
         self.resume = enabled;
         self
     }
+}
+
+/// Upstream `PathFormat._enum_file`: insert `N.` before the extension
+/// for the first `N` whose path does not exist.
+pub(crate) fn enumerated_path(path: &Path) -> PathBuf {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let (stem, extension) = match name.rsplit_once('.') {
+        Some((stem, extension)) => (stem.to_owned(), format!(".{extension}")),
+        None => (name.into_owned(), String::new()),
+    };
+    (1u64..)
+        .map(|number| path.with_file_name(format!("{stem}.{number}{extension}")))
+        .find(|candidate| std::fs::symlink_metadata(candidate).is_err())
+        .expect("unbounded enumeration")
 }
 
 pub fn client(timeout: Duration) -> Result<DownloadClient> {
@@ -265,13 +411,96 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         mtime_http: true,
         mtime_field: None,
         response_mtime: None,
+        response_headers: None,
+        metadata_http: None,
         sleep: None,
         rate: None,
         ytdl: Some(Path::new("yt-dlp").into()),
         ytdl_cookies: None,
         overwrite: false,
+        adjust_extensions: true,
+        validate_html: true,
+        retry_codes: std::sync::Arc::new([]),
+        part_directory: None,
+        progress: None,
+        enumerate: false,
         no_download: false,
     })
+}
+
+/// Upstream `text.filename_from_contentdisposition`.
+fn content_disposition_filename(value: &str) -> Option<String> {
+    if let Some(start) = value.find("filename*=") {
+        let raw = value[start + 10..].split(';').next()?.trim();
+        let encoded = raw.split_once("''").map_or(raw, |(_, rest)| rest);
+        return Some(crate::sites::percent_decode(encoded.trim_matches('"')));
+    }
+    let start = value.find("filename=")?;
+    let raw = value[start + 9..]
+        .split(';')
+        .next()?
+        .trim()
+        .trim_matches('"');
+    (!raw.is_empty()).then(|| crate::sites::unescape(raw))
+}
+
+/// Upstream `util.format_value`: `1234567` → `1.23M`.
+fn format_value(value: u64) -> String {
+    let text = value.to_string();
+    if text.len() < 4 {
+        return text;
+    }
+    let index = text.len() - 4;
+    let offset = (text.len() - 1) % 3 + 1;
+    format!(
+        "{}.{}{}",
+        &text[..offset],
+        &text[offset..offset + 2],
+        "kMGTPEZY".as_bytes()[index / 3] as char
+    )
+}
+
+/// With concurrent downloads, one download at a time owns the progress line.
+#[derive(Default)]
+struct ProgressOwner(std::cell::Cell<bool>);
+
+static PROGRESS_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+impl ProgressOwner {
+    fn claim(&self) -> bool {
+        if !self.0.get()
+            && PROGRESS_BUSY
+                .compare_exchange(
+                    false,
+                    true,
+                    std::sync::atomic::Ordering::AcqRel,
+                    std::sync::atomic::Ordering::Acquire,
+                )
+                .is_ok()
+        {
+            self.0.set(true);
+        }
+        self.0.get()
+    }
+}
+
+impl Drop for ProgressOwner {
+    fn drop(&mut self) {
+        if self.0.get() {
+            eprint!("\r\x1b[K");
+            PROGRESS_BUSY.store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
+}
+
+/// Upstream `TerminalOutput.progress` on standard error.
+fn progress_line(total: Option<u64>, received: u64, elapsed: Duration) {
+    let rate = (received as f64 / elapsed.as_secs_f64().max(0.001)) as u64;
+    let (done, speed) = (format_value(received), format_value(rate));
+    match total.filter(|total| *total > 0) {
+        Some(total) => eprint!("\r{:>3}% {done:>7}B {speed:>7}B/s ", received * 100 / total),
+        None => eprint!("\r{done:>7}B {speed:>7}B/s "),
+    }
 }
 
 pub fn safe_component(value: &str) -> String {
@@ -295,6 +524,13 @@ pub fn safe_component(value: &str) -> String {
 }
 
 pub fn destination(root: &Path, media: &Media) -> PathBuf {
+    // Dedicated extractors use upstream's default layouts.
+    if let Some((filename, directory)) = crate::naming::dedicated_templates(media)
+        && let Ok(Some(name)) = filename.render_optional(media)
+        && let Ok(Some(directory)) = directory.render(media)
+    {
+        return root.join(directory).join(name);
+    }
     // Hash URL and job/request context so different manifests or authenticated
     // representations cannot share a path. This is not a stable archive identity.
     let digest = format!("{:x}", Sha256::digest(media.identity().as_bytes()));
@@ -460,13 +696,16 @@ pub async fn download_with_template(
         .as_ref()
         .is_some_and(|metadata| metadata.booru_keywords.is_some());
     // Source filename preparation also runs when no hooks are configured.
-    let empty_processors = (source_booru && options.postprocessors.is_none())
+    // `metadata-http` needs the processing path, which builds the
+    // destination after the response.
+    let processing = source_booru || client.metadata_http.is_some();
+    let empty_processors = (processing && options.postprocessors.is_none())
         .then(|| crate::postprocess::Postprocessors::new(Vec::new()));
     let options = DownloadOptions {
         postprocessors: options.postprocessors.or(empty_processors.as_ref()),
         ..options
     };
-    if source_booru || options.postprocessors.is_some_and(|pp| pp.has_generic()) {
+    if processing || options.postprocessors.is_some_and(|pp| pp.has_generic()) {
         let prepared = processing::prepare(client, root, media, options, template).await?;
         return processing::download(client, root, media, options, template, prepared).await;
     }
@@ -856,7 +1095,9 @@ async fn download_media(
         return Err(error(failure.error.to_string()));
     }
     // Destination and publication metadata always belong to the original job.
-    let path = destination_with_templates(root, media, template, directory)?;
+    let path = client.free_path(destination_with_templates(
+        root, media, template, directory,
+    )?);
     match std::fs::symlink_metadata(&path) {
         Ok(metadata) if metadata.is_file() => return Ok(Outcome::Skipped(path)),
         Ok(_) => return Err(error("media destination is not a regular file")),
@@ -953,6 +1194,23 @@ async fn download_media(
             }
         };
         let failure = match result {
+            Ok(Outcome::Downloaded(saved))
+                if client.adjust_extensions
+                    && matches!(candidate.job, MediaJob::DirectHttp)
+                    && ytdl::source(&candidate).is_none()
+                    && media
+                        .handoff
+                        .get("_http_adjust_extension")
+                        .is_none_or(|v| v.as_bool() != Some(false)) =>
+            {
+                // Upstream `adjust-extensions`: fix extensions that do not
+                // match the file's signature.
+                return Ok(match crate::signature::adjust_file(&saved)? {
+                    Some((target, true)) => Outcome::Skipped(target),
+                    Some((target, false)) => Outcome::Downloaded(target),
+                    None => Outcome::Downloaded(saved),
+                });
+            }
             Ok(outcome) => return Ok(outcome),
             Err(failure) if failure.fallback && client.fallback => failure,
             Err(failure) => return Err(failure.error),
@@ -1201,13 +1459,20 @@ async fn attempt_download(
     let expected = response.content_length();
     client.capture_http_mtime(response.headers());
     let modified = mtime.select(response.headers());
-    validate_media(&response)?;
+    validate_media(client, path, &response)?;
     if let Some(rejection) = expected.and_then(|size| limits.check(size)) {
         return Ok(Outcome::Filtered(rejection));
     }
     // A unique temporary file prevents concurrent workers from sharing a partial
     // file. Dropping TempPath removes incomplete downloads, including on failure.
-    let temporary = tempfile::NamedTempFile::new_in(parent)?.into_temp_path();
+    // Upstream `part-directory` keeps them in a separate directory.
+    let temporary = match &client.part_directory {
+        Some(directory) => {
+            tokio::fs::create_dir_all(directory).await?;
+            tempfile::NamedTempFile::new_in(directory)?.into_temp_path()
+        }
+        None => tempfile::NamedTempFile::new_in(parent)?.into_temp_path(),
+    };
     let mut file = tokio::fs::OpenOptions::new()
         .write(true)
         .truncate(true)
@@ -1217,6 +1482,9 @@ async fn attempt_download(
     let mut received = 0u64;
     let check_placeholder = kemono_txt_resource(media);
     let mut prefix = Vec::new();
+    let started = std::time::Instant::now();
+    let mut reported = None::<std::time::Instant>;
+    let progress_owner = ProgressOwner::default();
     loop {
         io.set_remote(true);
         let chunk = stream.next().await;
@@ -1226,6 +1494,14 @@ async fn attempt_download(
         received = received
             .checked_add(chunk.len() as u64)
             .ok_or_else(|| terminal("media response exceeds size limit"))?;
+        if let Some(delay) = client.progress
+            && started.elapsed() >= delay
+            && reported.is_none_or(|at| at.elapsed() >= Duration::from_secs(1))
+            && progress_owner.claim()
+        {
+            reported = Some(std::time::Instant::now());
+            progress_line(expected, received, started.elapsed());
+        }
         if expected.is_some_and(|expected| received > expected) {
             return Err(terminal("media body exceeds declared length"));
         }
@@ -1256,6 +1532,24 @@ async fn attempt_download(
     set_mtime(&file, modified)?;
     file.sync_all()?;
     drop(file);
+    // A part directory on another filesystem needs a copy next to the
+    // destination first.
+    let temporary = match &client.part_directory {
+        Some(_) => {
+            let local = tempfile::NamedTempFile::new_in(parent)?.into_temp_path();
+            if std::fs::rename(&temporary, &local).is_err() {
+                std::fs::copy(&temporary, &local)?;
+                if let Some(modified) = modified {
+                    std::fs::File::options()
+                        .write(true)
+                        .open(&local)?
+                        .set_modified(modified)?;
+                }
+            }
+            local
+        }
+        None => temporary,
+    };
     match temporary.persist_noclobber(path) {
         Ok(_) => Ok(Outcome::Downloaded(path.into())),
         Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -1450,7 +1744,8 @@ fn check_status(
         && !expected_status(media, response.status())
     {
         let retry = response.status().is_server_error()
-            || response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS;
+            || response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+            || client.retry_codes.contains(&response.status().as_u16());
         if retry && let Some(delay) = retry_after(response.headers(), SystemTime::now()) {
             // Record even on the final attempt so other workers honor the server.
             client.rate_limits.defer(&media.url, delay);
@@ -1477,7 +1772,11 @@ fn expected_status(media: &Media, status: reqwest::StatusCode) -> bool {
         })
 }
 
-fn validate_media(response: &reqwest::Response) -> std::result::Result<(), Failure> {
+fn validate_media(
+    client: &DownloadClient,
+    path: &Path,
+    response: &reqwest::Response,
+) -> std::result::Result<(), Failure> {
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -1488,6 +1787,16 @@ fn validate_media(response: &reqwest::Response) -> std::result::Result<(), Failu
         .unwrap_or("")
         .trim()
         .to_ascii_lowercase();
+    // Upstream `validate-html`: HTML is accepted when disabled or when the
+    // file is meant to be a web page.
+    let html_wanted = !client.validate_html
+        || path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("html") || e.eq_ignore_ascii_case("htm"));
+    if html_wanted && matches!(content_type.as_str(), "text/html" | "application/xhtml+xml") {
+        return Ok(());
+    }
     if matches!(
         content_type.as_str(),
         "text/html"
@@ -1629,7 +1938,7 @@ async fn attempt_resume(
                     });
             }
             crate::range::Plan::Full(checkpoint) => {
-                validate_media(&response)?;
+                validate_media(client, path, &response)?;
                 if let Some(rejection) = response
                     .content_length()
                     .and_then(|size| limits.check(size))
@@ -1644,7 +1953,7 @@ async fn attempt_resume(
                 (0, response.content_length(), response.content_length())
             }
             crate::range::Plan::Append { end, total } => {
-                validate_media(&response)?;
+                validate_media(client, path, &response)?;
                 if let Some(rejection) = limits.check(total) {
                     return filter_partial(partial, rejection).await;
                 }
@@ -1846,5 +2155,35 @@ mod kemono_redirect_tests {
             media.url = url::Url::parse(url).unwrap();
             assert!(!kemono_public_redirects(&media, &HeaderMap::new()));
         }
+    }
+}
+
+#[cfg(test)]
+mod content_disposition_tests {
+    use super::content_disposition_filename as name;
+
+    #[test]
+    fn parses_plain_and_encoded_filenames() {
+        assert_eq!(
+            name(r#"attachment; filename="a b.png""#).as_deref(),
+            Some("a b.png")
+        );
+        assert_eq!(name("inline; filename=x.jpg").as_deref(), Some("x.jpg"));
+        assert_eq!(
+            name("attachment; filename*=UTF-8''%C3%A9t%C3%A9.gif").as_deref(),
+            Some("été.gif")
+        );
+        assert_eq!(name("attachment"), None);
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    #[test]
+    fn formats_values_like_upstream() {
+        assert_eq!(super::format_value(999), "999");
+        assert_eq!(super::format_value(1234), "1.23k");
+        assert_eq!(super::format_value(1234567), "1.23M");
+        assert_eq!(super::format_value(98765432), "98.76M");
     }
 }

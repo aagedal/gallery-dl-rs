@@ -445,7 +445,7 @@ async fn inspection_ignores_size_filters_without_fetching_media_or_opening_archi
         serde_json::json!({"extractor":{
         "base-directory":"output", "archive":"missing-parent/archive.sqlite", "filesize-min":"1g"}}),
     );
-    for mode in ["-g", "-j"] {
+    for mode in ["-g", "--dump-media-json"] {
         let mut command = binary(root.path());
         command
             .arg("--native-config")

@@ -126,7 +126,7 @@ async fn category_api_server_and_likes_endpoint_drive_independent_native_childre
             "1",
             "--range",
             "1",
-            "-j",
+            "--dump-media-json",
         ])
         .arg(format!("https://bsky.app/profile/{DID}"));
     let result = tokio::time::timeout(Duration::from_secs(8), command.output())

@@ -100,7 +100,10 @@ pub(crate) async fn prepare(
         directory.as_deref(),
     )
     .or_else(|failure| {
+        // With `metadata-http`, templates may need the response headers;
+        // the path is built again after the download.
         if source_filename
+            || client.metadata_http.is_some()
             || pp
                 .specifications
                 .iter()
@@ -480,6 +483,7 @@ pub(crate) async fn download(
     mut prepared: Prepared,
 ) -> Result<Outcome> {
     build_source_path(root, options, template, &mut prepared, false)?;
+    prepared.path = client.free_path(prepared.path);
     if !client.overwrite && postprocess::regular_file(&prepared.path)? {
         let converted = skip(client, root, media, options, template, &mut prepared).await?;
         return Ok(converted.unwrap_or(Outcome::Skipped(prepared.path)));
@@ -499,6 +503,9 @@ pub(crate) async fn download(
     )
     .await?;
     // Upstream `_file_recheck`: a renamed destination may already exist.
+    if prepared.path != pending {
+        prepared.path = client.free_path(prepared.path);
+    }
     if !client.overwrite && prepared.path != pending && postprocess::regular_file(&prepared.path)? {
         let converted = skip(client, root, media, options, template, &mut prepared).await?;
         return Ok(converted.unwrap_or(Outcome::Skipped(prepared.path)));
@@ -540,8 +547,12 @@ pub(crate) async fn download(
         recovery,
     };
     let captured_mtime = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let captured_headers = std::sync::Arc::new(std::sync::Mutex::new(None));
     let mut source_client = client.clone();
     source_client.response_mtime = Some(captured_mtime.clone());
+    if client.metadata_http.is_some() {
+        source_client.response_headers = Some(captured_headers.clone());
+    }
     let result = download_media(
         &source_client,
         source.directory.path(),
@@ -596,6 +607,36 @@ pub(crate) async fn download(
             prepared
                 .keywords
                 .insert("_mtime_http".into(), seconds.into());
+        }
+    }
+    // Upstream `metadata-http`: headers become a keyword, and the path is
+    // built afterwards so templates can use them.
+    let headers = captured_headers
+        .lock()
+        .map_err(|_| error("HTTP metadata lock poisoned"))?
+        .take();
+    if let Some(name) = &client.metadata_http
+        && let Some(headers) = headers
+    {
+        prepared
+            .keywords
+            .insert(name.to_string(), Value::Object(headers));
+        let rebuilt = logical_path(
+            root,
+            &prepared.media,
+            &prepared.keywords,
+            options,
+            template,
+            prepared.directory.as_deref(),
+        )?;
+        if rebuilt != prepared.path {
+            if !client.overwrite && postprocess::regular_file(&rebuilt)? {
+                return Ok(Outcome::Skipped(rebuilt));
+            }
+            if let Some(parent) = rebuilt.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+            prepared.path = rebuilt;
         }
     }
     let pp = options.postprocessors.expect("generic processors");
@@ -696,6 +737,12 @@ pub(crate) async fn download(
             .await
             .map_err(|_| error("postprocessor hook timed out"))
             .and_then(|result| result);
+            if let Err(failure) = &result
+                && crate::Stop::of(failure).is_some()
+            {
+                // Upstream removes the temporary file before stopping.
+                source.source = None;
+            }
             if result.is_err()
                 && let Some(scope) = options.postprocessor_scope
             {
@@ -883,15 +930,29 @@ async fn run_path_processor(
     };
     match processor {
         Processor::Exec(config) => {
+            let media = prepared.media.clone();
             config
-                .run(
+                .run_archived(
                     &mut prepared.keywords,
                     postprocess::exec::ExecPaths {
                         path: Some(&prepared.path),
                         temppath: Some(input),
                         ..Default::default()
                     },
+                    &media,
+                    root,
                 )
+                .await?
+        }
+        Processor::Python(config) => {
+            let media = prepared.media.clone();
+            let directory = prepared
+                .path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| root.to_path_buf());
+            config
+                .run_archived(&mut prepared.keywords, &media, root, &directory)
                 .await?
         }
         Processor::Classify(config) => {
@@ -940,10 +1001,16 @@ async fn run_path_processor(
         }
         Processor::Compare(config) => {
             if postprocess::regular_file(&prepared.path)? {
-                match config.run(&prepared.path, input) {
+                let comparison = config.run(&prepared.path, input);
+                config.count(&comparison)?;
+                match comparison {
                     postprocess::compare::Comparison::Equal => prepared.delete = true,
                     postprocess::compare::Comparison::Publish(path) => prepared.path = path,
                 }
+            } else {
+                config.count(&postprocess::compare::Comparison::Publish(
+                    prepared.path.clone(),
+                ))?;
             }
         }
         Processor::Ugoira(_)

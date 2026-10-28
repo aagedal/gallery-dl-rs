@@ -44,6 +44,8 @@ pub(crate) struct ArchiveConfig {
     table: Option<String>,
     reuse: bool,
     pragmas: Vec<String>,
+    /// Upstream `"_" + NAME.upper() + "_"` key prefix of the processor.
+    marker: &'static str,
 }
 impl fmt::Debug for ArchiveConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -58,6 +60,11 @@ fn string(options: &Map<String, Value>, key: &str) -> Result<Option<String>> {
     }
 }
 impl ArchiveConfig {
+    /// Use another processor's default key prefix (e.g. `_EXEC_`).
+    pub(crate) fn with_marker(mut self, marker: &'static str) -> Self {
+        self.marker = marker;
+        self
+    }
     pub(crate) fn uses_source_format(&self) -> bool {
         self.format.is_none()
     }
@@ -115,6 +122,7 @@ impl ArchiveConfig {
             table: string(options, "archive-table")?,
             reuse: options.get("archive-reuse").is_some_and(truthy),
             pragmas,
+            marker: "_MD_",
         }))
     }
     pub(crate) async fn open(
@@ -132,7 +140,8 @@ impl ArchiveConfig {
         let format = match &self.format {
             Some(f) => f.clone(),
             None => format!(
-                "_MD_{}",
+                "{}{}",
+                self.marker,
                 archive_format.ok_or_else(|| error("source archive format is unavailable"))?
             ),
         };

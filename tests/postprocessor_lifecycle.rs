@@ -133,7 +133,7 @@ async fn cli(root: &Path, backend: &Path, config: &Path, extra: &[&str]) -> std:
         .arg("--native-config")
         .arg(config)
         .arg("-d")
-        .arg(root.join("downloads"))
+        .arg(root.join("gallery-dl"))
         .args(extra)
         .arg("https://instagram.com/p/fixture/")
         .kill_on_drop(true);
@@ -191,7 +191,7 @@ async fn cli_concurrent_hash_names_sidecars_mtime_and_post_hooks_complete_in_ord
     );
     let requests = server.finish();
     assert_eq!(requests.len(), 4);
-    let downloaded = files(&temp.path().join("downloads"));
+    let downloaded = files(&temp.path().join("gallery-dl"));
     let images = downloaded
         .iter()
         .filter(|p| p.extension().is_some_and(|e| e == "jpg"))
@@ -279,7 +279,7 @@ async fn cli_skip_hooks_run_for_existing_files_and_archive_hits_without_http() {
             "{}",
             String::from_utf8_lossy(&first.stderr)
         );
-        let sidecars = files(&temp.path().join("downloads"))
+        let sidecars = files(&temp.path().join("gallery-dl"))
             .into_iter()
             .filter(|p| p.extension().is_some_and(|e| e == "json"))
             .collect::<Vec<_>>();
@@ -347,7 +347,7 @@ async fn inspection_modes_never_execute_configured_lifecycle_or_file_processors(
         assert!(!output.stdout.is_empty());
         assert!(server.finish().is_empty());
         assert!(!temp.path().join("trace.txt").exists());
-        assert!(!temp.path().join("downloads").exists());
+        assert!(!temp.path().join("gallery-dl").exists());
     }
 }
 
@@ -431,7 +431,7 @@ async fn failed_http_runs_error_finalization_before_unconditional_finalization()
     let output = cli(temp.path(), &backend, &config, &[]).await;
     assert_eq!(
         output.status.code(),
-        Some(1),
+        Some(4),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -469,10 +469,10 @@ async fn cli_classify_directory_and_exec_relocate_files_and_run_commands() {
         String::from_utf8_lossy(&output.stderr)
     );
     server.finish();
-    let mut names: Vec<_> = files(&temp.path().join("downloads"))
+    let mut names: Vec<_> = files(&temp.path().join("gallery-dl"))
         .into_iter()
         .map(|p| {
-            p.strip_prefix(temp.path().join("downloads"))
+            p.strip_prefix(temp.path().join("gallery-dl"))
                 .unwrap()
                 .to_string_lossy()
                 .into_owned()
@@ -516,7 +516,7 @@ async fn cli_zip_stores_job_files_in_directory_archive() {
         String::from_utf8_lossy(&output.stderr)
     );
     server.finish();
-    let downloads = temp.path().join("downloads");
+    let downloads = temp.path().join("gallery-dl");
     assert_eq!(files(&downloads), [downloads.join("fixture.cbz")]);
     let archive =
         zip::ZipArchive::new(fs::File::open(downloads.join("fixture.cbz")).unwrap()).unwrap();
@@ -531,7 +531,7 @@ async fn cli_zip_stores_job_files_in_directory_archive() {
 #[tokio::test]
 async fn cli_rename_moves_existing_files_between_formats_without_downloading() {
     let temp = tempfile::tempdir().unwrap();
-    let directory = temp.path().join("downloads/fixture");
+    let directory = temp.path().join("gallery-dl/fixture");
     fs::create_dir_all(&directory).unwrap();
     for name in ["old-1-1.jpg", "old-1-2.jpg", "old-3-1.jpg", "old-3-2.jpg"] {
         fs::write(directory.join(name), b"kept").unwrap();

@@ -2,7 +2,7 @@
 //! download against the existing file and keep the old one when equal
 //! (`replace`) or save under `NAME.N.EXT` when different (`enumerate`).
 use super::truthy;
-use crate::{Result, error};
+use crate::{Result, Stop};
 use serde_json::{Map, Value};
 use std::{
     io::Read,
@@ -13,6 +13,9 @@ use std::{
 pub struct CompareOptions {
     enumerate: bool,
     shallow: bool,
+    /// `equal`: stop after this many consecutive equal files.
+    equal: Option<(Stop, u64)>,
+    equal_count: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// What to do with the new download.
@@ -26,12 +29,23 @@ pub enum Comparison {
 
 impl CompareOptions {
     pub fn parse(options: &Map<String, Value>) -> Result<Self> {
-        if options.get("equal").is_some_and(truthy) {
-            return Err(error(
-                "compare option 'equal' is not supported natively; use --abort or --terminate",
-            ));
-        }
+        let equal = options
+            .get("equal")
+            .filter(|v| truthy(v))
+            .and_then(Value::as_str)
+            .and_then(|equal| {
+                let (mode, limit) = equal.split_once(':').unwrap_or((equal, ""));
+                let stop = match mode {
+                    "abort" => Stop::Abort,
+                    "terminate" => Stop::Terminate,
+                    "exit" => Stop::Exit(0),
+                    _ => return None,
+                };
+                Some((stop, crate::sites::gdl::parse_int(limit) as u64))
+            });
         Ok(Self {
+            equal,
+            equal_count: Default::default(),
             enumerate: options.get("action").and_then(Value::as_str) == Some("enumerate"),
             shallow: options.get("shallow").is_some_and(truthy),
         })
@@ -56,6 +70,23 @@ impl CompareOptions {
                 return Ok(true);
             }
         }
+    }
+
+    /// Count an equal file for `equal`; fails with the configured stop
+    /// once the limit of consecutive equal files is reached.
+    pub fn count(&self, comparison: &Comparison) -> Result<()> {
+        use std::sync::atomic::Ordering;
+        if *comparison != Comparison::Equal {
+            self.equal_count.store(0, Ordering::Relaxed);
+            return Ok(());
+        }
+        if let Some((stop, limit)) = self.equal {
+            let count = self.equal_count.fetch_add(1, Ordering::Relaxed) + 1;
+            if count >= limit {
+                return Err(stop.into());
+            }
+        }
+        Ok(())
     }
 
     /// Compare the download at `new` with the destination `path`.
@@ -115,6 +146,18 @@ mod tests {
         );
         std::fs::write(dir.path().join("a.1.jpg"), b"new").unwrap();
         assert_eq!(enumerate.run(&path, &new), Comparison::Equal);
-        assert!(CompareOptions::parse(json!({"equal": "abort:3"}).as_object().unwrap()).is_err());
+
+        let abort =
+            CompareOptions::parse(json!({"equal": "abort:2"}).as_object().unwrap()).unwrap();
+        assert!(abort.count(&Comparison::Equal).is_ok());
+        assert!(abort.count(&Comparison::Publish(path.clone())).is_ok());
+        assert!(abort.count(&Comparison::Equal).is_ok());
+        let stop = abort.count(&Comparison::Equal).unwrap_err();
+        assert_eq!(Stop::of(&stop), Some(Stop::Abort));
+        let exit = CompareOptions::parse(json!({"equal": "exit"}).as_object().unwrap()).unwrap();
+        assert_eq!(
+            Stop::of(&exit.count(&Comparison::Equal).unwrap_err()),
+            Some(Stop::Exit(0))
+        );
     }
 }

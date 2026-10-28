@@ -166,6 +166,10 @@ pub enum Target {
         id: String,
         kind: ProfileKind,
     },
+    /// A `pixiv.me/NAME` short link, resolved to its user profile.
+    Me(String),
+    /// `/artworks/unlisted/ID`, read from the public web AJAX API.
+    Unlisted(String),
 }
 
 fn segments(url: &Url) -> Vec<&str> {
@@ -216,6 +220,26 @@ pub fn target(url: &Url) -> Result<Target> {
     };
     if url.host_str() == Some("sketch.pixiv.net") {
         return sketch::target(url).map(Target::Sketch);
+    }
+    if url.host_str() == Some("pixiv.me") {
+        return match segments(url).as_slice() {
+            [name] if name.len() <= 64 && !name.contains(['/', '?', '#']) => {
+                Ok(Target::Me((*name).to_owned()))
+            }
+            _ => Err(unsupported()),
+        };
+    }
+    // Upstream `BASE_PATTERN` also accepts touch.pixiv.net and the phixiv.net
+    // embed proxy; their paths mirror www.pixiv.net.
+    if matches!(
+        url.host_str(),
+        Some("touch.pixiv.net" | "phixiv.net" | "www.phixiv.net" | "touch.phixiv.net")
+    ) {
+        let mut normalized = url.clone();
+        normalized
+            .set_host(Some("www.pixiv.net"))
+            .map_err(|_| unsupported())?;
+        return target(&normalized);
     }
     if matches!(
         url.host_str(),
@@ -303,8 +327,21 @@ pub fn target(url: &Url) -> Result<Target> {
             private: query("rest").as_deref() == Some("hide"),
         })
     };
+    // `/#id=ID` and `/mypage.php#id=ID` profile links.
+    if matches!(rest, [] | ["mypage.php"])
+        && let Some(raw) = url.fragment().and_then(|f| f.strip_prefix("id="))
+    {
+        return user(raw, vec![Kind::Illust]);
+    }
     match rest {
-        ["artworks", raw] => Ok(Target::Illust(id(raw)?)),
+        ["artworks", "unlisted", key]
+            if (1..=64).contains(&key.len()) && key.bytes().all(|b| b.is_ascii_alphanumeric()) =>
+        {
+            Ok(Target::Unlisted((*key).to_owned()))
+        }
+        ["artworks", raw] | ["i", raw] => Ok(Target::Illust(id(raw)?)),
+        ["u", raw] => user(raw, vec![Kind::Illust]),
+        ["member.php"] => user(&query("id").ok_or_else(unsupported)?, vec![Kind::Illust]),
         ["member_illust.php"] if query("illust_id").is_some() => {
             let raw = url
                 .query_pairs()
@@ -428,6 +465,60 @@ pub fn parse_illust(illust: &Value) -> std::result::Result<Vec<Media>, Skip> {
         ),
     }
     Ok(parse_files(illust, &id, urls, pages.is_some()))
+}
+
+/// Upstream `_extract_ajax`: an App-API-shaped illustration from a web
+/// AJAX work body (`illust/unlisted/KEY`).
+fn unlisted_illust(body: &Value, key: &str) -> Option<Value> {
+    let id = match body.get("illustId")? {
+        Value::String(id) => id.clone(),
+        Value::Number(id) => id.to_string(),
+        _ => return None,
+    };
+    let original = string(body.get("urls")?, "original")?;
+    let count = body.get("pageCount").and_then(Value::as_u64).unwrap_or(1);
+    let tags: Vec<Value> = body
+        .pointer("/tags/tags")
+        .and_then(Value::as_array)
+        .map(|tags| {
+            tags.iter()
+                .filter_map(|tag| {
+                    Some(serde_json::json!({
+                        "name": tag.get("tag")?.as_str()?,
+                        "translated_name": tag.pointer("/translation/en"),
+                    }))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut illust = serde_json::json!({
+        "id": id.parse::<u64>().ok()?,
+        "id_unlisted": key,
+        "title": body.get("illustTitle"),
+        "caption": body.get("illustComment"),
+        "create_date": body.get("createDate"),
+        "width": body.get("width"),
+        "height": body.get("height"),
+        "page_count": count,
+        "type": if body.get("illustType").and_then(Value::as_u64) == Some(2) { "ugoira" } else { "illust" },
+        "tags": tags,
+        "user": {
+            "id": body.get("userId").and_then(Value::as_str).and_then(|id| id.parse::<u64>().ok()),
+            "account": body.get("userAccount"),
+            "name": body.get("userName"),
+        },
+    });
+    if count <= 1 {
+        illust["meta_single_page"] = serde_json::json!({ "original_image_url": original });
+    } else {
+        let (base, ext) = original.rsplit_once("_p0.")?;
+        illust["meta_pages"] = Value::Array(
+            (0..count.min(1000))
+                .map(|n| serde_json::json!({"image_urls": {"original": format!("{base}_p{n}.{ext}")}}))
+                .collect(),
+        );
+    }
+    Some(illust)
 }
 
 fn illustration_metadata(illust: &Value, id: &str) -> PostMetadata {
@@ -1380,8 +1471,19 @@ impl Pixiv {
             Ok(target) => target,
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
         };
+        if let Target::Me(name) = target {
+            return self.me_events(name);
+        }
+        if let Target::Unlisted(key) = target {
+            return self.unlisted_events(key);
+        }
         let path = segments(url);
-        let bare_user = matches!(path.as_slice(), ["users", _] | ["en", "users", _]);
+        // Upstream `PixivUserExtractor` URLs dispatch the profile views.
+        let bare_user = matches!(
+            path.as_slice(),
+            ["users", _] | ["en", "users", _] | ["u", _] | ["en", "u", _] | ["member.php"]
+        ) || (matches!(path.as_slice(), [] | ["mypage.php"])
+            && url.fragment().is_some_and(|f| f.starts_with("id=")));
         if bare_user {
             let Target::User { id, .. } = target else {
                 unreachable!("validated bare user")
@@ -1411,6 +1513,65 @@ impl Pixiv {
                 .boxed();
         }
         self.target_events(target)
+    }
+
+    /// Upstream `PixivUnlistedExtractor`: the work from `ajax/illust/unlisted`,
+    /// converted to the App API shape. No login is needed.
+    fn unlisted_events(&self, key: String) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::once(async move {
+            let body = self
+                .request_ajax(&format!("/illust/unlisted/{key}"))
+                .await
+                .ok_or_else(|| error("Pixiv unlisted work not found"))?;
+            let illust = unlisted_illust(&body, &key)
+                .ok_or_else(|| error("Pixiv returned an invalid unlisted work"))?;
+            let media = parse_illust(&illust)
+                .map_err(|_| error("Pixiv unlisted work has no downloadable file"))?;
+            Ok::<_, crate::Error>(stream::iter(self.finish(media).into_iter().map(Ok)))
+        })
+        .map(|result| match result {
+            Ok(events) => events.boxed(),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
+    /// Upstream `PixivMeExtractor`: follow the short link's redirect and
+    /// extract the user profile it points to.
+    fn me_events(&self, name: String) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::once(async move {
+            // Redirects are not followed: the Location names the profile.
+            let client = self.network.client(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+                Duration::from_secs(30),
+            )?;
+            let response = client
+                .get(format!("https://pixiv.me/{name}"))
+                .send()
+                .await
+                .map_err(|_| error("pixiv.me request failed; check network access"))?;
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| Url::parse("https://www.pixiv.net/").ok()?.join(value).ok())
+                .filter(|url| matches!(url.host_str(), Some("www.pixiv.net" | "pixiv.net")))
+                .ok_or_else(|| error("pixiv.me user not found"))?;
+            match target(&location)? {
+                Target::User { .. } => Ok(location),
+                _ => Err(error("pixiv.me did not redirect to a user profile")),
+            }
+        })
+        .map(move |result| match result {
+            Ok(location) => crate::event::child_job(
+                ChildMetadata::from_raw("pixiv", "me", &serde_json::Map::new()),
+                move || self.events(&location),
+            ),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
     }
 
     fn view_events(&self, id: String, view: &str) -> BoxStream<'_, Result<ExtractionEvent>> {
@@ -1476,6 +1637,8 @@ impl Pixiv {
             Target::Sketch(username) => return self.sketch_events(username),
             Target::Novel(target) => return self.novel_events(target),
             Target::Followed => return self.followed_events(),
+            Target::Me(name) => return self.me_events(name),
+            Target::Unlisted(key) => return self.unlisted_events(key),
             Target::Pixivision(id) => return self.pixivision_events(id),
             Target::Following { id, private } => return self.following_events(id, private),
             Target::Ranking(options) => return self.ranking_events(options),
@@ -2066,6 +2229,41 @@ mod tests {
         ] {
             assert!(t(raw).is_err(), "{raw}");
         }
+    }
+
+    #[test]
+    fn classifies_upstream_url_aliases() {
+        let t = |raw: &str| target(&Url::parse(raw).unwrap()).unwrap();
+        let user = |id: &str| Target::User {
+            id: id.into(),
+            kinds: vec![Kind::Illust],
+            tag: None,
+        };
+        for raw in [
+            "https://www.pixiv.net/u/173530",
+            "https://www.pixiv.net/member.php?id=173530",
+            "https://www.pixiv.net/#id=173530",
+            "https://www.pixiv.net/mypage.php#id=173530",
+            "https://touch.pixiv.net/member_illust.php?id=173530",
+            "https://www.phixiv.net/member_illust.php?id=173530",
+        ] {
+            assert_eq!(t(raw), user("173530"), "{raw}");
+        }
+        for raw in [
+            "https://www.pixiv.net/i/966412",
+            "https://www.phixiv.net/en/artworks/966412",
+            "https://phixiv.net/member_illust.php?mode=medium&illust_id=966412",
+        ] {
+            assert_eq!(t(raw), Target::Illust("966412".into()), "{raw}");
+        }
+        assert_eq!(
+            t("https://pixiv.me/del_shannon"),
+            Target::Me("del_shannon".into())
+        );
+        assert_eq!(
+            t("https://touch.pixiv.net/bookmark_new_illust.php"),
+            Target::Followed
+        );
     }
 
     #[test]

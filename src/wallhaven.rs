@@ -60,6 +60,10 @@ pub enum Target {
         user: String,
         id: String,
     },
+    /// All collections of a user, queued as collection children.
+    Collections {
+        user: String,
+    },
 }
 
 fn plain(url: &Url) -> bool {
@@ -99,6 +103,9 @@ pub fn target(url: &Url) -> Result<Target> {
             // `/user/NAME/` dispatches to uploads by default upstream.
             ["user", user] | ["user", user, "uploads"] if valid_user(user) => Ok(Target::Search {
                 query: vec![("q".into(), format!("@{user}"))],
+            }),
+            ["user", user, "favorites"] if valid_user(user) => Ok(Target::Collections {
+                user: (*user).into(),
             }),
             ["user", user, "favorites", id]
                 if valid_user(user) && id.bytes().all(|b| b.is_ascii_digit()) && id.len() <= 20 =>
@@ -351,6 +358,50 @@ impl Wallhaven {
     }
 
     /// Emit one post boundary per wallpaper; listings paginate lazily.
+    /// Upstream `WallhavenCollectionsExtractor`: queue each collection.
+    fn collections(&self, user: String) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::once(async move {
+            let endpoint = self.endpoint(&format!("api/v1/collections/{user}"));
+            let body: Value = serde_json::from_slice(&self.call(&endpoint).await?)
+                .map_err(|_| error("Wallhaven returned invalid collections"))?;
+            let collections = body
+                .get("data")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            Ok::<_, crate::Error>((user, collections))
+        })
+        .map(move |result| match result {
+            Ok((user, collections)) => stream::iter(collections)
+                .filter_map(move |collection| {
+                    let user = user.clone();
+                    let id = collection.get("id").and_then(Value::as_u64);
+                    std::future::ready(id.map(|id| {
+                        let data = collection.as_object().cloned().unwrap_or_default();
+                        crate::event::child_job(
+                            crate::event::ChildMetadata::from_raw(
+                                "wallhaven",
+                                "collections",
+                                &data,
+                            ),
+                            move || {
+                                let url = Url::parse(&format!(
+                                    "https://wallhaven.cc/user/{user}/favorites/{id}"
+                                ))
+                                .expect("valid collection URL");
+                                self.events(&url)
+                            },
+                        )
+                    }))
+                })
+                .flatten()
+                .boxed(),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
         let target = match target(url) {
             Ok(target) => target,
@@ -376,6 +427,7 @@ impl Wallhaven {
             Target::Collection { user, id } => {
                 self.endpoint(&format!("api/v1/collections/{user}/{id}"))
             }
+            Target::Collections { user } => return self.collections(user),
         };
         let state = ListingState {
             endpoint,

@@ -53,17 +53,7 @@ pub(super) fn profile_input(url: &Url) -> Result<(ProfileInput, ProfileTab)> {
         )
     };
     if !matches!(url.scheme(), "http" | "https")
-        || !matches!(
-            url.host_str(),
-            Some(
-                "x.com"
-                    | "www.x.com"
-                    | "mobile.x.com"
-                    | "twitter.com"
-                    | "www.twitter.com"
-                    | "mobile.twitter.com"
-            )
-        )
+        || !crate::twitter::twitter_host(url.host_str())
         || !url.username().is_empty()
         || url.password().is_some()
         || url.port().is_some()

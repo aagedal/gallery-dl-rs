@@ -378,6 +378,19 @@ impl FilenameTemplate {
         name: &str,
         keywords: bool,
     ) -> Option<Value> {
+        Self::lookup_present(media, context, name, keywords).or_else(|| {
+            KEYWORDS_DEFAULT
+                .get()
+                .map(|value| convert(&crate::filter::json_value(value), name))
+        })
+    }
+
+    fn lookup_present(
+        media: &Media,
+        context: &BTreeMap<String, crate::filter::Value>,
+        name: &str,
+        keywords: bool,
+    ) -> Option<Value> {
         if keywords {
             context.get(name).map(|value| {
                 if matches!(name, "date" | "date_updated")
@@ -693,9 +706,9 @@ pub(crate) fn effective_filename(
         }
         (Some(template), None) => Some(template.clone()),
         (None, Some(source)) => Some(source.filename.clone()),
-        (None, None) => {
-            crate::sites::default_templates(media).map(|(filename, _)| filename.clone())
-        }
+        (None, None) => crate::sites::default_templates(media)
+            .or_else(|| dedicated_templates(media))
+            .map(|(filename, _)| filename.clone()),
     }
 }
 pub(crate) fn effective_directory(
@@ -716,9 +729,9 @@ pub(crate) fn effective_directory(
         }
         (Some(template), None) => Some(template.clone()),
         (None, Some(source)) => Some(source.directory.clone()),
-        (None, None) => {
-            crate::sites::default_templates(media).map(|(_, directory)| directory.clone())
-        }
+        (None, None) => crate::sites::default_templates(media)
+            .or_else(|| dedicated_templates(media))
+            .map(|(_, directory)| directory.clone()),
     }
 }
 
@@ -871,6 +884,15 @@ impl DirectoryTemplate {
         }
         Ok(Some(output))
     }
+}
+
+/// Upstream `keywords-default`: the value of missing keywords in path
+/// templates (otherwise `None`).
+static KEYWORDS_DEFAULT: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+
+/// Install the process-wide `keywords-default` value.
+pub fn set_keywords_default(value: serde_json::Value) {
+    let _ = KEYWORDS_DEFAULT.set(value);
 }
 
 fn convert(value: &crate::filter::Value, key: &str) -> Value {
@@ -1070,3 +1092,76 @@ mod source_segment_limit_tests {
 #[cfg(test)]
 #[path = "source_formatter_offset_tests.rs"]
 mod source_formatter_offset_tests;
+
+/// Upstream default paths of extractors with dedicated native ports,
+/// expressed with the native keywords (`post_id`, `media_id`, `username`,
+/// `caption`, `num`, ...). Optional fields use `{field:? //}` forms, so
+/// missing values never fail rendering. Registry and booru files carry
+/// their own source defaults.
+pub(crate) fn dedicated_templates(
+    media: &Media,
+) -> Option<&'static (FilenameTemplate, DirectoryTemplate)> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    let metadata = media.metadata.as_ref()?;
+    let user = metadata.username.as_deref().is_some_and(|u| !u.is_empty());
+    let album = metadata.post_id != metadata.media_id && !metadata.post_id.is_empty();
+    let filename = match media.category.as_str() {
+        "flickr" => "{category}_{media_id}.{extension}",
+        "imgur" if album => "{category}_{post_id}_{num:>03}_{media_id}.{extension}",
+        "imgur" => "{category}_{media_id}{caption:?_//}.{extension}",
+        "furaffinity" => "{post_id}{caption:? //}.{extension}",
+        "wallhaven" => "{category}_{media_id}{width:?_//}{height:?x//}.{extension}",
+        "weasyl" => "{post_id}{caption:? //}.{extension}",
+        "deviantart" => "{category}_{post_id}{caption:?_//}.{extension}",
+        "pixiv" | "pixiv-novel" => "{post_id}_p{num}.{extension}",
+        "twitter" => "{post_id}_{num}.{extension}",
+        "instagram" | "facebook" | "vsco" => "{media_id}.{extension}",
+        "bluesky" => "{post_id}_{num}.{extension}",
+        "reddit" => "{post_id}{num:? //>02}{caption:? //}.{extension}",
+        "tumblr" => "{category}{username:?_//}_{post_id}_{num:>02}.{extension}",
+        "mastodon" => "{category}_{post_id}_{media_id}.{extension}",
+        "kemono" | "coomer" => "{post_id}{caption:?_//}_{num:>02}_{filename}.{extension}",
+        "pinterest" => "{category}_{post_id}.{extension}",
+        "artstation" => "{category}_{post_id}_{media_id}{caption:?_//}.{extension}",
+        "newgrounds" => "{category}_{media_id}{caption:?_//}.{extension}",
+        "pixeldrain" | "catbox" | "imgbox" | "postimg" => "{filename}.{extension}",
+        _ => return None,
+    };
+    let directory: &[&str] = match (media.category.as_str(), user) {
+        ("imgur", _) if album => &["{category}", "{post_id}{caption:? - //}"],
+        ("imgur" | "wallhaven" | "pixeldrain" | "catbox" | "imgbox" | "postimg", _)
+        | (_, false) => &["{category}"],
+        ("pixiv" | "pixiv-novel", true) => &["{category}", "{user[id]:?/ /}{username}"],
+        ("furaffinity", true) => &["{category}", "{username!l}"],
+        (_, true) => &["{category}", "{username}"],
+    };
+    type Entry = &'static (FilenameTemplate, DirectoryTemplate);
+    type Cache = Mutex<HashMap<(String, Vec<&'static str>), Entry>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
+    let key = (filename.to_owned(), directory.to_vec());
+    let entry = {
+        let mut cache = CACHE.get_or_init(Default::default).lock().ok()?;
+        match cache.get(&key) {
+            Some(entry) => *entry,
+            None => {
+                let entry: Entry = Box::leak(Box::new((
+                    FilenameTemplate::parse(filename).ok()?,
+                    DirectoryTemplate::parse(
+                        &directory
+                            .iter()
+                            .map(|s| (*s).to_owned())
+                            .collect::<Vec<_>>(),
+                    )
+                    .ok()?,
+                )));
+                cache.insert(key, entry);
+                entry
+            }
+        }
+    };
+    // Files without the fields a layout needs keep the digest default.
+    (matches!(entry.0.render_optional(media), Ok(Some(_)))
+        && matches!(entry.1.render(media), Ok(Some(_))))
+    .then_some(entry)
+}

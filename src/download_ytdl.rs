@@ -67,6 +67,104 @@ pub struct YtdlOptions {
     pub format: Option<String>,
     pub cmdline_args: Vec<String>,
     pub config_file: Option<std::path::PathBuf>,
+    /// `forward-cookies` (default true).
+    pub forward_cookies: bool,
+    /// `raw-options` translated to command-line flags.
+    pub raw_args: Vec<String>,
+    /// `logging` (default true) and `deprecations` (default false).
+    pub logging: bool,
+    pub deprecations: bool,
+    /// `outtmpl`: a yt-dlp output template for the file name.
+    pub outtmpl: Option<String>,
+}
+
+/// Re-log yt-dlp's `WARNING:`/`ERROR:` lines as `[ytdl][LEVEL]` messages,
+/// like upstream's logging bridge; other output is debug-level and hidden.
+async fn relay_messages(stderr: tokio::process::ChildStderr) {
+    use tokio::io::AsyncBufReadExt;
+    let mut lines = tokio::io::BufReader::new(stderr).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        let (level, message) = if let Some(message) = line.strip_prefix("ERROR: ") {
+            (crate::actions::ERROR, message)
+        } else if let Some(message) = line.strip_prefix("WARNING: ") {
+            if !YtdlOptions::deprecations() && message.to_ascii_lowercase().contains("deprecat") {
+                continue;
+            }
+            (crate::actions::WARNING, message)
+        } else {
+            continue;
+        };
+        let _ = crate::actions::log_as("ytdl", level, message);
+    }
+}
+
+/// Translate `raw-options` (YoutubeDL constructor options) into yt-dlp
+/// command-line flags. Unknown options are reported and ignored.
+fn raw_options(object: &serde_json::Map<String, serde_json::Value>) -> Vec<String> {
+    use serde_json::Value;
+    let mut args = Vec::new();
+    for (key, value) in object {
+        let text = match value {
+            Value::String(s) => Some(s.clone()),
+            Value::Number(n) => Some(n.to_string()),
+            Value::Array(items) => Some(
+                items
+                    .iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
+            _ => None,
+        };
+        let enabled = !matches!(value, Value::Null | Value::Bool(false));
+        let flag = |name: &str| enabled.then(|| vec![name.to_owned()]);
+        let with = |name: &str| text.clone().map(|t| vec![name.to_owned(), t]);
+        let mapped = match key.as_str() {
+            "quiet" => flag("--quiet"),
+            "no_warnings" => flag("--no-warnings"),
+            "verbose" => flag("--verbose"),
+            "writesubtitles" => flag("--write-subs"),
+            "writeautomaticsub" => flag("--write-auto-subs"),
+            "allsubtitles" => Some(vec!["--sub-langs".to_owned(), "all".to_owned()]),
+            "subtitleslangs" => with("--sub-langs"),
+            "subtitlesformat" => with("--sub-format"),
+            "writethumbnail" => flag("--write-thumbnail"),
+            "writedescription" => flag("--write-description"),
+            "writeinfojson" => flag("--write-info-json"),
+            "merge_output_format" => with("--merge-output-format"),
+            "ratelimit" => with("--limit-rate"),
+            "retries" => with("--retries"),
+            "fragment_retries" => with("--fragment-retries"),
+            "concurrent_fragment_downloads" => with("--concurrent-fragments"),
+            "socket_timeout" => with("--socket-timeout"),
+            "nocheckcertificate" => flag("--no-check-certificates"),
+            "geo_bypass" => flag("--geo-bypass"),
+            "geo_bypass_country" => with("--geo-bypass-country"),
+            "noplaylist" => flag("--no-playlist"),
+            "playlistend" => with("--playlist-end"),
+            "max_filesize" => with("--max-filesize"),
+            "min_filesize" => with("--min-filesize"),
+            "username" => with("--username"),
+            "password" => with("--password"),
+            "videopassword" => with("--video-password"),
+            "cookiefile" => with("--cookies"),
+            "proxy" => with("--proxy"),
+            "source_address" => with("--source-address"),
+            "http_chunk_size" => with("--http-chunk-size"),
+            "external_downloader" => with("--downloader"),
+            "keepvideo" => flag("--keep-video"),
+            "prefer_free_formats" => flag("--prefer-free-formats"),
+            "embedsubtitles" => flag("--embed-subs"),
+            "embedthumbnail" => flag("--embed-thumbnail"),
+            "addmetadata" => flag("--embed-metadata"),
+            _ => {
+                eprintln!("warning: unsupported ytdl raw-option '{key}'");
+                None
+            }
+        };
+        args.extend(mapped.unwrap_or_default());
+    }
+    args
 }
 
 static OPTIONS: std::sync::OnceLock<YtdlOptions> = std::sync::OnceLock::new();
@@ -102,6 +200,21 @@ impl YtdlOptions {
                 .get("config-file")
                 .and_then(serde_json::Value::as_str)
                 .map(crate::postprocess::expand_path),
+            forward_cookies: object.get("forward-cookies") != Some(&serde_json::Value::Bool(false)),
+            logging: object.get("logging") != Some(&serde_json::Value::Bool(false)),
+            outtmpl: object
+                .get("outtmpl")
+                .and_then(serde_json::Value::as_str)
+                .filter(|t| !t.is_empty())
+                .map(str::to_owned),
+            deprecations: object
+                .get("deprecations")
+                .is_some_and(|v| v.as_bool() == Some(true)),
+            raw_args: object
+                .get("raw-options")
+                .and_then(serde_json::Value::as_object)
+                .map(raw_options)
+                .unwrap_or_default(),
         })
     }
 
@@ -120,8 +233,28 @@ impl YtdlOptions {
             args.push("--config-locations".into());
             args.push(file.display().to_string());
         }
+        args.extend(options.raw_args.iter().cloned());
         args.extend(options.cmdline_args.iter().cloned());
         args
+    }
+
+    fn outtmpl() -> Option<&'static str> {
+        OPTIONS.get()?.outtmpl.as_deref()
+    }
+
+    /// Upstream `logging` (default true): relay yt-dlp's messages.
+    pub fn logging() -> bool {
+        OPTIONS.get().is_none_or(|options| options.logging)
+    }
+
+    /// Upstream `deprecations` (default false): show deprecation warnings.
+    pub fn deprecations() -> bool {
+        OPTIONS.get().is_some_and(|options| options.deprecations)
+    }
+
+    /// Whether session cookies are passed to yt-dlp.
+    pub fn forward_cookies() -> bool {
+        OPTIONS.get().is_none_or(|options| options.forward_cookies)
     }
 
     fn format() -> Option<&'static str> {
@@ -149,8 +282,8 @@ pub(super) fn arguments(
         "--ignore-config",
         "--no-playlist",
         "--no-progress",
+        // Warnings stay on: upstream shows them (or relays them, `logging`).
         "--quiet",
-        "--no-warnings",
         "--no-mtime",
         "--no-part",
         "--no-cache-dir",
@@ -203,7 +336,13 @@ pub(super) fn arguments(
     args.extend_from_slice(cookies);
     args.extend(YtdlOptions::arguments());
     args.push("--output".into());
-    args.push(output.join(format!("{STEM}.%(ext)s")).display().to_string());
+    // Upstream `outtmpl`: yt-dlp names the file (`default`: its own default).
+    let template = match YtdlOptions::outtmpl() {
+        Some("default") => "%(title)s [%(id)s].%(ext)s".to_owned(),
+        Some(template) => template.replace(['/', '\\'], "_"),
+        None => format!("{STEM}.%(ext)s"),
+    };
+    args.push(output.join(template).display().to_string());
     // URLs never start with '-', but keep them out of option parsing anyway.
     args.push("--".into());
     args.push(url.as_str().to_owned());
@@ -235,7 +374,7 @@ pub(super) async fn download(request: Request<'_>) -> std::result::Result<Outcom
         .tempdir_in(parent)?;
     // Cookie copies live outside the destination directory.
     let scratch = tempfile::tempdir()?;
-    let cookies = match request.cookies {
+    let cookies = match request.cookies.filter(|_| YtdlOptions::forward_cookies()) {
         Some(cookies) => cookies.arguments(scratch.path()).map_err(|error| Failure {
             error,
             retry: false,
@@ -244,13 +383,26 @@ pub(super) async fn download(request: Request<'_>) -> std::result::Result<Outcom
         None => Vec::new(),
     };
     let mut command = tokio::process::Command::new(command);
+    let logging = YtdlOptions::logging();
     command
         .args(arguments(&request, &cookies, work.path(), url))
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
         .kill_on_drop(true);
-    let status = match command.status().await {
+    // Upstream `logging: false` writes yt-dlp's output directly.
+    if logging {
+        command.stdout(Stdio::null()).stderr(Stdio::piped());
+    } else {
+        command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    }
+    let status = match async {
+        let mut child = command.spawn()?;
+        if let Some(stderr) = child.stderr.take() {
+            relay_messages(stderr).await;
+        }
+        child.wait().await
+    }
+    .await
+    {
         Ok(status) => status,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Err(failure(
@@ -265,6 +417,15 @@ pub(super) async fn download(request: Request<'_>) -> std::result::Result<Outcom
     }
     let output = produced_file(work.path())?
         .ok_or_else(|| failure("yt-dlp produced no media file", false))?;
+    // With `outtmpl`, the file keeps the name yt-dlp gave it.
+    let named;
+    let destination: &Path = match (YtdlOptions::outtmpl(), output.file_name()) {
+        (Some(_), Some(name)) => {
+            named = parent.join(name);
+            &named
+        }
+        _ => request.path,
+    };
     let size = std::fs::metadata(&output)?.len();
     if let Some(rejection) = request.limits.check(size) {
         return Ok(Outcome::Filtered(rejection));
@@ -277,11 +438,11 @@ pub(super) async fn download(request: Request<'_>) -> std::result::Result<Outcom
     }
     // A hard link publishes atomically and never replaces an existing file;
     // the temporary directory, including the source name, is removed on drop.
-    match std::fs::hard_link(&output, request.path) {
-        Ok(()) => Ok(Outcome::Downloaded(request.path.into())),
+    match std::fs::hard_link(&output, destination) {
+        Ok(()) => Ok(Outcome::Downloaded(destination.into())),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            if std::fs::symlink_metadata(request.path)?.is_file() {
-                Ok(Outcome::Skipped(request.path.into()))
+            if std::fs::symlink_metadata(destination)?.is_file() {
+                Ok(Outcome::Skipped(destination.into()))
             } else {
                 Err(failure("media destination is not a regular file", false))
             }
@@ -290,10 +451,10 @@ pub(super) async fn download(request: Request<'_>) -> std::result::Result<Outcom
             // Filesystems without hard links: copy, then refuse to clobber.
             let temporary = tempfile::NamedTempFile::new_in(parent)?.into_temp_path();
             std::fs::copy(&output, &temporary)?;
-            match temporary.persist_noclobber(request.path) {
-                Ok(_) => Ok(Outcome::Downloaded(request.path.into())),
+            match temporary.persist_noclobber(destination) {
+                Ok(_) => Ok(Outcome::Downloaded(destination.into())),
                 Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    Ok(Outcome::Skipped(request.path.into()))
+                    Ok(Outcome::Skipped(destination.into()))
                 }
                 Err(e) => Err(e.error.into()),
             }
@@ -353,6 +514,22 @@ fn find(command: &Path, path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
 
 /// The single completed `media.EXT` file yt-dlp wrote.
 fn produced_file(dir: &Path) -> std::io::Result<Option<PathBuf>> {
+    if YtdlOptions::outtmpl().is_some() {
+        // Any finished file yt-dlp wrote.
+        let mut found = None;
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let partial = [".part", ".ytdl", ".temp"]
+                .iter()
+                .any(|s| name.ends_with(s));
+            if !partial && entry.file_type()?.is_file() {
+                found = Some(entry.path());
+            }
+        }
+        return Ok(found);
+    }
     let mut found = None;
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
@@ -574,5 +751,29 @@ mod tests {
         ));
         assert_eq!(std::fs::read(out.path().join("c.mp4")).unwrap(), b"jar");
         assert_eq!(std::fs::read_dir(out.path()).unwrap().count(), 2);
+    }
+}
+
+#[cfg(test)]
+mod raw_option_tests {
+    #[test]
+    fn translates_raw_options_and_cookie_forwarding() {
+        let options = super::YtdlOptions::parse(&serde_json::json!({
+            "forward-cookies": false,
+            "raw-options": {"quiet": true, "writesubtitles": false,
+                            "merge_output_format": "mkv", "subtitleslangs": ["en", "de"]},
+        }))
+        .unwrap();
+        assert!(!options.forward_cookies);
+        assert_eq!(
+            options.raw_args,
+            [
+                "--quiet",
+                "--merge-output-format",
+                "mkv",
+                "--sub-langs",
+                "en,de"
+            ]
+        );
     }
 }
