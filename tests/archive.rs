@@ -474,7 +474,7 @@ fn cli_does_not_deduplicate_a_failed_representation_by_its_stable_id() {
         .output()
         .unwrap();
     handle.join().unwrap();
-    assert_eq!(output.status.code(), Some(1)); // first job still reports its error
+    assert_eq!(output.status.code(), Some(4)); // first job still reports its error
     assert!(String::from_utf8_lossy(&output.stderr).contains("downloaded"));
     assert_eq!(records(&path), 1);
 }

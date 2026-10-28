@@ -1646,12 +1646,14 @@ files), `archive-mode: memory` (written after a run without errors) and
 checks, default on), `validate-html`, `retry-codes` and `part-directory`
 apply. `-j/--dump-json` prints upstream's `[2, post]`/`[3, url, file]`
 message list (`output.private`, `num-to-str`, `jsonl`, `ascii`); the native
-media dump is the hidden `--dump-media-json`.
+media dump is the hidden `--dump-media-json`. Exit codes follow upstream's
+bit flags: 4 for download and extraction errors, 8 for bot challenges, 16 for
+authentication, 32 for format errors, 64 for unsupported URLs and 128 for
+local file errors (extraction errors are classified by their messages).
 **Remaining divergences:** direct links keep `direct/<digest>_NAME` paths
 (request-identity separation) rather than `directlink/{domain}_{path}_NAME`;
 without `path-restrict`, filenames use conservative ASCII cleaning rather
-than upstream's `auto`; exit codes are 0/1 rather than upstream's bit flags;
-`metadata-http`, `metadata-extractor`, `parent-*`, `category-transfer`,
+than upstream's `auto`; `metadata-http`, `metadata-extractor`, `parent-*`, `category-transfer`,
 `file-unique`/`child-unique`, `path-extended`/`path-convert`, `tls12`,
 `ciphers`, `truststore`, `proxy-env`, `cookies-select`, `category-map` and
 `config-map` are not implemented.

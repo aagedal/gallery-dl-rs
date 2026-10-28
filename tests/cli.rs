@@ -119,7 +119,7 @@ fn json_inspection_keeps_input_order_and_deduplicates_after_failures() {
         ])
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(4));
     let items: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(items.as_array().unwrap().len(), 2);
     assert_eq!(items[0]["url"], "https://example.com/b.jpg");
@@ -606,7 +606,7 @@ mod cancellation {
         std::fs::write(root.path().join("backend.release"), b"").unwrap();
         wait_until(|| child.0.as_mut().unwrap().try_wait().unwrap().is_some());
         let output = child.0.take().unwrap().wait_with_output().unwrap();
-        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.status.code(), Some(16));
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("2 operation(s) failed"), "{stderr}");
         assert_eq!(stderr.matches("downloaded ").count(), 1, "{stderr}");
@@ -651,7 +651,7 @@ mod cancellation {
         wait_until(|| child.0.as_mut().unwrap().try_wait().unwrap().is_some());
         let output = child.0.take().unwrap().wait_with_output().unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.status.code(), Some(4));
         assert!(
             stderr.contains("need yt-dlp or yt-dlp-rs on PATH"),
             "{stderr}"
@@ -834,7 +834,7 @@ fn native_twitter_reports_authentication_without_launching_backend_and_continues
             ])
             .output()
             .unwrap();
-        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.status.code(), Some(4));
         assert_eq!(
             String::from_utf8(output.stdout).unwrap(),
             "https://example.com/image.jpg\n"
@@ -886,7 +886,7 @@ fn native_session_initialization_failure_does_not_block_unrelated_direct_inputs(
             ])
             .output()
             .unwrap();
-        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.status.code(), Some(4));
         assert_eq!(
             String::from_utf8(output.stdout).unwrap(),
             "https://example.com/image.jpg\n"

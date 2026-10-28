@@ -329,7 +329,7 @@ async fn after_boundary_terminates_unfinished_backend_and_resets_for_next_input(
     );
     let result =
         output(binary(root.path(), &backend).args(["-g", "--date-after=10", FIRST, SECOND])).await;
-    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(result.status.code(), Some(4));
     assert_eq!(
         urls(&result),
         [

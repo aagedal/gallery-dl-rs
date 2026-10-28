@@ -231,7 +231,7 @@ async fn missing_fields_and_runtime_errors_reject_only_the_current_file_and_erro
         SECOND,
     ]))
     .await;
-    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(result.status.code(), Some(4));
     assert_eq!(urls(&result), [url("selected"), url("next-input")]);
     assert!(String::from_utf8_lossy(&result.stderr).contains("1 operation(s) failed"));
 }

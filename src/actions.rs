@@ -185,13 +185,66 @@ fn level_number(level: &str) -> u32 {
     }
 }
 
-/// The final exit status: `base` modified by `status` actions, or the
-/// code of an `exit` action.
+/// Upstream job status bits of failed operations.
+static STATUS: AtomicI32 = AtomicI32::new(0);
+
+/// Upstream exception codes: 4 extraction/HTTP errors, 8 challenges,
+/// 16 authentication/authorization, 32 input/format errors, 64 unsupported
+/// URLs, 128 local OS errors.
+pub mod code {
+    pub const ERROR: i32 = 1;
+    pub const HTTP: i32 = 4;
+    pub const CHALLENGE: i32 = 8;
+    pub const AUTH: i32 = 16;
+    pub const FORMAT: i32 = 32;
+    pub const NO_EXTRACTOR: i32 = 64;
+    pub const OS: i32 = 128;
+}
+
+/// Record a failure for the exit status.
+pub fn fail(bits: i32) {
+    STATUS.fetch_or(bits, Ordering::Relaxed);
+}
+
+/// The upstream status code of an extraction error, from its message.
+pub fn classify(message: &str) -> i32 {
+    let lower = message.to_ascii_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| lower.contains(w));
+    if has(&["unsupported url", "no extractor"]) {
+        code::NO_EXTRACTOR
+    } else if has(&["cloudflare", "challenge", "captcha"]) {
+        code::CHALLENGE
+    } else if has(&[
+        "credential",
+        "login",
+        "log in",
+        "authenticat",
+        "authoriz",
+        "401 unauthorized",
+        "api key",
+        "api-key",
+        "access token",
+    ]) {
+        code::AUTH
+    } else if has(&["template", "format string", "filename field"]) {
+        code::FORMAT
+    } else {
+        code::HTTP
+    }
+}
+
+/// The final exit status: the recorded failure bits (or `base` if none
+/// were recorded) modified by `status` actions, or the code of an `exit`
+/// action.
 pub fn exit_status(base: i32) -> i32 {
     let exit = EXIT.load(Ordering::Relaxed);
     if exit != i32::MIN {
         return exit;
     }
+    let base = match STATUS.load(Ordering::Relaxed) {
+        0 => base,
+        bits => bits,
+    };
     STATUS_OPS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -285,6 +338,17 @@ pub const ERROR: u32 = 40;
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn classifies_errors_like_upstream_exceptions() {
+        assert_eq!(
+            classify("unsupported URL; expected ..."),
+            code::NO_EXTRACTOR
+        );
+        assert_eq!(classify("login required"), code::AUTH);
+        assert_eq!(classify("HTTP 404 Not Found"), code::HTTP);
+        assert_eq!(classify("Cloudflare challenge"), code::CHALLENGE);
+    }
 
     #[tokio::test]
     async fn parses_and_runs_actions() {

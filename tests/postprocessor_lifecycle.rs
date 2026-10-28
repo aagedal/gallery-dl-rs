@@ -431,7 +431,7 @@ async fn failed_http_runs_error_finalization_before_unconditional_finalization()
     let output = cli(temp.path(), &backend, &config, &[]).await;
     assert_eq!(
         output.status.code(),
-        Some(1),
+        Some(4),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );

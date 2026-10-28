@@ -1285,6 +1285,9 @@ async fn run(args: Args) -> Result<()> {
                 std::future::ready(match result {
                     Ok(item) => Some((index, item)),
                     Err(e) => {
+                        gallery_dl_rs::actions::fail(gallery_dl_rs::actions::classify(
+                            &e.to_string(),
+                        ));
                         let message = format!("extraction failed for input {}: {e}", index + 1);
                         match gallery_dl_rs::actions::log(gallery_dl_rs::actions::ERROR, &message)
                             .err()
@@ -1398,6 +1401,7 @@ async fn run(args: Args) -> Result<()> {
             ) {
                 Ok(path) => println!("# {}", path.display()),
                 Err(e) => {
+                    gallery_dl_rs::actions::fail(gallery_dl_rs::actions::code::FORMAT);
                     eprintln!("simulation failed: {e}");
                     failed.set(failed.get() + 1);
                 }
@@ -1627,6 +1631,15 @@ async fn run(args: Args) -> Result<()> {
                     }
                 }
                 Err(e) => {
+                    gallery_dl_rs::actions::fail(
+                        if e.downcast_ref::<std::io::Error>()
+                            .is_some_and(|e| e.kind() != std::io::ErrorKind::Other)
+                        {
+                            gallery_dl_rs::actions::code::OS
+                        } else {
+                            gallery_dl_rs::actions::code::HTTP
+                        },
+                    );
                     match gallery_dl_rs::actions::log(
                         gallery_dl_rs::actions::ERROR,
                         &format!("download failed: {e}"),

@@ -186,7 +186,7 @@ async fn finite_range_ignores_unconsumed_invalid_row_but_errors_before_end_conti
     );
     let result =
         output(binary(root.path(), &backend).args(["-g", "--range", "2", FIRST, SECOND])).await;
-    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(result.status.code(), Some(4));
     assert_eq!(urls(&result), ["https://cdn.example/later2.jpg"]);
     assert!(String::from_utf8_lossy(&result.stderr).contains("1 operation(s) failed"));
 }

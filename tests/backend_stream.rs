@@ -147,7 +147,7 @@ async fn cli_listing_preserves_items_and_continues_after_late_failure() {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(output.status.code(), Some(4));
         assert_eq!(
             String::from_utf8(output.stdout).unwrap(),
             "https://cdn.example/first.jpg\nhttps://example.com/later.jpg\n"
