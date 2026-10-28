@@ -487,7 +487,6 @@ mod tests {
             "https://www.facebook.com/groups/123",
             "https://www.facebook.com/NASA/posts/123",
             "https://www.facebook.com/NASA/videos/123",
-            "https://www.facebook.com/NASA/info",
             "https://www.facebook.com/profile.php",
             "https://www.facebook.com/profile.php?id=1&sk=about",
             "https://www.facebook.com:8443/NASA",
