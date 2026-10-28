@@ -142,6 +142,10 @@ pub enum Target {
     Tags {
         tags: String,
     },
+    /// Danbooru `/posts/random[?tags=...]`: one random matching post.
+    Random {
+        tags: String,
+    },
     Popular {
         params: Vec<(String, String)>,
     },
@@ -370,6 +374,9 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
         })
     } else if site.danbooru_dialect() {
         match segments.as_slice() {
+            ["posts", "random"] if site == Site::Danbooru => Some(Target::Random {
+                tags: query("tags").unwrap_or_default(),
+            }),
             ["posts", id] | ["post", "show", id] => post_id(id).map(|id| Target::Post { id }),
             // e621 short links: base-32 post IDs (`int(ID, 32)`).
             ["p", code] if site == Site::E621 => u64::from_str_radix(code, 32)
@@ -727,7 +734,7 @@ fn defaults(
         Target::Post { .. } | Target::Artist { .. } | Target::ArtistSearch { .. } => {
             &["{category}"]
         }
-        Target::Tags { .. } => &["{category}", "{search_tags}"],
+        Target::Tags { .. } | Target::Random { .. } => &["{category}", "{search_tags}"],
         Target::Favorites { .. } => &["{category}", "Favorites", "{user_id}"],
         Target::Popular { .. } => &["{category}", "popular", "{scale}", "{date}"],
         Target::DapiFavorites { .. } => &["{category}", "favorites", "{favorite_id}"],
@@ -742,7 +749,7 @@ fn defaults(
     let archive = match target {
         Target::Post { .. } => "{id}",
         Target::Artist { .. } | Target::ArtistSearch { .. } => "",
-        Target::Tags { .. } => "t_{search_tags}_{id}",
+        Target::Tags { .. } | Target::Random { .. } => "t_{search_tags}_{id}",
         Target::Pool { .. } if !site.danbooru_dialect() => "p_{pool}_{id}",
         Target::Pool { .. } => "p_{pool[id]}_{id}",
         Target::Favgroup { .. } => "fg_{favgroup[id]}_{id}",
@@ -753,6 +760,7 @@ fn defaults(
     let subcategory = match target {
         Target::Post { .. } => "post",
         Target::Tags { .. } => "tag",
+        Target::Random { .. } => "random",
         Target::Pool { .. } => "pool",
         Target::Favgroup { .. } => "favgroup",
         Target::Favorites { .. } | Target::DapiFavorites { .. } => "favorite",
@@ -1693,9 +1701,27 @@ impl Booru {
                     pending_error: None,
                 });
             }
-            Target::Post { id } => {
+            Target::Post { .. } | Target::Random { .. } => {
                 return stream::once(async move {
-                    let raw = self.post(&root, id).await?;
+                    let search_tags = match &target {
+                        Target::Random { tags } => Some(Arc::<str>::from(tags.as_str())),
+                        _ => None,
+                    };
+                    let raw = match target {
+                        Target::Post { id } => self.post(&root, id).await?,
+                        Target::Random { tags } => {
+                            let query: Vec<(&str, &str)> = if tags.is_empty() {
+                                Vec::new()
+                            } else {
+                                vec![("tags", tags.as_str())]
+                            };
+                            posts(
+                                self.site,
+                                &self.call(&root, "posts/random.json", &query).await?,
+                            )?
+                        }
+                        _ => unreachable!("post targets"),
+                    };
                     let mut state = State {
                         dapi_listing: None,
                         popular: None,
@@ -1703,7 +1729,7 @@ impl Booru {
                         collection: None,
                         root,
                         tags: String::new(),
-                        search_tags: None,
+                        search_tags,
                         cursor: Cursor::Page(0),
                         pages: 0,
                         done: true,
