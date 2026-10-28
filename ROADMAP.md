@@ -1734,7 +1734,9 @@ ArtStation albums, likes, collections, challenges, following, `artstn.co` links 
 (Cloudflare blocks ArtStation here).
 **Remaining:** ArtStation search
 (CSRF-token POST API), DeviantArt scraps/search/
-watch (Eclipse API needing a CSRF session, or login); journals and literature are saved as `.htm`
+(Eclipse API needing a CSRF session); DeviantArt `watch/deviations`,
+`notifications/watch` and `watch/posts` use the `refresh-token` from
+`oauth:deviantart` (unverified without an account); journals and literature are saved as `.htm`
 from `deviation/content` (simpler than upstream's journal template; not yet
 verified live because DeviantArt rate-limited this host), 500px liked (login;
 the native port uses the newer api-neo GraphQL schema, whose liked query is

@@ -2570,6 +2570,7 @@ fn extract_input<'a>(
                                             options.client_id.as_deref(),
                                             options.client_secret.as_deref(),
                                         )
+                                        .with_refresh_token(options.refresh_token.as_deref())
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)

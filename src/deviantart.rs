@@ -103,6 +103,11 @@ pub enum Target {
     Following(String),
     /// `USER/journal/`, `USER/posts[/journals]`: the user's journals.
     Journals(String),
+    /// `watch/deviations` (`notifications/watch`) or `watch/posts`: needs a
+    /// `refresh-token`.
+    Watch {
+        posts: bool,
+    },
     /// `USER/posts/statuses`: shared deviations and status texts.
     Statuses(String),
     /// A Sta.sh item or folder; `true` for legacy `sta.sh` links.
@@ -191,6 +196,10 @@ pub fn target(url: &Url) -> Result<Target> {
                     .ok_or_else(unsupported);
             }
             ["tag", tag] => return Ok(Target::Tag(crate::sites::percent_decode(tag))),
+            ["watch", "deviations"] | ["notifications", "watch"] => {
+                return Ok(Target::Watch { posts: false });
+            }
+            ["watch", "posts"] => return Ok(Target::Watch { posts: true }),
             _ => {}
         }
     }
@@ -407,6 +416,7 @@ pub fn parse_page(body: &Value) -> Result<Page> {
 }
 
 pub struct DeviantArt {
+    refresh_token: Option<String>,
     client: Client,
     network: NetworkOptions,
     root: Url,
@@ -432,6 +442,7 @@ struct ListingState {
 impl DeviantArt {
     pub fn new(timeout: Duration) -> Result<Self> {
         Ok(Self {
+            refresh_token: None,
             client: NetworkOptions::default().client(USER_AGENT, timeout)?,
             network: NetworkOptions::default(),
             root: Url::parse("https://www.deviantart.com/").expect("static URL"),
@@ -453,6 +464,13 @@ impl DeviantArt {
     }
 
     /// Override upstream's public OAuth client.
+    /// Upstream `refresh-token` (from `oauth:deviantart`): act as the user,
+    /// needed for the `watch` views.
+    pub fn with_refresh_token(mut self, token: Option<&str>) -> Self {
+        self.refresh_token = token.filter(|t| !t.is_empty()).map(str::to_owned);
+        self
+    }
+
     pub fn with_credentials(mut self, id: Option<&str>, secret: Option<&str>) -> Self {
         if let Some(id) = id {
             self.client_id = id.into();
@@ -491,11 +509,18 @@ impl DeviantArt {
 
     async fn authenticate(&self) -> Result<String> {
         let endpoint = self.root.join("oauth2/token").expect("static path");
-        let body = url::form_urlencoded::Serializer::new(String::new())
-            .append_pair("grant_type", "client_credentials")
-            .append_pair("client_id", &self.client_id)
-            .append_pair("client_secret", &self.client_secret)
-            .finish();
+        let body = {
+            let mut form = url::form_urlencoded::Serializer::new(String::new());
+            match &self.refresh_token {
+                Some(token) => form
+                    .append_pair("grant_type", "refresh_token")
+                    .append_pair("refresh_token", token),
+                None => form.append_pair("grant_type", "client_credentials"),
+            };
+            form.append_pair("client_id", &self.client_id)
+                .append_pair("client_secret", &self.client_secret)
+                .finish()
+        };
         let reply = self
             .request(&endpoint, || {
                 self.client
@@ -686,6 +711,9 @@ impl DeviantArt {
         let path = match (&state.folder, state.kind) {
             (_, "browse/tags") => "browse/tags".to_owned(),
             (_, "user/profile/posts" | "statuses") => "user/profile/posts".to_owned(),
+            (_, kind @ ("browse/deviantsyouwatch" | "browse/posts/deviantsyouwatch")) => {
+                kind.to_owned()
+            }
             (Some(folder), kind) => format!("{kind}/{folder}"),
             (None, kind) => format!("{kind}/all"),
         };
@@ -694,6 +722,8 @@ impl DeviantArt {
             let mut query = endpoint.query_pairs_mut();
             if state.kind == "browse/tags" {
                 query.append_pair("tag", &state.user);
+            } else if state.kind.starts_with("browse/") {
+                // `deviantsyouwatch` lists the authenticated user's feed.
             } else {
                 query.append_pair("username", &state.user);
             }
@@ -724,7 +754,19 @@ impl DeviantArt {
             }
             return Ok(());
         }
-        for deviation in &page.results {
+        // Upstream `unpack`: watched posts wrap journals.
+        let unpacked: Vec<Value>;
+        let results = if state.kind == "browse/posts/deviantsyouwatch" {
+            unpacked = page
+                .results
+                .iter()
+                .filter_map(|item| item.get("journal").cloned())
+                .collect();
+            &unpacked
+        } else {
+            &page.results
+        };
+        for deviation in results {
             // Profile posts also contain status updates; keep journals.
             if state.kind == "user/profile/posts"
                 && !string(deviation, "url").is_some_and(|url| url.contains("/journal/"))
@@ -1071,6 +1113,8 @@ impl DeviantArt {
             Target::Stash(id, legacy) => return self.stash(id, legacy, 0),
             Target::Journals(user) => ("user/profile/posts", user, None),
             Target::Statuses(user) => ("statuses", user, None),
+            Target::Watch { posts: false } => ("browse/deviantsyouwatch", String::new(), None),
+            Target::Watch { posts: true } => ("browse/posts/deviantsyouwatch", String::new(), None),
             Target::Tag(tag) => ("browse/tags", tag, None),
             Target::Favorites { user, folder } => ("collections", user, folder),
             Target::Gallery(user) => ("gallery", user, None),
@@ -1348,6 +1392,14 @@ mod tests {
         assert_eq!(
             t("https://www.deviantart.com/shimoda7/about#watching"),
             Target::Following("shimoda7".into())
+        );
+        assert_eq!(
+            t("https://www.deviantart.com/notifications/watch"),
+            Target::Watch { posts: false }
+        );
+        assert_eq!(
+            t("https://www.deviantart.com/watch/posts"),
+            Target::Watch { posts: true }
         );
         assert_eq!(
             t("https://www.deviantart.com/t1na/posts/statuses"),
