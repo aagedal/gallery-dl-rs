@@ -1667,6 +1667,29 @@ implemented. `config-map` (default: upstream's renamed categories, e.g.
 category names; `category-map` and `--compat` rename `category` (and
 `subcategory`) keywords, but configuration lookups keep the native names.
 
+**Implemented upstream URL coverage for dedicated extractors, 2026-10-28:**
+a sweep of every `#url` in upstream's `test/results` (excluding `#fail` and
+`#exception` cases) against `--extractor native -g` found 175 URLs the
+native extractors rejected. Added: Imgur user/favorite/favorite-folder/
+subreddit/tag/search listings and slug/thumbnail forms; Danbooru/e621
+`/post/show/ID`, `/posts/random`, e621 `/p/BASE32`, e621.cc and
+e621.anthro.fr, Gelbooru `redirect.php`; Twitter fx/vx/fixup/fixvx hosts;
+Pixiv touch./phixiv hosts, `/i/ID`, `/u/ID`, `member.php`, `#id=` and
+`pixiv.me`; Weasyl journals, journal, favorites, folders and `~` names;
+Wallhaven collections; Pixeldrain `/d/` filesystem folders (recursive);
+Flickr albums overview, favorites, galleries, groups and search; Fur
+Affinity folders, user dispatch, search, watchlist, `/msg/submissions` and
+mirror hosts; DeviantArt `/view/ID`, `fav.me`, `view.php`, favourites and
+collections, tags, avatar, banner, watching and fxdeviantart; Facebook
+`profile.php?id=ID/TAB`; `i.reddituploads.com`; remaining directlink
+extensions. **Remaining:** Newgrounds audio/movies/games/favorites/search
+(the site now serves an "NG Guard" browser check), VSCO collection/spaces/
+avatar/video (HTTP 403 here), ArtStation albums/collections/likes/search/
+challenges (Cloudflare), DeviantArt scraps/search/journals/statuses/stash/
+watch (Eclipse API, literature or login), Danbooru media assets, Pixiv
+unlisted works, Imgur `/user/me`, MangaDex feed/follows and 500px liked
+(login), Facebook `/info`.
+
 ### Companion yt-dlp-rs integration
 
 Prefer an optional Rust library adapter once yt-dlp-rs has a stable, consumable
