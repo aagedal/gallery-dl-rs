@@ -214,7 +214,7 @@ fn manifests_are_inspectable_but_not_downloaded() {
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()
-            .contains("need yt-dlp on PATH or --ytdl-command")
+            .contains("need yt-dlp or yt-dlp-rs on PATH, or --ytdl-command")
     );
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
 }
@@ -625,7 +625,10 @@ mod cancellation {
         let output = child.0.take().unwrap().wait_with_output().unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(1));
-        assert!(stderr.contains("need yt-dlp on PATH"), "{stderr}");
+        assert!(
+            stderr.contains("need yt-dlp or yt-dlp-rs on PATH"),
+            "{stderr}"
+        );
         assert!(!stderr.contains("extraction failed"), "{stderr}");
         assert!(stderr.contains("1 operation(s) failed"), "{stderr}");
     }

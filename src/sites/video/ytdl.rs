@@ -1,4 +1,5 @@
 //! Video platforms through yt-dlp, mirroring gallery_dl/extractor/ytdl.py.
+//! The native port yt-dlp-rs is used when `yt-dlp` is not on `PATH`.
 //!
 //! Upstream only takes `ytdl:`-prefixed URLs unless `extractor.ytdl.enabled`
 //! is set; here the hosts of large video and social platforms without a
@@ -267,7 +268,9 @@ fn info_key(info: &Map<String, Value>) -> Option<String> {
 
 /// `yt-dlp -J --flat-playlist URL`, parsed.
 async fn run(http: &Http, url: &Url) -> Result<Value> {
-    let mut command = tokio::process::Command::new(http.ytdl());
+    let executable = crate::download::ytdl_executable(http.ytdl())
+        .ok_or_else(|| error("yt-dlp sites need yt-dlp or yt-dlp-rs on PATH, or --ytdl-command"))?;
+    let mut command = tokio::process::Command::new(executable);
     command.args([
         "--ignore-config",
         "--no-warnings",
@@ -295,7 +298,7 @@ async fn run(http: &Http, url: &Url) -> Result<Value> {
         .kill_on_drop(true);
     let mut child = command.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
-            error("yt-dlp sites need yt-dlp on PATH or --ytdl-command")
+            error("yt-dlp sites need yt-dlp or yt-dlp-rs on PATH, or --ytdl-command")
         } else {
             error("could not start yt-dlp")
         }

@@ -1,5 +1,7 @@
 //! Video-page and HLS/DASH downloads through an external `yt-dlp`, like
-//! gallery-dl's `ytdl` downloader.
+//! gallery-dl's `ytdl` downloader. The native port
+//! [yt-dlp-rs](https://github.com/aagedal/yt-dlp-rs) accepts the same
+//! arguments and is used when the default `yt-dlp` is not on `PATH`.
 //!
 //! The executable is invoked directly, without a shell, with user yt-dlp
 //! configuration files ignored as upstream's module use does. Output goes to
@@ -223,7 +225,7 @@ pub(super) async fn download(request: Request<'_>) -> std::result::Result<Outcom
     // Fail before touching the filesystem when yt-dlp is unavailable.
     let command = executable(request.command).ok_or_else(|| {
         failure(
-            "video downloads need yt-dlp on PATH or --ytdl-command",
+            "video downloads need yt-dlp or yt-dlp-rs on PATH, or --ytdl-command",
             false,
         )
     })?;
@@ -252,7 +254,7 @@ pub(super) async fn download(request: Request<'_>) -> std::result::Result<Outcom
         Ok(status) => status,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Err(failure(
-                "video downloads need yt-dlp on PATH or --ytdl-command",
+                "video downloads need yt-dlp or yt-dlp-rs on PATH, or --ytdl-command",
                 false,
             ));
         }
@@ -299,9 +301,36 @@ pub(super) async fn download(request: Request<'_>) -> std::result::Result<Outcom
     }
 }
 
-/// The executable a bare command name resolves to on `PATH`, or the given
-/// path when it names an existing file.
-fn executable(command: &Path) -> Option<PathBuf> {
+/// Default yt-dlp command, and the native port tried in its place.
+const DEFAULT_COMMAND: &str = "yt-dlp";
+const NATIVE_COMMAND: &str = "yt-dlp-rs";
+
+/// The executable to run for a yt-dlp command: the given path when it names
+/// an existing file, or a bare name resolved on `PATH`. The default `yt-dlp`
+/// falls back to `yt-dlp-rs`, which takes the same arguments.
+pub fn executable(command: &Path) -> Option<PathBuf> {
+    executable_in(command, std::env::var_os("PATH").as_deref())
+}
+
+fn executable_in(command: &Path, path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    find(command, path).or_else(|| {
+        (command == Path::new(DEFAULT_COMMAND))
+            .then(|| find(Path::new(NATIVE_COMMAND), path))
+            .flatten()
+    })
+}
+
+/// The command a `ytdl.module` setting names, if it is one this port runs.
+/// Upstream names Python modules (`yt_dlp`); `yt_dlp_rs` selects the port.
+pub fn module_command(module: &str) -> Option<&'static str> {
+    match module.to_ascii_lowercase().replace('-', "_").as_str() {
+        "yt_dlp" => Some(DEFAULT_COMMAND),
+        "yt_dlp_rs" => Some(NATIVE_COMMAND),
+        _ => None,
+    }
+}
+
+fn find(command: &Path, path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
     if command.components().count() > 1 {
         return command.is_file().then(|| command.to_owned());
     }
@@ -317,7 +346,7 @@ fn executable(command: &Path) -> Option<PathBuf> {
     } else {
         vec![command.as_os_str().to_owned()]
     };
-    std::env::split_paths(&std::env::var_os("PATH")?)
+    std::env::split_paths(path?)
         .flat_map(|dir| names.iter().map(move |name| dir.join(name)))
         .find(|candidate| candidate.is_file())
 }
@@ -431,6 +460,41 @@ mod tests {
             inline_data: None,
         });
         assert_eq!(source(&remote), Some(&base));
+    }
+
+    #[test]
+    fn default_command_falls_back_to_yt_dlp_rs() {
+        let dir = tempfile::tempdir().unwrap();
+        let native = dir.path().join(if cfg!(windows) {
+            "yt-dlp-rs.exe"
+        } else {
+            "yt-dlp-rs"
+        });
+        std::fs::write(&native, b"").unwrap();
+        let path = Some(dir.path().as_os_str());
+        assert_eq!(
+            executable_in(Path::new("yt-dlp"), path),
+            Some(native.clone())
+        );
+        // Explicit other commands never fall back.
+        assert_eq!(executable_in(Path::new("youtube-dl"), path), None);
+        assert_eq!(executable_in(&dir.path().join("yt-dlp"), path), None);
+        // An installed yt-dlp is preferred.
+        let python = dir.path().join(if cfg!(windows) {
+            "yt-dlp.exe"
+        } else {
+            "yt-dlp"
+        });
+        std::fs::write(&python, b"").unwrap();
+        assert_eq!(executable_in(Path::new("yt-dlp"), path), Some(python));
+    }
+
+    #[test]
+    fn modules_name_commands() {
+        assert_eq!(module_command("yt_dlp"), Some("yt-dlp"));
+        assert_eq!(module_command("yt-dlp-rs"), Some("yt-dlp-rs"));
+        assert_eq!(module_command("YT_DLP_RS"), Some("yt-dlp-rs"));
+        assert_eq!(module_command("youtube_dl"), None);
     }
 
     #[test]

@@ -2499,7 +2499,14 @@ The parser follows the
 
 Video-page jobs and HLS/DASH manifest URLs are downloaded by running an external
 [yt-dlp](https://github.com/yt-dlp/yt-dlp) (`yt-dlp` on `PATH`, or
-`--ytdl-command PATH`), like gallery-dl's `ytdl` downloader. It is invoked
+`--ytdl-command PATH`), like gallery-dl's `ytdl` downloader. The native Rust
+port [yt-dlp-rs](https://github.com/aagedal/yt-dlp-rs) takes the same arguments
+and needs no Python runtime: it is used automatically when `yt-dlp` is not on
+`PATH`, or explicitly with `--ytdl-command yt-dlp-rs` or
+`"module": "yt-dlp-rs"` in the native configuration's `downloader.ytdl` or
+`extractor.ytdl` (upstream's `"yt_dlp"` selects `yt-dlp`; other modules are
+ignored). The same applies to
+`ytdl` site extraction. It is invoked
 directly, without a shell, with `--ignore-config`; request headers, `--proxy`,
 `--retries` and `--limit-rate` are forwarded, and destinations with a video or
 audio container extension are merged/remuxed into that container. Output is
