@@ -22,6 +22,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tokio::io::AsyncWriteExt;
+pub use ytdl::YtdlOptions;
 
 /// Clones share the HTTP connection pool and per-origin rate-limit cooldowns.
 #[derive(Clone)]

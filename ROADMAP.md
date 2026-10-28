@@ -1602,6 +1602,8 @@ and `cache` are ignored. Credentials stay confined to supporting categories,
 and `base-directory`, `archive` and cookie-file paths expand `~` and
 environment variables. The `output` section's `logfile`, `unsupportedfile`, `errorfile` (paths or
 `{"path": ...}`), `mode: null`/`false` and `skip: false` apply.
+`downloader.ytdl` `format`, `cmdline-args` (whitespace-split strings or
+lists) and `config-file` apply to yt-dlp downloads; `raw-options` cannot.
 `sleep`, `sleep-extractor`, `sleep-skip`, `source-address`, `geo-bypass` and
 `netrc` are also read from the root/`extractor` configuration scope.
 Upstream's `extension-map` applies to every extractor (default: `jpeg`,

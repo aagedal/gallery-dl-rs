@@ -918,6 +918,9 @@ async fn run(args: Args) -> Result<()> {
         if downloader.get("mtime") == Some(&serde_json::Value::Bool(false)) {
             args.no_mtime = true;
         }
+        if let Some(ytdl) = downloader.get("ytdl") {
+            download::YtdlOptions::parse(ytdl)?.install();
+        }
     }
     match globals.and_then(|g| g.get("skip")) {
         Some(serde_json::Value::Bool(false)) => args.no_skip = true,

@@ -57,6 +57,85 @@ pub(super) struct Request<'a> {
     pub cookies: Option<&'a crate::cookies::YtdlCookies>,
 }
 
+/// Upstream `downloader.ytdl` options: `format`, `cmdline-args` and
+/// `config-file`. `raw-options` (Python keyword arguments) has no
+/// command-line equivalent.
+#[derive(Debug, Default)]
+pub struct YtdlOptions {
+    pub format: Option<String>,
+    pub cmdline_args: Vec<String>,
+    pub config_file: Option<std::path::PathBuf>,
+}
+
+static OPTIONS: std::sync::OnceLock<YtdlOptions> = std::sync::OnceLock::new();
+
+impl YtdlOptions {
+    /// Parse a `downloader.ytdl` object.
+    pub fn parse(value: &serde_json::Value) -> crate::Result<Self> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| crate::error("downloader.ytdl must be an object"))?;
+        let cmdline_args = match object.get("cmdline-args") {
+            None | Some(serde_json::Value::Null) => Vec::new(),
+            Some(serde_json::Value::String(text)) => {
+                text.split_whitespace().map(str::to_owned).collect()
+            }
+            Some(serde_json::Value::Array(items)) => items
+                .iter()
+                .map(|item| {
+                    item.as_str()
+                        .map(str::to_owned)
+                        .ok_or_else(|| crate::error("cmdline-args must be strings"))
+                })
+                .collect::<crate::Result<_>>()?,
+            Some(_) => return Err(crate::error("cmdline-args must be a string or list")),
+        };
+        Ok(Self {
+            format: object
+                .get("format")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
+            cmdline_args,
+            config_file: object
+                .get("config-file")
+                .and_then(serde_json::Value::as_str)
+                .map(crate::postprocess::expand_path),
+        })
+    }
+
+    /// Install process-wide options; later calls are ignored.
+    pub fn install(self) {
+        let _ = OPTIONS.set(self);
+    }
+
+    /// Arguments added to every yt-dlp invocation.
+    pub fn arguments() -> Vec<String> {
+        let Some(options) = OPTIONS.get() else {
+            return Vec::new();
+        };
+        let mut args = Vec::new();
+        if let Some(file) = &options.config_file {
+            args.push("--config-locations".into());
+            args.push(file.display().to_string());
+        }
+        args.extend(options.cmdline_args.iter().cloned());
+        args
+    }
+
+    fn format() -> Option<&'static str> {
+        OPTIONS.get()?.format.as_deref()
+    }
+}
+
+fn extension_name(request: &Request<'_>) -> String {
+    request
+        .path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default()
+}
+
 /// Command-line arguments, excluding the executable.
 pub(super) fn arguments(
     request: &Request<'_>,
@@ -101,10 +180,16 @@ pub(super) fn arguments(
         args.push(extension);
     } else if AUDIO_CONTAINERS.contains(&extension.as_str()) {
         args.push("--format".into());
-        args.push("bestaudio/best".into());
+        args.push(YtdlOptions::format().unwrap_or("bestaudio/best").into());
         args.push("--extract-audio".into());
         args.push("--audio-format".into());
         args.push(extension);
+    }
+    if !AUDIO_CONTAINERS.contains(&extension_name(request).as_str())
+        && let Some(format) = YtdlOptions::format()
+    {
+        args.push("--format".into());
+        args.push(format.into());
     }
     for (name, value) in &request.media.headers {
         if SKIPPED_HEADERS.contains(&name.to_ascii_lowercase().as_str()) {
@@ -114,6 +199,7 @@ pub(super) fn arguments(
         args.push(format!("{name}:{value}"));
     }
     args.extend_from_slice(cookies);
+    args.extend(YtdlOptions::arguments());
     args.push("--output".into());
     args.push(output.join(format!("{STEM}.%(ext)s")).display().to_string());
     // URLs never start with '-', but keep them out of option parsing anyway.
@@ -261,6 +347,24 @@ fn produced_file(dir: &Path) -> std::io::Result<Option<PathBuf>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn upstream_ytdl_options_parse() {
+        let options = YtdlOptions::parse(&serde_json::json!({
+            "format": "bv*+ba",
+            "cmdline-args": "--embed-subs --sub-langs en",
+            "config-file": "/tmp/yt.conf",
+            "raw-options": {"ignored": true}
+        }))
+        .unwrap();
+        assert_eq!(options.format.as_deref(), Some("bv*+ba"));
+        assert_eq!(options.cmdline_args, ["--embed-subs", "--sub-langs", "en"]);
+        assert_eq!(
+            options.config_file.unwrap(),
+            std::path::Path::new("/tmp/yt.conf")
+        );
+        assert!(YtdlOptions::parse(&serde_json::json!({"cmdline-args": 1})).is_err());
+    }
+
     use super::*;
     use std::collections::BTreeMap;
 
