@@ -491,6 +491,11 @@ impl MetadataOptions {
             out.write_all(content.as_bytes())
                 .await
                 .map_err(|_| error("could not write metadata output"))?;
+            // Tokio writes stdout on a blocking thread; wait until it is done
+            // so output is not lost when the process exits.
+            out.flush()
+                .await
+                .map_err(|_| error("could not write metadata output"))?;
             return Ok(());
         }
         let archive = self.archive_session().await;
