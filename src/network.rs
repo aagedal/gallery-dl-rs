@@ -18,6 +18,8 @@ pub struct NetworkOptions {
     tls13_only: bool,
     /// Upstream `truststore`: verify with the system certificate store.
     system_roots: bool,
+    /// Upstream `ciphers`: allowed cipher suites, in order.
+    ciphers: Option<Vec<String>>,
 }
 impl fmt::Debug for NetworkOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -67,6 +69,34 @@ impl NetworkOptions {
         self.tls13_only = !tls12;
         self.system_roots = truststore;
         self
+    }
+    /// Upstream `ciphers`: a list or `:`-separated string of OpenSSL or IANA
+    /// cipher names. Browser presets (`firefox`, `chrome`) only imitate
+    /// fingerprints and are not supported.
+    pub fn with_ciphers(mut self, value: Option<&serde_json::Value>) -> Result<Self> {
+        let names: Vec<String> = match value {
+            None | Some(serde_json::Value::Null) => return Ok(self),
+            Some(serde_json::Value::String(text))
+                if text.starts_with("firefox") || text.starts_with("chrome") =>
+            {
+                static WARNED: std::sync::Once = std::sync::Once::new();
+                WARNED.call_once(|| {
+                    eprintln!("warning: browser cipher presets are not supported natively")
+                });
+                return Ok(self);
+            }
+            Some(serde_json::Value::String(text)) => text.split(':').map(str::to_owned).collect(),
+            Some(serde_json::Value::Array(items)) => items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_owned))
+                .collect(),
+            Some(_) => return Err(error("ciphers must be a string or a list")),
+        };
+        if cipher_suites(&names).is_empty() {
+            return Err(error("ciphers names no cipher suite supported natively"));
+        }
+        self.ciphers = Some(names);
+        Ok(self)
     }
     /// Disable TLS certificate verification (`--no-check-certificate`).
     pub fn with_insecure(mut self, insecure: bool) -> Self {
@@ -124,6 +154,9 @@ impl NetworkOptions {
         if self.insecure {
             builder = builder.danger_accept_invalid_certs(true);
         }
+        if let Some(names) = self.ciphers.as_ref().filter(|_| !self.insecure) {
+            builder = builder.use_preconfigured_tls(self.tls_config(names)?);
+        }
         if self.tls13_only {
             builder = builder.min_tls_version(reqwest::tls::Version::TLS_1_3);
         }
@@ -158,6 +191,31 @@ impl NetworkOptions {
         builder
             .build()
             .map_err(|_| error("could not initialize HTTP client"))
+    }
+    /// A rustls configuration limited to the configured cipher suites.
+    fn tls_config(&self, names: &[String]) -> Result<rustls::ClientConfig> {
+        let mut provider = rustls::crypto::ring::default_provider();
+        provider.cipher_suites = cipher_suites(names);
+        let mut roots = rustls::RootCertStore::empty();
+        if self.system_roots {
+            for certificate in rustls_native_certs::load_native_certs().certs {
+                let _ = roots.add(certificate);
+            }
+        } else {
+            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        }
+        let versions: &[&rustls::SupportedProtocolVersion] = if self.tls13_only {
+            &[&rustls::version::TLS13]
+        } else {
+            rustls::DEFAULT_VERSIONS
+        };
+        let mut config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(provider))
+            .with_protocol_versions(versions)
+            .map_err(|_| error("ciphers do not match the allowed TLS versions"))?
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        config.alpn_protocols = vec![b"http/1.1".to_vec()];
+        Ok(config)
     }
     /// An explicit override is also part of the job's effective request identity.
     pub fn apply_media(&self, media: &mut Media) {
@@ -213,6 +271,76 @@ mod tests {
                 .unwrap()
                 .proxy(),
             Some("")
+        );
+    }
+}
+
+/// Supported suites for OpenSSL or IANA cipher names, in the given order.
+fn cipher_suites(names: &[String]) -> Vec<rustls::SupportedCipherSuite> {
+    use rustls::CipherSuite as S;
+    let available = rustls::crypto::ring::default_provider().cipher_suites;
+    let mut selected = Vec::new();
+    for name in names {
+        let suite = match name.trim() {
+            "TLS_AES_128_GCM_SHA256" | "TLS13_AES_128_GCM_SHA256" => S::TLS13_AES_128_GCM_SHA256,
+            "TLS_AES_256_GCM_SHA384" | "TLS13_AES_256_GCM_SHA384" => S::TLS13_AES_256_GCM_SHA384,
+            "TLS_CHACHA20_POLY1305_SHA256" | "TLS13_CHACHA20_POLY1305_SHA256" => {
+                S::TLS13_CHACHA20_POLY1305_SHA256
+            }
+            "ECDHE-ECDSA-AES128-GCM-SHA256" | "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256" => {
+                S::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+            }
+            "ECDHE-ECDSA-AES256-GCM-SHA384" | "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384" => {
+                S::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+            }
+            "ECDHE-RSA-AES128-GCM-SHA256" | "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256" => {
+                S::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+            }
+            "ECDHE-RSA-AES256-GCM-SHA384" | "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384" => {
+                S::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+            }
+            "ECDHE-ECDSA-CHACHA20-POLY1305" | "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256" => {
+                S::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+            }
+            "ECDHE-RSA-CHACHA20-POLY1305" | "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256" => {
+                S::TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+            }
+            // CBC and non-ECDHE suites are not implemented by rustls.
+            _ => continue,
+        };
+        if let Some(found) = available.iter().find(|s| s.suite() == suite)
+            && !selected
+                .iter()
+                .any(|s: &rustls::SupportedCipherSuite| s.suite() == suite)
+        {
+            selected.push(*found);
+        }
+    }
+    selected
+}
+
+#[cfg(test)]
+mod cipher_tests {
+    #[test]
+    fn maps_openssl_and_iana_names() {
+        let names: Vec<String> = [
+            "ECDHE-RSA-AES128-GCM-SHA256",
+            "AES128-SHA",
+            "TLS_AES_256_GCM_SHA384",
+        ]
+        .map(str::to_owned)
+        .into();
+        let suites = super::cipher_suites(&names);
+        assert_eq!(suites.len(), 2);
+        assert!(
+            super::NetworkOptions::default()
+                .with_ciphers(Some(&serde_json::json!("AES128-SHA")))
+                .is_err()
+        );
+        assert!(
+            super::NetworkOptions::default()
+                .with_ciphers(Some(&serde_json::json!(names)))
+                .is_ok()
         );
     }
 }

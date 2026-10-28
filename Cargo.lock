@@ -478,6 +478,7 @@ dependencies = [
  "reqwest",
  "roxmltree",
  "rusqlite",
+ "rustls",
  "rustls-native-certs",
  "serde",
  "serde_json",
@@ -490,6 +491,7 @@ dependencies = [
  "tokio",
  "toml",
  "url",
+ "webpki-roots",
  "zip",
 ]
 

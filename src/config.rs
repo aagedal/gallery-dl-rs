@@ -658,6 +658,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     "source-address",
     "proxy-env",
     "tls12",
+    "ciphers",
     "truststore",
     "metadata-http",
     "http-metadata",

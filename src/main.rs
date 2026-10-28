@@ -3883,6 +3883,7 @@ async fn resolved_settings(
         });
         let network = NetworkOptions::new(proxy, options.user_agent.clone())?
             .with_insecure(args.no_check_certificate || !downloader_verify)
+            .with_ciphers(config.globals().get("ciphers"))?
             .with_tls(
                 config.globals().get("tls12") != Some(&serde_json::Value::Bool(false)),
                 config.globals().get("truststore").is_some_and(|v| {

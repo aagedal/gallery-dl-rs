@@ -18,6 +18,8 @@ encoding_rs = "0.8"
 rustls-native-certs = "0.8"
 lzma-rust2 = { version = "0.22", default-features = false, features = ["std", "encoder"] }
 crc32fast = "1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 roxmltree = "0.21.1"
 rusqlite = { version = "0.38", features = ["bundled", "hooks"] }

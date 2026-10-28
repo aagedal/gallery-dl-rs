@@ -1684,8 +1684,10 @@ local file errors (extraction errors are classified by their messages).
 `metadata-extractor`, `parent-*`, `category-transfer`,
 `file-unique`/`child-unique`, `path-extended`/`path-convert`,
 `tls12: false` (TLS 1.3 only) and `truststore` (system certificates) apply
-to every native client; `ciphers` (browser cipher mimicry) is not
-implemented; `cookies-select` picks one
+to every native client; `ciphers` restricts connections to the listed
+suites (OpenSSL or IANA names that rustls implements: TLS 1.3 and ECDHE
+AEAD suites), while the `firefox`/`chrome` presets (fingerprint imitation)
+are ignored with a warning; `cookies-select` picks one
 source per run (`rotate` starts with the first);
 `proxy-env: false` disables environment proxies. `metadata-http` (root or
 `extractor` scope) exposes response headers, the Content-Disposition
