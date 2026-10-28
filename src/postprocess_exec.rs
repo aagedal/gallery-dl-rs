@@ -22,6 +22,9 @@ pub struct ExecOptions {
     output: bool,
     verbose: bool,
     session: bool,
+    /// Upstream `success`/`error`: actions run after each command.
+    success: Option<crate::actions::Actions>,
+    failure: Option<crate::actions::Actions>,
 }
 impl std::fmt::Debug for ExecOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -132,13 +135,16 @@ impl ExecOptions {
                     .ok_or_else(|| error("exec requires a command"))?,
             )?],
         };
-        for key in ["archive", "success", "error"] {
-            if options.get(key).is_some_and(truthy) {
-                return Err(error(format!(
-                    "exec option '{key}' is not supported natively"
-                )));
-            }
+        if options.get("archive").is_some_and(truthy) {
+            return Err(error("exec option 'archive' is not supported natively"));
         }
+        let actions = |key: &str| {
+            options
+                .get(key)
+                .filter(|v| !v.is_null())
+                .map(crate::actions::Actions::parse)
+                .transpose()
+        };
         let flag = |key: &str, default: bool| options.get(key).map_or(default, truthy);
         Ok(Self {
             // Upstream only honors `async` for a single command.
@@ -146,6 +152,8 @@ impl ExecOptions {
             output: flag("output", true),
             verbose: flag("verbose", true),
             session: flag("session", false),
+            success: actions("success")?,
+            failure: actions("error")?,
             commands,
         })
     }
@@ -220,11 +228,20 @@ impl ExecOptions {
             }
             let status = child.wait().await?;
             if !status.success() {
-                eprintln!(
-                    "warning: '{display}' returned with non-zero exit status ({})",
-                    status.code().unwrap_or(-1)
-                );
+                crate::actions::log(
+                    crate::actions::WARNING,
+                    &format!(
+                        "'{display}' returned with non-zero exit status ({})",
+                        status.code().unwrap_or(-1)
+                    ),
+                )?;
+                if let Some(actions) = &self.failure {
+                    actions.run(Some(context)).await?;
+                }
                 break;
+            }
+            if let Some(actions) = &self.success {
+                actions.run(Some(context)).await?;
             }
         }
         Ok(())
@@ -286,6 +303,20 @@ mod tests {
         assert_eq!(context["_filename"], "media file.jpg");
     }
 
+    #[tokio::test]
+    async fn error_actions_stop_extraction() {
+        let exec = options(json!({"command": "false", "error": "terminate"}));
+        let failure = exec.run(&mut Map::new(), ExecPaths::default()).await;
+        assert_eq!(
+            crate::Stop::of(&failure.unwrap_err()),
+            Some(crate::Stop::Terminate)
+        );
+        let exec = options(json!({"command": "true", "success": "keyword done 1"}));
+        let mut context = Map::new();
+        exec.run(&mut context, ExecPaths::default()).await.unwrap();
+        assert_eq!(context["done"], 1);
+    }
+
     #[test]
     fn rejects_unsupported_options_and_missing_commands() {
         let parse = |v: Value| ExecOptions::parse(v.as_object().unwrap());
@@ -293,5 +324,7 @@ mod tests {
         assert!(parse(json!({"command": []})).is_err());
         assert!(parse(json!({"command": "x", "archive": "a.db"})).is_err());
         assert!(parse(json!({"command": "x", "async": true})).is_ok());
+        assert!(parse(json!({"command": "x", "error": "abort", "success": ["print ok"]})).is_ok());
+        assert!(parse(json!({"command": "x", "error": "nonsense"})).is_err());
     }
 }

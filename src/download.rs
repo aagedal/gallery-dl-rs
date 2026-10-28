@@ -45,6 +45,9 @@ pub struct DownloadClient {
     ytdl_cookies: Option<std::sync::Arc<crate::cookies::YtdlCookies>>,
     /// Upstream `skip: false`: download and replace existing files.
     pub(crate) overwrite: bool,
+    /// Upstream `skip: "enumerate"`: save under `NAME.N.EXT` next to
+    /// existing files instead of skipping them.
+    pub(crate) enumerate: bool,
     /// Upstream `download: false`: run hooks without fetching files.
     pub(crate) no_download: bool,
 }
@@ -236,6 +239,22 @@ impl DownloadClient {
         self
     }
 
+    /// Save next to existing files as `NAME.1.EXT`, `NAME.2.EXT`, ...
+    /// (upstream `skip: "enumerate"`).
+    pub fn with_enumerate(mut self, enabled: bool) -> Self {
+        self.enumerate = enabled;
+        self
+    }
+
+    /// The first destination without an existing file: `path` itself, or
+    /// with `skip: "enumerate"` the first free `NAME.N.EXT`.
+    pub(crate) fn free_path(&self, path: PathBuf) -> PathBuf {
+        if !self.enumerate || std::fs::symlink_metadata(&path).is_err() {
+            return path;
+        }
+        enumerated_path(&path)
+    }
+
     /// Run preparation hooks but do not fetch files (`download: false`).
     pub fn with_no_download(mut self, enabled: bool) -> Self {
         self.no_download = enabled;
@@ -247,6 +266,20 @@ impl DownloadClient {
         self.resume = enabled;
         self
     }
+}
+
+/// Upstream `PathFormat._enum_file`: insert `N.` before the extension
+/// for the first `N` whose path does not exist.
+pub(crate) fn enumerated_path(path: &Path) -> PathBuf {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let (stem, extension) = match name.rsplit_once('.') {
+        Some((stem, extension)) => (stem.to_owned(), format!(".{extension}")),
+        None => (name.into_owned(), String::new()),
+    };
+    (1u64..)
+        .map(|number| path.with_file_name(format!("{stem}.{number}{extension}")))
+        .find(|candidate| std::fs::symlink_metadata(candidate).is_err())
+        .expect("unbounded enumeration")
 }
 
 pub fn client(timeout: Duration) -> Result<DownloadClient> {
@@ -270,6 +303,7 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         ytdl: Some(Path::new("yt-dlp").into()),
         ytdl_cookies: None,
         overwrite: false,
+        enumerate: false,
         no_download: false,
     })
 }
@@ -856,7 +890,9 @@ async fn download_media(
         return Err(error(failure.error.to_string()));
     }
     // Destination and publication metadata always belong to the original job.
-    let path = destination_with_templates(root, media, template, directory)?;
+    let path = client.free_path(destination_with_templates(
+        root, media, template, directory,
+    )?);
     match std::fs::symlink_metadata(&path) {
         Ok(metadata) if metadata.is_file() => return Ok(Outcome::Skipped(path)),
         Ok(_) => return Err(error("media destination is not a regular file")),

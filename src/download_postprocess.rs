@@ -480,6 +480,7 @@ pub(crate) async fn download(
     mut prepared: Prepared,
 ) -> Result<Outcome> {
     build_source_path(root, options, template, &mut prepared, false)?;
+    prepared.path = client.free_path(prepared.path);
     if !client.overwrite && postprocess::regular_file(&prepared.path)? {
         let converted = skip(client, root, media, options, template, &mut prepared).await?;
         return Ok(converted.unwrap_or(Outcome::Skipped(prepared.path)));
@@ -499,6 +500,9 @@ pub(crate) async fn download(
     )
     .await?;
     // Upstream `_file_recheck`: a renamed destination may already exist.
+    if prepared.path != pending {
+        prepared.path = client.free_path(prepared.path);
+    }
     if !client.overwrite && prepared.path != pending && postprocess::regular_file(&prepared.path)? {
         let converted = skip(client, root, media, options, template, &mut prepared).await?;
         return Ok(converted.unwrap_or(Outcome::Skipped(prepared.path)));
@@ -696,6 +700,12 @@ pub(crate) async fn download(
             .await
             .map_err(|_| error("postprocessor hook timed out"))
             .and_then(|result| result);
+            if let Err(failure) = &result
+                && crate::Stop::of(failure).is_some()
+            {
+                // Upstream removes the temporary file before stopping.
+                source.source = None;
+            }
             if result.is_err()
                 && let Some(scope) = options.postprocessor_scope
             {
@@ -940,10 +950,16 @@ async fn run_path_processor(
         }
         Processor::Compare(config) => {
             if postprocess::regular_file(&prepared.path)? {
-                match config.run(&prepared.path, input) {
+                let comparison = config.run(&prepared.path, input);
+                config.count(&comparison)?;
+                match comparison {
                     postprocess::compare::Comparison::Equal => prepared.delete = true,
                     postprocess::compare::Comparison::Publish(path) => prepared.path = path,
                 }
+            } else {
+                config.count(&postprocess::compare::Comparison::Publish(
+                    prepared.path.clone(),
+                ))?;
             }
         }
         Processor::Ugoira(_)

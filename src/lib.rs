@@ -1,3 +1,4 @@
+pub mod actions;
 pub mod archive;
 pub mod artstation;
 mod backend;
@@ -64,6 +65,34 @@ pub mod weasyl;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// Upstream `StopExtraction`/`TerminateExtraction`/`SystemExit` raised by
+/// postprocessors and actions: stop the current input, all inputs, or exit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stop {
+    Abort,
+    Terminate,
+    Exit(i32),
+}
+
+impl std::fmt::Display for Stop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Abort => f.write_str("extraction stopped"),
+            Self::Terminate => f.write_str("extraction terminated"),
+            Self::Exit(code) => write!(f, "exit requested ({code})"),
+        }
+    }
+}
+
+impl std::error::Error for Stop {}
+
+impl Stop {
+    /// The stop request carried by an error, if any.
+    pub fn of(error: &Error) -> Option<Self> {
+        error.downcast_ref::<Self>().copied()
+    }
+}
 
 pub fn error(message: impl Into<String>) -> Error {
     std::io::Error::other(message.into()).into()

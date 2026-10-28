@@ -300,6 +300,9 @@ struct Args {
     /// Do not skip downloads; overwrite existing files
     #[arg(long)]
     no_skip: bool,
+    /// Upstream `skip: "enumerate"` (configuration only).
+    #[arg(skip)]
+    skip_enumerate: bool,
     /// Username to login with
     #[arg(short = 'u', long, value_name = "USER")]
     username: Option<String>,
@@ -736,15 +739,23 @@ async fn async_main(args: Args) {
             signal = tokio::signal::ctrl_c() => (signal.map_err(Into::into), true),
         }
     };
-    if let Err(e) = result {
-        eprintln!("error: {e}");
-        gallery_dl_rs::logfile::finish();
-        std::process::exit(1);
-    }
     if interrupted {
         eprintln!("cancelled");
         gallery_dl_rs::logfile::finish();
         std::process::exit(130);
+    }
+    let base = match result {
+        Err(e) => {
+            eprintln!("error: {e}");
+            1
+        }
+        Ok(()) => 0,
+    };
+    // `status` and `exit` actions change the exit status.
+    let status = gallery_dl_rs::actions::exit_status(base);
+    if status != 0 {
+        gallery_dl_rs::logfile::finish();
+        std::process::exit(status);
     }
 }
 
@@ -899,6 +910,10 @@ async fn run(args: Args) -> Result<()> {
             print_skipped = false;
         }
     }
+    // Upstream `actions`: run actions for matching log messages.
+    if let Some(spec) = globals.and_then(|g| g.get("actions")) {
+        gallery_dl_rs::actions::install(gallery_dl_rs::actions::LogActions::parse(spec)?);
+    }
     let global_sleep = |key: &str| {
         globals.and_then(|g| g.get(key)).and_then(|value| {
             gallery_dl_rs::sleep::SleepRange::from_value(value)
@@ -969,7 +984,7 @@ async fn run(args: Args) -> Result<()> {
             match mode {
                 "abort" => args.abort = args.abort.or(limit),
                 "terminate" | "exit" => args.terminate = args.terminate.or(limit),
-                "enumerate" => return Err(error("skip: enumerate is not supported natively")),
+                "enumerate" => args.skip_enumerate = true,
                 _ => {}
             }
         }
@@ -1257,7 +1272,20 @@ async fn run(args: Args) -> Result<()> {
                 std::future::ready(match result {
                     Ok(item) => Some((index, item)),
                     Err(e) => {
-                        eprintln!("extraction failed for input {}: {e}", index + 1);
+                        let message = format!("extraction failed for input {}: {e}", index + 1);
+                        match gallery_dl_rs::actions::log(gallery_dl_rs::actions::ERROR, &message)
+                            .err()
+                            .and_then(|e| gallery_dl_rs::Stop::of(&e))
+                        {
+                            Some(gallery_dl_rs::Stop::Abort) => {
+                                aborted
+                                    .lock()
+                                    .expect("abort state lock poisoned")
+                                    .insert(index);
+                            }
+                            Some(_) => terminated.store(true, std::sync::atomic::Ordering::Release),
+                            None => {}
+                        }
                         failed.set(failed.get() + 1);
                         failed_inputs.borrow_mut().insert(index);
                         None
@@ -1373,6 +1401,7 @@ async fn run(args: Args) -> Result<()> {
         let client = download::client(Duration::from_secs(60))?
             .with_resume(args.resume)
             .with_overwrite(args.no_skip)
+            .with_enumerate(args.skip_enumerate)
             .with_no_download(args.no_download)
             .with_http_mtime(!args.no_mtime)
             .with_metadata_mtime(args.mtime.clone())
@@ -1525,8 +1554,39 @@ async fn run(args: Args) -> Result<()> {
                     eprintln!("filtered media: {reason}")
                 }
                 Ok(ArchiveOutcome::AlreadyArchived) => eprintln!("skipped archived media"),
+                Err(e) if gallery_dl_rs::Stop::of(&e).is_some() => {
+                    match gallery_dl_rs::Stop::of(&e) {
+                        Some(gallery_dl_rs::Stop::Abort) => {
+                            aborted
+                                .lock()
+                                .expect("abort state lock poisoned")
+                                .insert(index);
+                        }
+                        _ => {
+                            terminated.store(true, std::sync::atomic::Ordering::Release);
+                        }
+                    }
+                    if !args.quiet {
+                        eprintln!("{e}");
+                    }
+                }
                 Err(e) => {
-                    eprintln!("download failed: {e}");
+                    match gallery_dl_rs::actions::log(
+                        gallery_dl_rs::actions::ERROR,
+                        &format!("download failed: {e}"),
+                    )
+                    .err()
+                    .and_then(|e| gallery_dl_rs::Stop::of(&e))
+                    {
+                        Some(gallery_dl_rs::Stop::Abort) => {
+                            aborted
+                                .lock()
+                                .expect("abort state lock poisoned")
+                                .insert(index);
+                        }
+                        Some(_) => terminated.store(true, std::sync::atomic::Ordering::Release),
+                        None => {}
+                    }
                     failed.set(failed.get() + 1);
                     failed_inputs.borrow_mut().insert(index);
                 }
