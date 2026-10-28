@@ -89,9 +89,13 @@ impl NetworkOptions {
         let mut builder = Client::builder()
             .timeout(timeout)
             .user_agent(self.user_agent().unwrap_or(default_agent))
-            .redirect(reqwest::redirect::Policy::none())
-            .danger_accept_invalid_certs(self.insecure)
-            .local_address(self.source_address);
+            .redirect(reqwest::redirect::Policy::none());
+        if self.insecure {
+            builder = builder.danger_accept_invalid_certs(true);
+        }
+        if let Some(address) = self.source_address {
+            builder = builder.local_address(address);
+        }
         if let Some(proxy) = self.proxy() {
             builder = if proxy.is_empty() {
                 builder.no_proxy()

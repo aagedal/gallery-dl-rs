@@ -1540,6 +1540,18 @@ backend. Repeated CLI options override earlier ones, as with argparse.
 `python` (no native equivalent), exec `archive`/`success`/`error` actions, and
 bzip2/lzma zip compression.
 
+**Implemented input, auth and pacing options, 2026-10-28:** input files accept
+upstream's `-KEY=VALUE` (next URL) and `-G KEY=VALUE` (all following URLs)
+option lines; such inputs re-resolve their settings. `-I/--input-file-comment`
+and `-x/--input-file-delete` comment out or delete the lines of URLs that
+completed without errors (applied when the run ends, not after each URL).
+`-u/--username`, `-p/--password` and `--netrc` (machine = category) provide
+lowest-priority credentials. `--write-unsupported FILE` records queued URLs no
+extractor handles. Registry sites honor `sleep-request`, `sleep-retries` and
+`sleep-429` (CLI flags or site options); `--sleep-skip` waits after skipped
+files. `-v`, `-w`, `--no-part`, `--chunk-size`, `--no-colors`, `--no-input`
+and `--config-ignore` are accepted for compatibility.
+
 ### Companion yt-dlp-rs integration
 
 Prefer an optional Rust library adapter once yt-dlp-rs has a stable, consumable

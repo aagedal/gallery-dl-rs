@@ -10,6 +10,7 @@ use crate::{
     cookies::CookieJar,
     error,
     network::NetworkOptions,
+    sleep::SleepRange,
     transport::{RateLimits, Redirects, retry_after},
 };
 use reqwest::{Client, StatusCode};
@@ -41,7 +42,15 @@ pub struct Http {
     cookies: std::sync::Mutex<CookieJar>,
     ytdl: std::path::PathBuf,
     ytdl_cookies: Option<crate::cookies::YtdlCookies>,
+    /// Upstream `sleep-request`, `sleep-retries` and `sleep-429`.
+    sleep_request: Option<SleepRange>,
+    sleep_retries: Option<SleepRange>,
+    sleep_429: Option<SleepRange>,
 }
+
+/// Upstream `Extractor.request_timestamp`: when any extractor last sent a
+/// request, shared so `sleep-request` spaces requests across sites.
+static LAST_REQUEST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
 /// A request body.
 #[derive(Clone, Copy)]
@@ -70,6 +79,9 @@ impl Http {
             cookies: std::sync::Mutex::new(CookieJar::default()),
             ytdl: "yt-dlp".into(),
             ytdl_cookies: None,
+            sleep_request: None,
+            sleep_retries: None,
+            sleep_429: None,
         })
     }
 
@@ -205,7 +217,41 @@ impl Http {
         options: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
     ) -> Self {
         self.options = options;
+        let sleep = |key: &str| {
+            self.option(key).and_then(|value| {
+                SleepRange::from_value(value).unwrap_or_else(|_| {
+                    eprintln!("warning: invalid '{key}' value; ignoring it");
+                    None
+                })
+            })
+        };
+        let (request, retries, too_many) = (
+            sleep("sleep-request"),
+            sleep("sleep-retries"),
+            sleep("sleep-429"),
+        );
+        self.sleep_request = request;
+        self.sleep_retries = retries;
+        self.sleep_429 = too_many;
         self
+    }
+
+    /// Wait until `sleep-request` has passed since the last request.
+    async fn pace(&self) {
+        let Some(interval) = self.sleep_request else {
+            return;
+        };
+        let wait = {
+            let last = LAST_REQUEST.lock().unwrap_or_else(|e| e.into_inner());
+            last.map(|last| interval.sample().saturating_sub(last.elapsed()))
+        };
+        if let Some(wait) = wait.filter(|wait| !wait.is_zero()) {
+            tokio::time::sleep(wait).await;
+        }
+    }
+
+    fn mark_request(&self) {
+        *LAST_REQUEST.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::time::Instant::now());
     }
 
     /// A site-specific configuration value.
@@ -556,12 +602,23 @@ impl Http {
         body: Option<Body<'_>>,
         strict: bool,
     ) -> Result<(Vec<u8>, Url, reqwest::header::HeaderMap)> {
+        self.pace().await;
         tokio::time::timeout(self.timeout, async {
             for attempt in 0..=self.retries {
-                match self.attempt(url, headers, body, attempt, strict).await {
+                let result = self.attempt(url, headers, body, attempt, strict).await;
+                self.mark_request();
+                match result {
                     Ok(body) => return Ok(body),
                     Err(failure) if failure.retry && attempt < self.retries => {
-                        tokio::time::sleep(backoff(attempt)).await;
+                        let configured = if failure.rate_limited {
+                            self.sleep_429.or(self.sleep_retries)
+                        } else {
+                            self.sleep_retries
+                        };
+                        tokio::time::sleep(
+                            configured.map_or_else(|| backoff(attempt), |range| range.sample()),
+                        )
+                        .await;
                     }
                     Err(failure) => return Err(failure.error),
                 }
@@ -647,18 +704,18 @@ impl Http {
             let delay = retry_after(response.headers(), SystemTime::now());
             self.rate_limits
                 .defer(endpoint, delay.unwrap_or_else(|| backoff(attempt)));
-            return Err(Failure::transient(
-                if status == StatusCode::TOO_MANY_REQUESTS {
-                    match delay {
-                        Some(delay) => {
-                            format!("{name} rate limit; retry after {} seconds", delay.as_secs())
-                        }
-                        None => format!("{name} rate limit; retry later"),
+            let mut failure = Failure::transient(if status == StatusCode::TOO_MANY_REQUESTS {
+                match delay {
+                    Some(delay) => {
+                        format!("{name} rate limit; retry after {} seconds", delay.as_secs())
                     }
-                } else {
-                    format!("{name} returned HTTP {status}")
-                },
-            ));
+                    None => format!("{name} rate limit; retry later"),
+                }
+            } else {
+                format!("{name} returned HTTP {status}")
+            });
+            failure.rate_limited = status == StatusCode::TOO_MANY_REQUESTS;
+            return Err(failure);
         }
         if matches!(status.as_u16(), 404 | 410) {
             return Err(error(format!("{name} resource not found")).into());
@@ -781,6 +838,7 @@ fn backoff(attempt: u8) -> Duration {
 struct Failure {
     error: crate::Error,
     retry: bool,
+    rate_limited: bool,
 }
 
 impl Failure {
@@ -788,6 +846,7 @@ impl Failure {
         Self {
             error: error(message),
             retry: true,
+            rate_limited: false,
         }
     }
 }
@@ -797,6 +856,7 @@ impl From<crate::Error> for Failure {
         Self {
             error,
             retry: false,
+            rate_limited: false,
         }
     }
 }
@@ -805,6 +865,30 @@ impl From<crate::Error> for Failure {
 mod tests {
     use super::*;
     use crate::sites::testing::{http, json, response, serve};
+
+    #[tokio::test]
+    async fn sleep_request_spaces_consecutive_requests() {
+        let body = || json(serde_json::json!({}));
+        let (root, server) = serve(vec![body(), body()]);
+        let options = serde_json::Map::from_iter([("sleep-request".into(), "0.3".into())]);
+        let client = http("Test", root.clone()).with_options(Some(std::sync::Arc::new(options)));
+        client.json(&root.join("a").unwrap()).await.unwrap();
+        let start = std::time::Instant::now();
+        client.json(&root.join("b").unwrap()).await.unwrap();
+        assert!(
+            start.elapsed() >= Duration::from_millis(250),
+            "{:?}",
+            start.elapsed()
+        );
+        server.join().unwrap();
+        let invalid = serde_json::Map::from_iter([("sleep-request".into(), "x".into())]);
+        assert!(
+            http("Test", root)
+                .with_options(Some(std::sync::Arc::new(invalid)))
+                .sleep_request
+                .is_none()
+        );
+    }
 
     #[tokio::test]
     async fn cookies_are_sent_and_updated_from_responses() {

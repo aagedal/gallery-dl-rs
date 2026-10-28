@@ -259,3 +259,63 @@ fn file_only_download_uses_category_destination_metadata_and_archive() {
     );
     assert!(!saved.exists());
 }
+
+/// Serves `body` for paths other than `/missing.jpg` until `count` requests.
+fn serve(count: usize) -> (String, std::thread::JoinHandle<()>) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let handle = std::thread::spawn(move || {
+        for _ in 0..count {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 4096];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = socket.read(&mut buffer).unwrap();
+                assert!(n > 0);
+                request.extend_from_slice(&buffer[..n]);
+            }
+            let response: &[u8] = if request.starts_with(b"GET /missing.jpg ") {
+                b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            } else {
+                b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndata"
+            };
+            socket.write_all(response).unwrap();
+        }
+    });
+    (origin, handle)
+}
+
+#[test]
+fn inline_options_apply_per_url_and_delete_removes_successful_lines() {
+    let root = tempfile::tempdir().unwrap();
+    let (origin, handle) = serve(3);
+    let list = root.path().join("urls.txt");
+    std::fs::write(
+        &list,
+        format!(
+            "-filename=\"custom.{{extension}}\"\n{origin}/a.jpg\n{origin}/b.jpg\n{origin}/missing.jpg\n"
+        ),
+    )
+    .unwrap();
+    let output = binary()
+        .args(["--retries", "0", "--jobs", "1", "-d"])
+        .arg(root.path().join("out"))
+        .arg("-x")
+        .arg(&list)
+        .output()
+        .unwrap();
+    handle.join().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(root.path().join("out/direct/custom.jpg").is_file());
+    assert_eq!(
+        std::fs::read_dir(root.path().join("out/direct"))
+            .unwrap()
+            .count(),
+        2
+    );
+    assert_eq!(
+        std::fs::read_to_string(&list).unwrap(),
+        format!("{origin}/missing.jpg\n")
+    );
+}

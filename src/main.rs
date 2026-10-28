@@ -16,7 +16,7 @@ use gallery_dl_rs::{
     extract::{self, Backend, BackendOptions},
     facebook::Facebook,
     filter::FilterExpression,
-    input::Inputs,
+    input::{Action as InputAction, Inputs, Origin as InputOrigin},
     instagram::Instagram,
     job_selection::JobSelection,
     naming::{DirectoryTemplate, FilenameTemplate},
@@ -47,11 +47,17 @@ use tokio::sync::OnceCell;
 )]
 struct Args {
     /// Instagram, Facebook, Twitter/X, or direct media URLs
-    #[arg(required_unless_present_any = ["input_files", "list_extractors", "list_modules"])]
+    #[arg(required_unless_present_any = ["input_files", "input_file_comment", "input_file_delete", "list_extractors", "list_modules"])]
     urls: Vec<String>,
     /// Read URLs from a UTF-8 file; repeat for multiple files, or use - for stdin
     #[arg(short = 'i', long = "input-file", value_name = "FILE")]
     input_files: Vec<PathBuf>,
+    /// Download URLs found in FILE; comment out each successfully downloaded URL
+    #[arg(short = 'I', long = "input-file-comment", value_name = "FILE")]
+    input_file_comment: Vec<PathBuf>,
+    /// Download URLs found in FILE; delete each successfully downloaded URL
+    #[arg(short = 'x', long = "input-file-delete", value_name = "FILE")]
+    input_file_delete: Vec<PathBuf>,
     /// Output root (default: downloads)
     #[arg(short, long)]
     destination: Option<PathBuf>,
@@ -197,6 +203,36 @@ struct Args {
         conflicts_with = "native_config"
     )]
     native_config_ignore: bool,
+    /// Number of seconds to wait between HTTP requests during data extraction
+    #[arg(long, value_name = "SECONDS")]
+    sleep_request: Option<String>,
+    /// Number of seconds to wait before retrying an HTTP request
+    #[arg(long, value_name = "SECONDS")]
+    sleep_retries: Option<String>,
+    /// Number of seconds to wait when receiving a '429 Too Many Requests' response
+    #[arg(long = "sleep-429", value_name = "SECONDS")]
+    sleep_429: Option<String>,
+    /// Number of seconds to wait after skipping a file download
+    #[arg(long, value_name = "SECONDS", value_parser = parse_sleep)]
+    sleep_skip: Option<gallery_dl_rs::sleep::SleepRange>,
+    /// Username to login with
+    #[arg(short = 'u', long, value_name = "USER")]
+    username: Option<String>,
+    /// Password belonging to the given username
+    #[arg(short = 'p', long, value_name = "PASS")]
+    password: Option<String>,
+    /// Enable .netrc authentication data
+    #[arg(long)]
+    netrc: bool,
+    /// Write URLs which get emitted by other extractors but cannot be handled to FILE
+    #[arg(long, value_name = "FILE")]
+    write_unsupported: Option<PathBuf>,
+    /// Accepted for compatibility; only warnings and errors are logged already
+    #[arg(short = 'w', long)]
+    warning: bool,
+    /// Accepted for compatibility; no additional debug output is printed
+    #[arg(short = 'v', long)]
+    verbose: bool,
     /// Disable HTTPS certificate validation
     #[arg(long)]
     no_check_certificate: bool,
@@ -457,6 +493,12 @@ const MAIN_STACK_SIZE: usize = 8 * 1024 * 1024;
 
 fn main() {
     let args = Args::parse();
+    if let Some(path) = &args.write_unsupported
+        && let Err(e) = gallery_dl_rs::unsupported::set_file(path)
+    {
+        eprintln!("error: cannot open {}: {e}", path.display());
+        std::process::exit(1);
+    }
     let worker = std::thread::Builder::new()
         .name("main-runtime".into())
         .stack_size(MAIN_STACK_SIZE)
@@ -502,8 +544,41 @@ async fn run(args: Args) -> Result<()> {
             "--config is only supported with --extractor compatibility",
         ));
     }
-    let settings = resolved_settings(&args).await?;
-    let inputs = Inputs::new(args.urls.clone(), args.input_files.clone())?;
+    let settings = resolved_settings(&args, &[]).await?;
+    let inputs = Inputs::with_actions(
+        args.urls.clone(),
+        args.input_files
+            .iter()
+            .map(|path| (path.clone(), None))
+            .chain(
+                args.input_file_comment
+                    .iter()
+                    .map(|path| (path.clone(), Some(InputAction::Comment))),
+            )
+            .chain(
+                args.input_file_delete
+                    .iter()
+                    .map(|path| (path.clone(), Some(InputAction::Delete))),
+            )
+            .collect(),
+    )?;
+    // Settings for inputs with inline `-KEY=VALUE` options, by input index and
+    // by option list. Leaked so that streams can borrow them like `settings`.
+    type SettingsMap = BTreeMap<&'static str, Settings>;
+    let input_settings = std::cell::RefCell::new(BTreeMap::<usize, &'static SettingsMap>::new());
+    let option_settings =
+        std::cell::RefCell::new(BTreeMap::<Vec<String>, &'static SettingsMap>::new());
+    let input_origins = std::cell::RefCell::new(BTreeMap::<usize, InputOrigin>::new());
+    let settings_for = |index: usize| -> &SettingsMap {
+        input_settings
+            .borrow()
+            .get(&index)
+            .copied()
+            .unwrap_or(&settings)
+    };
+    // Archives named only by inline options, created on first use.
+    let extra_archives =
+        std::sync::Mutex::new(BTreeMap::<PathBuf, &'static OnceCell<Result<Archive>>>::new());
     let extractors = Extractors {
         ytdl: args.ytdl_command.clone(),
         ytdl_cookies: ytdl_cookies(&args),
@@ -552,11 +627,68 @@ async fn run(args: Args) -> Result<()> {
             })
             .collect()
     });
+    let job_configurations_for = |settings: &SettingsMap| {
+        std::sync::Arc::new(if args.dump_json || args.get_urls {
+            BTreeMap::new()
+        } else {
+            settings
+                .iter()
+                .filter_map(|(category, settings)| {
+                    settings.postprocessors.as_ref().map(|processors| {
+                        (
+                            (*category).to_owned(),
+                            gallery_dl_rs::postprocess::jobs::JobConfiguration {
+                                processors: processors.clone(),
+                                root: settings.options.base_directory.clone().unwrap(),
+                                filename: settings.filename.clone(),
+                                directory: settings.directory.clone(),
+                                init: settings.options.init.unwrap_or(false),
+                            },
+                        )
+                    })
+                })
+                .collect()
+        })
+    };
     let media = inputs
-        .stream()
+        .items()
         .take_while(|_| std::future::ready(!terminated.load(std::sync::atomic::Ordering::Acquire)))
         .enumerate()
-        .flat_map(|(index, source)| {
+        .then(|(index, item)| {
+            let (args, option_settings, input_settings, input_origins) =
+                (&args, &option_settings, &input_settings, &input_origins);
+            async move {
+                let item = match item {
+                    Ok(item) => item,
+                    Err(e) => return (index, Err(e), None),
+                };
+                if let Some(origin) = item.origin {
+                    input_origins.borrow_mut().insert(index, origin);
+                }
+                if item.options.is_empty() {
+                    return (index, Ok(item.url), None);
+                }
+                let cached = option_settings.borrow().get(&item.options).copied();
+                let custom = match cached {
+                    Some(custom) => custom,
+                    None => match resolved_settings(args, &item.options).await {
+                        Ok(custom) => {
+                            let custom: &'static SettingsMap = Box::leak(Box::new(custom));
+                            option_settings
+                                .borrow_mut()
+                                .insert(item.options.clone(), custom);
+                            custom
+                        }
+                        Err(e) => return (index, Err(e), None),
+                    },
+                };
+                input_settings.borrow_mut().insert(index, custom);
+                (index, Ok(item.url), Some(job_configurations_for(custom)))
+            }
+        })
+        .flat_map(|(index, source, custom_jobs)| {
+            let settings = settings_for(index);
+            let job_configurations = custom_jobs.unwrap_or_else(|| job_configurations.clone());
             if args.error_file.is_some()
                 && let Ok(source) = &source
             {
@@ -635,7 +767,7 @@ async fn run(args: Args) -> Result<()> {
                         .ok()
                         .map(|url| &settings[settings_key(&url, args.extractor)]);
                     let input =
-                        extract_input(source, &extractors, &backend, args.extractor, &settings);
+                        extract_input(source, &extractors, &backend, args.extractor, settings);
                     let input = match args.sleep_extractor {
                         Some(delay) => stream::once(async move {
                             tokio::time::sleep(delay.sample()).await;
@@ -703,13 +835,15 @@ async fn run(args: Args) -> Result<()> {
             })
         })
         .map(|(index, mut job)| {
-            settings[media_settings_key(&job.media, args.extractor, &settings)]
+            let settings = settings_for(index);
+            settings[media_settings_key(&job.media, args.extractor, settings)]
                 .network
                 .apply_media(&mut job.media);
             (index, job)
         })
-        .filter(|(_, job)| {
+        .filter(|(index, job)| {
             let item = &job.media;
+            let settings = settings_for(*index);
             if item.category == "twitter" && settings["twitter"].options.unique == Some(false) {
                 return std::future::ready(true);
             }
@@ -780,9 +914,10 @@ async fn run(args: Args) -> Result<()> {
                 .insert(index);
         }
     } else if args.simulate {
-        while let Some((_, job)) = media.next().await {
+        while let Some((index, job)) = media.next().await {
             let item = &job.media;
-            let settings = &settings[media_settings_key(item, args.extractor, &settings)];
+            let settings = settings_for(index);
+            let settings = &settings[media_settings_key(item, args.extractor, settings)];
             match download::destination_with_templates(
                 settings.options.base_directory.as_ref().unwrap(),
                 item,
@@ -817,18 +952,24 @@ async fn run(args: Args) -> Result<()> {
         let results = media
             .map(|(index, job)| {
                 let gallery_dl_rs::postprocess::jobs::JobMedia { media: item, scope } = job;
-                let settings = &settings[media_settings_key(&item, args.extractor, &settings)];
+                let settings = settings_for(index);
+                let settings = &settings[media_settings_key(&item, args.extractor, settings)];
                 let client = client
                     .clone()
                     .with_timeout(settings.options.timeout.unwrap())
                     .with_fallback(settings.options.fallback.unwrap_or(true));
                 let cell = &settings.download_client;
                 let destination = settings.options.base_directory.as_ref().unwrap();
-                let archive = settings
-                    .options
-                    .archive
-                    .as_ref()
-                    .map(|path| (&archives[path], path));
+                let archive = settings.options.archive.as_ref().map(|path| {
+                    let cell = archives.get(path).unwrap_or_else(|| {
+                        *extra_archives
+                            .lock()
+                            .expect("archive map lock poisoned")
+                            .entry(path.clone())
+                            .or_insert_with(|| Box::leak(Box::new(OnceCell::new())))
+                    });
+                    (cell, path)
+                });
                 let filename = settings.filename.as_ref();
                 let options = DownloadOptions {
                     postprocessor_scope: None,
@@ -943,6 +1084,9 @@ async fn run(args: Args) -> Result<()> {
                     if !args.quiet {
                         eprintln!("skipped {}", path.display())
                     }
+                    if let Some(sleep) = &args.sleep_skip {
+                        sleep.wait().await;
+                    }
                 }
                 Ok(ArchiveOutcome::Completed(Outcome::Filtered(reason))) => {
                     eprintln!("filtered media: {reason}")
@@ -960,6 +1104,17 @@ async fn run(args: Args) -> Result<()> {
                 // Stop new work while draining active files and finalization hooks.
                 eprintln!("stopping after {skipped} consecutive skipped files");
             }
+        }
+    }
+    {
+        let failed_inputs = failed_inputs.borrow();
+        let origins = input_origins.borrow();
+        let succeeded = origins
+            .iter()
+            .filter(|(index, _)| !failed_inputs.contains(index))
+            .map(|(_, origin)| origin);
+        if let Err(e) = gallery_dl_rs::input::apply(succeeded) {
+            eprintln!("unable to update input file: {e}");
         }
     }
     if let Some(path) = &args.error_file {
@@ -2186,7 +2341,10 @@ fn ugoira_postprocessor(format: &str) -> Result<serde_json::Value> {
     Ok(pp)
 }
 
-async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Settings>> {
+async fn resolved_settings(
+    args: &Args,
+    extra: &[String],
+) -> Result<BTreeMap<&'static str, Settings>> {
     let discovered = if args.native_config.is_none() && !args.native_config_ignore {
         default_native_config()
     } else {
@@ -2195,6 +2353,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
     let mut options = args
         .options
         .iter()
+        .chain(extra)
         .map(|option| gallery_dl_rs::config::parse_option(option))
         .collect::<Result<Vec<_>>>()?;
     // Upstream CLI postprocessor shortcuts.
@@ -2284,11 +2443,57 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         None if options.is_empty() => Config::default(),
         None => Config::parse_with_options(b"{}", &std::env::current_dir()?, &options)?,
     };
+    // Upstream -u/-p set root-level options, which every scope may override.
+    let credentials = |username: Option<String>, password: Option<String>| {
+        let mut site = serde_json::Map::new();
+        if let Some(username) = &username {
+            site.insert("username".into(), username.clone().into());
+        }
+        if let Some(password) = &password {
+            site.insert("password".into(), password.clone().into());
+        }
+        (
+            username,
+            password,
+            (!site.is_empty()).then(|| Arc::new(site)),
+        )
+    };
+    let (username, password, mut site_options) =
+        credentials(args.username.clone(), args.password.clone());
+    // Upstream --sleep-* options are root-level too; registry sites read them.
+    for (key, value) in [
+        ("sleep-request", &args.sleep_request),
+        ("sleep-retries", &args.sleep_retries),
+        ("sleep-429", &args.sleep_429),
+    ] {
+        if let Some(value) = value {
+            gallery_dl_rs::sleep::SleepRange::parse(value)?;
+            Arc::make_mut(site_options.get_or_insert_with(Default::default))
+                .insert(key.into(), value.clone().into());
+        }
+    }
     let defaults = ConfigOptions {
         base_directory: Some(PathBuf::from("downloads")),
         retries: Some(2),
         timeout: Some(Duration::from_secs(60)),
+        username,
+        password,
+        site_options,
         ..ConfigOptions::default()
+    };
+    let netrc = if args.netrc {
+        match gallery_dl_rs::netrc::default_path() {
+            Some(path) => match tokio::fs::read_to_string(&path).await {
+                Ok(text) => Some(text),
+                Err(e) => {
+                    eprintln!("netrc: {e}");
+                    None
+                }
+            },
+            None => None,
+        }
+    } else {
+        None
     };
     let overrides = ConfigOptions {
         init: None,
@@ -2456,7 +2661,26 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             Some((base, class)) => config.resolve_class(base, class)?,
             None => config.resolve(category)?,
         };
-        let options = defaults.overlay(&resolved).overlay(&overrides);
+        let mut options = defaults.overlay(&resolved).overlay(&overrides);
+        let has_username = options.username.as_ref().is_some_and(|u| !u.is_empty())
+            || options
+                .site_options
+                .as_ref()
+                .and_then(|o| o.get("username"))
+                .is_some_and(|u| u.as_str().is_some_and(|u| !u.is_empty()));
+        if !has_username
+            && let Some(text) = &netrc
+            && let Some((login, password)) =
+                gallery_dl_rs::netrc::lookup(text, category.split('.').next().unwrap_or(category))
+        {
+            let (username, password, site) = credentials(Some(login), Some(password));
+            options = options.overlay(&ConfigOptions {
+                username,
+                password,
+                site_options: site,
+                ..ConfigOptions::default()
+            });
+        }
         let browser_spec = args.cookies_from_browser.clone().or_else(|| {
             options.browser_cookies.as_ref().map(|profile| {
                 // Config parsing has already checked that this path is UTF-8.

@@ -285,7 +285,11 @@ pub fn with_external_children<'a>(
                 Ok(child) => {
                     let ExternalChild(url) = *child;
                     // Like upstream, URLs no extractor supports are skipped.
-                    queue(url).unwrap_or_else(|| stream::empty().boxed())
+                    let text = url.to_string();
+                    queue(url).unwrap_or_else(|| {
+                        crate::unsupported::record(&text);
+                        stream::empty().boxed()
+                    })
                 }
                 Err(error) => stream::once(async move { Err(error) }).boxed(),
             },
