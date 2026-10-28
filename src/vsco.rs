@@ -89,6 +89,14 @@ pub enum Target {
     Collection {
         user: String,
     },
+    /// `spaces/ID`.
+    Space {
+        id: String,
+    },
+    /// `USER/spaces`: queued space children.
+    Spaces {
+        user: String,
+    },
 }
 
 fn plain(url: &Url) -> bool {
@@ -112,7 +120,9 @@ pub fn target(url: &Url) -> Result<Target> {
         .map(|s| s.filter(|s| !s.is_empty()).collect())
         .unwrap_or_default();
     match parts[..] {
+        ["spaces", id] if valid_id(id) => Ok(Target::Space { id: (*id).into() }),
         [user, ..] if !valid_user(user) || RESERVED.contains(&user) => Err(unsupported()),
+        [user, "spaces"] => Ok(Target::Spaces { user: user.into() }),
         [user, "media", id] if valid_id(id) => Ok(Target::Media {
             user: user.into(),
             id: id.into(),
@@ -342,6 +352,58 @@ pub fn parse_collection_page(html: &[u8], user: &str) -> Result<(String, String,
     Ok((collection, token, items))
 }
 
+/// The next space cursor (`postcursorcontext.postId`) unless `atEnd`.
+fn space_cursor(value: &Value) -> Option<String> {
+    let cursor = value.get("cursor")?;
+    if cursor.get("atEnd").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    cursor
+        .pointer("/postcursorcontext/postId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+        .map(str::to_owned)
+}
+
+/// Images of the posts a space page embeds (`entities.posts` and
+/// `entities.postImages`).
+fn space_images(state: &Value, space: &Value) -> Vec<Value> {
+    let posts = state.pointer("/entities/posts");
+    let post_images = state.pointer("/entities/postImages");
+    space
+        .get("postsList")
+        .and_then(Value::as_array)
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|pid| {
+                    let post = posts?.get(pid.as_str()?)?;
+                    match post.get("image")? {
+                        Value::String(key) => post_images?.get(key).cloned(),
+                        image => Some(image.clone()),
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Space IDs and metadata of a `grpc/spaces/user/UID` response.
+fn space_ids(value: &Value) -> Vec<(String, serde_json::Map<String, Value>)> {
+    value
+        .get("spacesWithRoleList")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|entry| {
+                    let space = entry.get("space")?;
+                    let id = space.get("id")?.as_str()?.to_owned();
+                    valid_id(&id).then(|| (id, space.as_object().cloned().unwrap_or_default()))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Site ID and bearer token from a gallery page.
 pub fn parse_gallery_page(html: &[u8], user: &str) -> Result<(String, String)> {
     let html = std::str::from_utf8(html).map_err(|_| error("VSCO returned invalid HTML"))?;
@@ -554,6 +616,129 @@ impl Vsco {
         Ok(self.finish(media))
     }
 
+    /// Bearer token and preloaded state of a page.
+    async fn state(&self, path: &str) -> Result<(Value, String)> {
+        let body = self.call(path, None).await?;
+        let html = String::from_utf8_lossy(&body);
+        let state = preloaded_state(&html)?;
+        let token = state
+            .pointer("/users/currentUser/tkn")
+            .and_then(Value::as_str)
+            .filter(|t| {
+                (8..=512).contains(&t.len())
+                    && t.bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+            })
+            .ok_or_else(|| error("VSCO page contains no access token"))?
+            .to_owned();
+        Ok((state, token))
+    }
+
+    /// Upstream `VscoSpaceExtractor`: posts embedded in the page, then
+    /// `grpc/spaces/ID/posts` by cursor.
+    fn space(&self, id: String) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::try_unfold(
+            (None::<(String, Option<String>)>, 0u64),
+            move |(state, page)| {
+                let id = id.clone();
+                async move {
+                    if page > MAX_PAGES {
+                        return Ok(None);
+                    }
+                    let (images, token, cursor) = match state {
+                        None => {
+                            let (state, token) = self.state(&format!("spaces/{id}")).await?;
+                            let space = state
+                                .pointer(&format!("/spaces/byId/{id}"))
+                                .ok_or_else(|| error("VSCO space not found"))?;
+                            (space_images(&state, space), token, space_cursor(space))
+                        }
+                        Some((_, None)) => return Ok(None),
+                        Some((token, Some(next))) => {
+                            let body = self
+                                .call(
+                                    &format!("grpc/spaces/{id}/posts?cursor={next}"),
+                                    Some(&token),
+                                )
+                                .await?;
+                            let value: Value = serde_json::from_slice(&body)
+                                .map_err(|_| error("VSCO returned invalid JSON"))?;
+                            let images = value
+                                .get("postsList")
+                                .and_then(Value::as_array)
+                                .map(|posts| {
+                                    posts
+                                        .iter()
+                                        .filter_map(|p| p.get("image").cloned())
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            (images, token, space_cursor(&value))
+                        }
+                    };
+                    let user = format!("space-{id}");
+                    let items: Vec<Media> = images
+                        .iter()
+                        .filter_map(|image| media_item(image, &user))
+                        .collect();
+                    Ok::<_, crate::Error>(Some((
+                        self.finish(items),
+                        (Some((token, cursor)), page + 1),
+                    )))
+                }
+            },
+        )
+        .map(|result| match result {
+            Ok(events) => stream::iter(events.into_iter().map(Ok)).boxed(),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
+    /// Upstream `VscoSpacesExtractor`: queue each space of the user.
+    fn spaces(&self, user: String) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::once(async move {
+            let (state, token) = self.state(&format!("{user}/spaces")).await?;
+            let uid = state
+                .pointer("/sites/siteByUsername")
+                .and_then(Value::as_object)
+                .and_then(|sites| {
+                    sites
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case(&user))
+                        .map(|(_, v)| v)
+                })
+                .and_then(|site| site.pointer("/site/userId"))
+                .and_then(|id| match id {
+                    Value::Number(n) => Some(n.to_string()),
+                    Value::String(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .filter(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric()))
+                .ok_or_else(|| error("VSCO user not found"))?;
+            let body = self
+                .call(&format!("grpc/spaces/user/{uid}"), Some(&token))
+                .await?;
+            let value: Value =
+                serde_json::from_slice(&body).map_err(|_| error("VSCO returned invalid JSON"))?;
+            Ok::<_, crate::Error>(space_ids(&value))
+        })
+        .map(move |result| match result {
+            Ok(ids) => stream::iter(ids)
+                .flat_map(move |(id, data)| {
+                    crate::event::child_job(
+                        crate::event::ChildMetadata::from_raw("vsco", "spaces", &data),
+                        move || self.space(id),
+                    )
+                })
+                .boxed(),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
     /// Upstream `VscoCollectionExtractor`: the page's media, then
     /// `api/2.0/collections/ID/medias` from page 2.
     fn collection(&self, user: String) -> BoxStream<'_, Result<ExtractionEvent>> {
@@ -607,6 +792,8 @@ impl Vsco {
         let user = match target(url) {
             Ok(Target::Gallery { user }) => user,
             Ok(Target::Collection { user }) => return self.collection(user),
+            Ok(Target::Space { id }) => return self.space(id),
+            Ok(Target::Spaces { user }) => return self.spaces(user),
             Ok(Target::Avatar { user }) => {
                 return stream::once(async move { self.avatar(&user).await })
                     .map(|result| match result {
@@ -887,12 +1074,43 @@ mod tests {
     }
 
     #[test]
+    fn parses_spaces() {
+        let state = json!({"entities": {
+            "posts": {"p1": {"image": "i1"}},
+            "postImages": {"i1": {"id": ID, "responsiveUrl": "im.vsco.co/1/a.jpg"}},
+        }});
+        let space = json!({"postsList": ["p1", "missing"],
+                           "cursor": {"atEnd": false, "postcursorcontext": {"postId": "p9"}}});
+        let images = space_images(&state, &space);
+        assert_eq!(images.len(), 1);
+        assert!(media_item(&images[0], "space-x").is_some());
+        assert_eq!(space_cursor(&space).as_deref(), Some("p9"));
+        assert_eq!(space_cursor(&json!({"cursor": {"atEnd": true}})), None);
+        let ids = space_ids(
+            &json!({"spacesWithRoleList": [{"space": {"id": "6320a3e1e0338d1350b33fea"}}]}),
+        );
+        assert_eq!(ids[0].0, "6320a3e1e0338d1350b33fea");
+    }
+
+    #[test]
     fn classifies_urls_and_hosts() {
         let t = |raw: &str| target(&Url::parse(raw).unwrap());
         assert_eq!(
             t("https://vsco.co/vsco/collection/1").unwrap(),
             Target::Collection {
                 user: "vsco".into()
+            }
+        );
+        assert_eq!(
+            t("https://vsco.co/spaces/6320a3e1e0338d1350b33fea").unwrap(),
+            Target::Space {
+                id: "6320a3e1e0338d1350b33fea".into()
+            }
+        );
+        assert_eq!(
+            t("https://vsco.co/missuri/spaces").unwrap(),
+            Target::Spaces {
+                user: "missuri".into()
             }
         );
         assert_eq!(
