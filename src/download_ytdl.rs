@@ -71,6 +71,29 @@ pub struct YtdlOptions {
     pub forward_cookies: bool,
     /// `raw-options` translated to command-line flags.
     pub raw_args: Vec<String>,
+    /// `logging` (default true) and `deprecations` (default false).
+    pub logging: bool,
+    pub deprecations: bool,
+}
+
+/// Re-log yt-dlp's `WARNING:`/`ERROR:` lines as `[ytdl][LEVEL]` messages,
+/// like upstream's logging bridge; other output is debug-level and hidden.
+async fn relay_messages(stderr: tokio::process::ChildStderr) {
+    use tokio::io::AsyncBufReadExt;
+    let mut lines = tokio::io::BufReader::new(stderr).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        let (level, message) = if let Some(message) = line.strip_prefix("ERROR: ") {
+            (crate::actions::ERROR, message)
+        } else if let Some(message) = line.strip_prefix("WARNING: ") {
+            if !YtdlOptions::deprecations() && message.to_ascii_lowercase().contains("deprecat") {
+                continue;
+            }
+            (crate::actions::WARNING, message)
+        } else {
+            continue;
+        };
+        let _ = crate::actions::log_as("ytdl", level, message);
+    }
 }
 
 /// Translate `raw-options` (YoutubeDL constructor options) into yt-dlp
@@ -176,6 +199,10 @@ impl YtdlOptions {
                 .and_then(serde_json::Value::as_str)
                 .map(crate::postprocess::expand_path),
             forward_cookies: object.get("forward-cookies") != Some(&serde_json::Value::Bool(false)),
+            logging: object.get("logging") != Some(&serde_json::Value::Bool(false)),
+            deprecations: object
+                .get("deprecations")
+                .is_some_and(|v| v.as_bool() == Some(true)),
             raw_args: object
                 .get("raw-options")
                 .and_then(serde_json::Value::as_object)
@@ -202,6 +229,16 @@ impl YtdlOptions {
         args.extend(options.raw_args.iter().cloned());
         args.extend(options.cmdline_args.iter().cloned());
         args
+    }
+
+    /// Upstream `logging` (default true): relay yt-dlp's messages.
+    pub fn logging() -> bool {
+        OPTIONS.get().is_none_or(|options| options.logging)
+    }
+
+    /// Upstream `deprecations` (default false): show deprecation warnings.
+    pub fn deprecations() -> bool {
+        OPTIONS.get().is_some_and(|options| options.deprecations)
     }
 
     /// Whether session cookies are passed to yt-dlp.
@@ -234,8 +271,8 @@ pub(super) fn arguments(
         "--ignore-config",
         "--no-playlist",
         "--no-progress",
+        // Warnings stay on: upstream shows them (or relays them, `logging`).
         "--quiet",
-        "--no-warnings",
         "--no-mtime",
         "--no-part",
         "--no-cache-dir",
@@ -329,13 +366,26 @@ pub(super) async fn download(request: Request<'_>) -> std::result::Result<Outcom
         None => Vec::new(),
     };
     let mut command = tokio::process::Command::new(command);
+    let logging = YtdlOptions::logging();
     command
         .args(arguments(&request, &cookies, work.path(), url))
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
         .kill_on_drop(true);
-    let status = match command.status().await {
+    // Upstream `logging: false` writes yt-dlp's output directly.
+    if logging {
+        command.stdout(Stdio::null()).stderr(Stdio::piped());
+    } else {
+        command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    }
+    let status = match async {
+        let mut child = command.spawn()?;
+        if let Some(stderr) = child.stderr.take() {
+            relay_messages(stderr).await;
+        }
+        child.wait().await
+    }
+    .await
+    {
         Ok(status) => status,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Err(failure(
