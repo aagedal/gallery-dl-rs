@@ -114,9 +114,9 @@ async fn category_destinations_and_filenames_anchor_to_config_directory() {
         ]);
     let result = output(&mut command).await;
     success(&result);
-    assert!(result.stdout.is_empty());
-    let stderr = String::from_utf8_lossy(&result.stderr);
-    assert_eq!(stderr.matches("skipped ").count(), 5);
+    // Skipped files are reported on standard output as `# PATH`.
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert_eq!(stdout.matches("# ").count(), 5, "{stdout}");
     assert!(!cwd.join("gallery-dl").exists());
     assert!(!settings.join("base").exists());
 }

@@ -38,7 +38,8 @@ fn metadata_is_opt_in_and_conflicts_with_inspection_modes() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(output.stdout.is_empty());
+    // The skipped file is reported on standard output as `# PATH`.
+    assert!(String::from_utf8_lossy(&output.stdout).starts_with("# "));
     assert_eq!(
         std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
         2
@@ -609,7 +610,9 @@ mod cancellation {
         assert_eq!(output.status.code(), Some(16));
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("2 operation(s) failed"), "{stderr}");
-        assert_eq!(stderr.matches("downloaded ").count(), 1, "{stderr}");
+        // Downloaded files are reported on standard output, like upstream.
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(stdout.lines().count(), 1, "{stdout}");
         // Duplicate input must not even issue another request after extraction fails.
         assert!(matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock));
     }

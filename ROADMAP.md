@@ -1621,7 +1621,11 @@ Upstream's `extension-map` applies to every extractor (default: `jpeg`,
 `jpe`, `jfif`, `jif` and `jfi` become `jpg`).
 `output.progress` (default on, or a format string) prints
 `[CURRENT/TOTAL] URL` before each of several inputs.
-**Remaining:** other `output` options (log formats, colors), most
+Completed and skipped files are reported on standard output per
+`output.mode` (`auto`, `pipe`, `terminal`, `color`, `null` or custom
+`success`/`skip` formats; `output.colors`, `NO_COLOR`, `output.skip`)
+instead of `downloaded`/`skipped` lines on standard error.
+**Remaining:** log formats, `output.shorten`, download progress, most
 `downloader.ytdl` options, and relative paths
 resolve against the configuration directory rather than the working directory.
 

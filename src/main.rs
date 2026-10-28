@@ -883,8 +883,7 @@ async fn run(args: Args) -> Result<()> {
         args.quiet = true;
     }
     // Upstream `output` section: files for logs, unsupported and failed
-    // URLs, `mode: null` and printing skipped files.
-    let mut print_skipped = true;
+    // URLs and `mode: null` (skipped files: see `gallery_dl_rs::output`).
     if let Some(output) = globals
         .and_then(|g| g.get("output"))
         .and_then(serde_json::Value::as_object)
@@ -915,9 +914,6 @@ async fn run(args: Args) -> Result<()> {
                 args.quiet = true
             }
             _ => {}
-        }
-        if output.get("skip") == Some(&serde_json::Value::Bool(false)) {
-            print_skipped = false;
         }
     }
     if let Some(value) = globals.and_then(|g| g.get("category-map")) {
@@ -1503,6 +1499,14 @@ async fn run(args: Args) -> Result<()> {
             .with_rate_limit(args.limit_rate)
             .with_ytdl((!args.no_ytdl).then_some(ytdl_command(&args)))
             .with_ytdl_cookies(ytdl_cookies(&args));
+        // Upstream `output.mode`: report files on standard output.
+        let output = gallery_dl_rs::output::Output::new(
+            GLOBAL_OPTIONS
+                .get()
+                .and_then(|g| g.get("output"))
+                .and_then(serde_json::Value::as_object),
+            args.quiet,
+        );
         let aborted = &aborted;
         let terminated = &terminated;
         let skip_filter = GLOBAL_OPTIONS
@@ -1656,14 +1660,10 @@ async fn run(args: Args) -> Result<()> {
             }
             match result {
                 Ok(ArchiveOutcome::Completed(Outcome::Downloaded(path))) => {
-                    if !args.quiet {
-                        eprintln!("downloaded {}", path.display());
-                    }
+                    output.success(&path.to_string_lossy());
                 }
                 Ok(ArchiveOutcome::Completed(Outcome::Skipped(path))) => {
-                    if !args.quiet && print_skipped {
-                        eprintln!("skipped {}", path.display())
-                    }
+                    output.skip(&path.to_string_lossy());
                     if let Some(sleep) = &args.sleep_skip {
                         sleep.wait().await;
                     }
