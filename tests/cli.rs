@@ -172,11 +172,12 @@ fn native_selection_rejects_unsupported_inputs_without_running_backend() {
         ])
         .output()
         .unwrap();
+    // Natively, --config is read as the configuration file; it is missing here.
     assert!(!output.status.success());
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()
-            .contains("--config is only supported")
+            .contains("cannot open native configuration")
     );
 }
 
