@@ -11,6 +11,8 @@ use url::Url;
 pub(crate) enum Tab {
     Photos,
     Avatar,
+    /// `/info`: the profile's metadata only (upstream `FacebookInfoExtractor`).
+    Info,
     /// Every album, or only those whose title matches (case-insensitively).
     Albums(Option<String>),
 }
@@ -26,7 +28,7 @@ impl ProfileInput {
     pub(crate) fn page(&self) -> Result<Url> {
         let suffix = match self.tab {
             Tab::Photos => "/photos_by",
-            Tab::Avatar => "",
+            Tab::Avatar | Tab::Info => "",
             Tab::Albums(_) => "/photos_albums",
         };
         Url::parse(&format!(
@@ -107,6 +109,7 @@ pub(crate) fn profile_input(url: &Url) -> Option<ProfileInput> {
             [] => Some(Tab::Photos),
             ["photos" | "photos_by"] => Some(Tab::Photos),
             ["avatar"] => Some(Tab::Avatar),
+            ["info"] => Some(Tab::Info),
             ["photos_albums"] => Some(Tab::Albums(None)),
             ["photos_albums", name] => Some(Tab::Albums(Some(percent_decode(name).to_lowercase()))),
             _ => None,
@@ -292,6 +295,24 @@ fn parse_user(page: &str) -> Option<Value> {
     serde_json::from_str(&format!("{{\"{data}}}")).ok()
 }
 
+/// Upstream `_extract_profile_user` for `/info`: the profile object, with
+/// `pfbid` identifiers replaced by the numeric `userID`.
+pub(crate) fn parse_profile_info(bytes: &[u8]) -> Result<serde_json::Map<String, Value>> {
+    let page = page_text(bytes)?;
+    let mut user = parse_user(page)
+        .and_then(|user| user.as_object().cloned())
+        .ok_or_else(|| error("Facebook profile page contains no profile data"))?;
+    if let Some(Value::String(id)) = user.get("id").cloned()
+        && id.starts_with("pfbid")
+    {
+        user.insert("user_pfbid".into(), id.into());
+        if let Some(numeric) = extr(page, r#""userID":""#, "\"") {
+            user.insert("id".into(), numeric.into());
+        }
+    }
+    Ok(user)
+}
+
 /// The avatar's photo permalink (`profilePhoto.url`), if the profile has one.
 pub(crate) fn parse_avatar(bytes: &[u8]) -> Result<Url> {
     let page = page_text(bytes)?;
@@ -429,6 +450,10 @@ mod tests {
         assert_eq!(
             input("https://www.facebook.com/NASA/avatar"),
             of("NASA", Tab::Avatar)
+        );
+        assert_eq!(
+            input("https://www.facebook.com/instagram/info"),
+            of("instagram", Tab::Info)
         );
         assert_eq!(
             input("https://www.facebook.com/NASA/photos_albums"),

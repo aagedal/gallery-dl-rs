@@ -1723,7 +1723,8 @@ Flickr albums overview, favorites, galleries, groups and search; Fur
 Affinity folders, user dispatch, search, watchlist, `/msg/submissions` and
 mirror hosts; DeviantArt `/view/ID`, `fav.me`, `view.php`, favourites and
 collections, tags, avatar, banner, watching and fxdeviantart; Facebook
-`profile.php?id=ID/TAB`; `i.reddituploads.com`; remaining directlink
+`profile.php?id=ID/TAB` and `/info` (a file-less post carrying the profile
+for `post`-event postprocessors); `i.reddituploads.com`; remaining directlink
 extensions. Newgrounds audio/movie pages, user audio/movies/games
 listings, favorites, following and search were ported from upstream but
 only tested against local fixtures (the site serves an "NG Guard" browser
@@ -1737,7 +1738,7 @@ watch (Eclipse API needing a CSRF session, or login); journals and literature ar
 from `deviation/content` (simpler than upstream's journal template; not yet
 verified live because DeviantArt rate-limited this host), 500px liked (login;
 the native port uses the newer api-neo GraphQL schema, whose liked query is
-unknown without an account), Facebook `/info` (profile metadata only).
+unknown without an account)
 MangaDex feed/follows log in with `username`/`password` (and optional
 `client-id`/`client-secret`), unverified without an account.
 

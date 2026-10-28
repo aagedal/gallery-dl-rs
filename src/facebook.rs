@@ -286,6 +286,38 @@ impl Facebook {
                         .append_pair("set", "");
                     self.post_events_endpoint(endpoint, id, false)
                 }
+                Tab::Info => {
+                    let user = crate::facebook_profile::parse_profile_info(&body)?;
+                    static INFO: crate::sites::Route = crate::sites::Route::new(
+                        "info",
+                        "{category}_{post_id}",
+                        &["{category}", "{username}"],
+                        "",
+                    );
+                    let username = user
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .map(std::sync::Arc::<str>::from);
+                    let post = crate::event::Post {
+                        keywords: crate::event::KeywordPolicy::default(),
+                        category: "facebook".into(),
+                        metadata: Some(crate::extract::PostMetadata {
+                            post_id: input.profile.clone(),
+                            username,
+                            site_keywords: Some(std::sync::Arc::new(crate::sites::SiteKeywords {
+                                route: &INFO,
+                                fields: user,
+                            })),
+                            ..Default::default()
+                        }),
+                        count: Some(0),
+                    };
+                    stream::iter([
+                        Ok(crate::event::ExtractionEvent::Post(Box::new(post))),
+                        Ok(crate::event::ExtractionEvent::EndPost),
+                    ])
+                    .boxed()
+                }
                 Tab::Albums(name) => {
                     let list = parse_albums(&body, name.as_deref())?;
                     let referer = input.page()?;
