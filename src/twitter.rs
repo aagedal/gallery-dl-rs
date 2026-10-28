@@ -121,6 +121,14 @@ pub struct Twitter {
 }
 
 impl Twitter {
+    /// A copy of the session cookies, for `--cookies-export`.
+    pub fn cookie_snapshot(&self) -> crate::cookies::CookieJar {
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
     pub async fn new(cookies: Option<&Path>, timeout: Duration) -> Result<Self> {
         let cookies = match cookies {
             Some(path) => CookieJar::parse(&tokio::fs::read_to_string(path).await?)?,

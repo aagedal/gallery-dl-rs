@@ -9,10 +9,20 @@ use futures_util::stream::BoxStream;
 pub struct PostSelection {
     pub(crate) range: Option<RangeSelection>,
     pub(crate) filter: Option<FilterExpression>,
+    /// Upstream `tags-blacklist`/`tags-whitelist`.
+    pub(crate) tags: Option<crate::tag_filter::TagFilter>,
 }
 impl PostSelection {
     pub fn new(range: Option<RangeSelection>, filter: Option<FilterExpression>) -> Self {
-        Self { range, filter }
+        Self {
+            range,
+            filter,
+            tags: None,
+        }
+    }
+    pub fn with_tags(mut self, tags: Option<crate::tag_filter::TagFilter>) -> Self {
+        self.tags = tags;
+        self
     }
     /// Post filters precede dates, followed by the range. Nested jobs reset positions.
     pub fn apply<'a>(

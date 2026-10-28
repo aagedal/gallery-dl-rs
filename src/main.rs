@@ -16,7 +16,7 @@ use gallery_dl_rs::{
     extract::{self, Backend, BackendOptions},
     facebook::Facebook,
     filter::FilterExpression,
-    input::Inputs,
+    input::{Action as InputAction, Inputs, Origin as InputOrigin},
     instagram::Instagram,
     job_selection::JobSelection,
     naming::{DirectoryTemplate, FilenameTemplate},
@@ -42,15 +42,22 @@ use tokio::sync::OnceCell;
 #[derive(Parser)]
 #[command(
     version,
+    args_override_self = true,
     about = "Rust gallery downloader with experimental native Instagram, Facebook, and Twitter/X extractors"
 )]
 struct Args {
     /// Instagram, Facebook, Twitter/X, or direct media URLs
-    #[arg(required_unless_present_any = ["input_files", "list_extractors", "list_modules"])]
+    #[arg(required_unless_present_any = ["input_files", "input_file_comment", "input_file_delete", "list_extractors", "list_modules", "config_status", "config_create", "config_open", "update", "update_check", "update_to", "cache_status", "cache_show", "cache_clear", "cache_vacuum"])]
     urls: Vec<String>,
     /// Read URLs from a UTF-8 file; repeat for multiple files, or use - for stdin
     #[arg(short = 'i', long = "input-file", value_name = "FILE")]
     input_files: Vec<PathBuf>,
+    /// Download URLs found in FILE; comment out each successfully downloaded URL
+    #[arg(short = 'I', long = "input-file-comment", value_name = "FILE")]
+    input_file_comment: Vec<PathBuf>,
+    /// Download URLs found in FILE; delete each successfully downloaded URL
+    #[arg(short = 'x', long = "input-file-delete", value_name = "FILE")]
+    input_file_delete: Vec<PathBuf>,
     /// Output root (default: downloads)
     #[arg(short, long)]
     destination: Option<PathBuf>,
@@ -189,16 +196,182 @@ struct Args {
     #[arg(long)]
     native_config: Option<PathBuf>,
     /// Do not load the discovered default native configuration file
-    #[arg(long, conflicts_with = "native_config")]
+    #[arg(
+        long,
+        alias = "config-ignore",
+        alias = "ignore-config",
+        conflicts_with = "native_config"
+    )]
     native_config_ignore: bool,
+    /// Number of seconds to wait between HTTP requests during data extraction
+    #[arg(long, value_name = "SECONDS")]
+    sleep_request: Option<String>,
+    /// Number of seconds to wait before retrying an HTTP request
+    #[arg(long, value_name = "SECONDS")]
+    sleep_retries: Option<String>,
+    /// Number of seconds to wait when receiving a '429 Too Many Requests' response
+    #[arg(long = "sleep-429", value_name = "SECONDS")]
+    sleep_429: Option<String>,
+    /// Number of seconds to wait after skipping a file download
+    #[arg(long, value_name = "SECONDS", value_parser = parse_sleep)]
+    sleep_skip: Option<gallery_dl_rs::sleep::SleepRange>,
+    /// Replace restricted filename characters with underscores: VALUE is
+    /// 'unix', 'windows', 'ascii', 'ascii+', 'auto', or a set of characters
+    #[arg(long, value_name = "VALUE")]
+    restrict_filenames: Option<String>,
+    /// Use Windows filename restrictions (same as --restrict-filenames windows)
+    #[arg(long)]
+    windows_filenames: bool,
+    /// Additional configuration files in JSON format
+    #[arg(long, value_name = "FILE")]
+    config_json: Option<PathBuf>,
+    /// Additional configuration files in YAML format
+    #[arg(long, value_name = "FILE")]
+    config_yaml: Option<PathBuf>,
+    /// Additional configuration files in TOML format
+    #[arg(long, value_name = "FILE")]
+    config_toml: Option<PathBuf>,
+    /// Set filetype of a --config-create file: json, yaml or toml
+    #[arg(long, value_name = "TYPE")]
+    config_type: Option<String>,
+    /// Show configuration file status
+    #[arg(long)]
+    config_status: bool,
+    /// Create a basic configuration file
+    #[arg(long)]
+    config_create: bool,
+    /// Open the configuration file in an external application
+    #[arg(long)]
+    config_open: bool,
+    /// Update to the latest version (not supported; reports an error)
+    #[arg(short = 'U', long)]
+    update: bool,
+    /// Check if a newer version is available (not supported; reports an error)
+    #[arg(long)]
+    update_check: bool,
+    /// Switch to a different release channel or version (not supported)
+    #[arg(long, value_name = "CHANNEL")]
+    update_to: Option<String>,
+    /// Do not download any files; postprocessor preparation hooks still run
+    #[arg(long)]
+    no_download: bool,
+    /// Write FORMAT during EVENT (default 'prepare') to standard output
+    /// instead of downloading files; e.g. -N '{id}' or -N 'after:{_path}'
+    #[arg(short = 'N', long = "print", value_name = "[EVENT:]FORMAT")]
+    print: Vec<String>,
+    /// Append FORMAT during EVENT to FILE instead of downloading files
+    #[arg(long, num_args = 2, value_names = ["[EVENT:]FORMAT", "FILE"])]
+    print_to_file: Vec<String>,
+    /// Accepted for compatibility: gallery-dl-rs keeps no cache file
+    #[arg(long, value_name = "PATH", hide = true)]
+    cache_file: Option<PathBuf>,
+    /// Show cache file information
+    #[arg(long)]
+    cache_status: bool,
+    /// Show cached values for MODULE
+    #[arg(long, value_name = "MODULE")]
+    cache_show: Option<String>,
+    /// Delete cached login sessions, cookies, etc. for MODULE
+    #[arg(long, alias = "clear-cache", value_name = "MODULE")]
+    cache_clear: Option<String>,
+    /// Clean up the cache database
+    #[arg(long)]
+    cache_vacuum: bool,
+    /// Load external Python extractors from PATH (not supported; reports an error)
+    #[arg(short = 'X', long = "extractors", value_name = "PATH")]
+    extractor_sources: Vec<PathBuf>,
+    /// Restore legacy 'category' names (not supported; reports an error)
+    #[arg(long)]
+    compat: bool,
+    /// Ignore the given comma-separated categories when spawning child
+    /// extractors for external URLs (e.g. 'pixiv,twitter')
+    #[arg(long, value_name = "CATEGORIES")]
+    blacklist: Option<String>,
+    /// Only spawn child extractors for external URLs of these categories
+    #[arg(long, value_name = "CATEGORIES")]
+    whitelist: Option<String>,
+    /// Ignore posts tagged with any of the given comma-separated tags (or
+    /// the lines of a file); Danbooru blacklist rules are supported
+    #[arg(long, value_name = "TAGS")]
+    tags_blacklist: Option<String>,
+    /// Allow only posts tagged with at least one of the given tags
+    #[arg(long, value_name = "TAGS")]
+    tags_whitelist: Option<String>,
+    /// Do not skip downloads; overwrite existing files
+    #[arg(long)]
+    no_skip: bool,
+    /// Username to login with
+    #[arg(short = 'u', long, value_name = "USER")]
+    username: Option<String>,
+    /// Password belonging to the given username
+    #[arg(short = 'p', long, value_name = "PASS")]
+    password: Option<String>,
+    /// Enable .netrc authentication data
+    #[arg(long)]
+    netrc: bool,
+    /// Write downloaded intermediary pages to files in the current directory
+    /// to debug problems
+    #[arg(long)]
+    write_pages: bool,
+    /// Display sent and read HTTP traffic of registry extractors
+    #[arg(long)]
+    print_traffic: bool,
+    /// Export session cookies to FILE
+    #[arg(long, value_name = "FILE")]
+    cookies_export: Option<PathBuf>,
+    /// Write logging output to FILE
+    #[arg(long, value_name = "FILE")]
+    write_log: Option<PathBuf>,
+    /// Write URLs which get emitted by other extractors but cannot be handled to FILE
+    #[arg(long, value_name = "FILE")]
+    write_unsupported: Option<PathBuf>,
+    /// Accepted for compatibility; only warnings and errors are logged already
+    #[arg(short = 'w', long)]
+    warning: bool,
+    /// Accepted for compatibility; no additional debug output is printed
+    #[arg(short = 'v', long)]
+    verbose: bool,
+    /// Use a fake 'X-Forwarded-For' HTTP header to try bypassing geographic
+    /// restrictions: IP blocks in CIDR notation or two-letter ISO 3166-2
+    /// country codes (12.0.0.0/8,FR,CN)
+    #[arg(long, value_name = "VALUE")]
+    xff: Option<String>,
+    /// Disable HTTPS certificate validation
+    #[arg(long)]
+    no_check_certificate: bool,
+    /// Client-side IP address to bind to
+    #[arg(long, value_name = "IP", conflicts_with_all = ["force_ipv4", "force_ipv6"])]
+    source_address: Option<std::net::IpAddr>,
+    /// Make all connections via IPv4
+    #[arg(short = '4', long, conflicts_with = "force_ipv6")]
+    force_ipv4: bool,
+    /// Make all connections via IPv6
+    #[arg(short = '6', long)]
+    force_ipv6: bool,
+    /// Accepted for compatibility: downloads always use temporary files that
+    /// are published once complete
+    #[arg(long, hide = true)]
+    no_part: bool,
+    /// Accepted for compatibility: the download buffer size is fixed
+    #[arg(long, hide = true, value_name = "SIZE", value_parser = parse_size)]
+    chunk_size: Option<u64>,
+    /// Accepted for compatibility: output is never colored
+    #[arg(long, hide = true)]
+    no_colors: bool,
+    /// Accepted for compatibility: gallery-dl-rs never prompts for input
+    #[arg(long, hide = true)]
+    no_input: bool,
     /// Additional native setting KEY=VALUE (VALUE is JSON or text), e.g.
     /// extractor.4chan.retries=3; `extractor.*` keys also reach the
     /// compatibility backend
     #[arg(short = 'o', long = "option", value_name = "KEY=VALUE")]
     options: Vec<String>,
     /// Simulate: print destination paths ("# PATH") without downloading
-    #[arg(short = 's', long, visible_alias = "no-download", conflicts_with_all = ["get_urls", "dump_json"])]
+    #[arg(short = 's', long, conflicts_with_all = ["get_urls", "dump_json"])]
     simulate: bool,
+    /// Print extractor defaults and settings
+    #[arg(short = 'E', long, conflicts_with_all = ["get_urls", "dump_json", "simulate", "list_keywords"])]
+    extractor_info: bool,
     /// Print available keywords and example values for the first file of each input
     #[arg(short = 'K', long, conflicts_with_all = ["get_urls", "dump_json", "simulate"])]
     list_keywords: bool,
@@ -220,6 +393,36 @@ struct Args {
     /// Activate a native postprocessor by name; repeatable
     #[arg(short = 'P', long = "postprocessor", value_name = "NAME")]
     postprocessor: Vec<String>,
+    /// Rename previously downloaded files from FORMAT to the current filename format
+    #[arg(long, value_name = "FORMAT")]
+    rename: Option<String>,
+    /// Rename previously downloaded files from the current filename format to FORMAT
+    #[arg(long, value_name = "FORMAT")]
+    rename_to: Option<String>,
+    /// Store downloaded files in a ZIP archive
+    #[arg(long)]
+    zip: bool,
+    /// Store downloaded files in a CBZ archive
+    #[arg(long)]
+    cbz: bool,
+    /// Convert Pixiv Ugoira to FMT using FFmpeg: webm, mp4, gif, vp8, vp9,
+    /// vp9-lossless, copy, or zip
+    #[arg(long, value_name = "FMT")]
+    ugoira: Vec<String>,
+    #[arg(long, hide = true)]
+    ugoira_conv: bool,
+    #[arg(long, hide = true)]
+    ugoira_conv_lossless: bool,
+    #[arg(long, hide = true)]
+    ugoira_conv_copy: bool,
+    #[arg(long, hide = true)]
+    mtime_from_date: bool,
+    /// Additional postprocessor option KEY=VALUE applied to every postprocessor
+    #[arg(short = 'O', long = "postprocessor-option", value_name = "KEY=VALUE")]
+    postprocessor_options: Vec<String>,
+    /// Do not run any postprocessors
+    #[arg(long)]
+    no_postprocessors: bool,
     /// Write gallery metadata to an info.json file per directory
     #[arg(long, alias = "write-infojson")]
     write_info_json: bool,
@@ -259,6 +462,13 @@ fn parse_size(value: &str) -> std::result::Result<u64, String> {
 /// of user configuration directories. Upstream gallery-dl files are not read:
 /// the native schema is a strict subset and would reject their settings.
 fn default_native_config() -> Option<PathBuf> {
+    native_config_candidates()
+        .into_iter()
+        .find(|path| path.is_file())
+}
+
+/// Native configuration search locations, in priority order.
+fn native_config_candidates() -> Vec<PathBuf> {
     let var = |name| {
         std::env::var_os(name)
             .filter(|value| !value.is_empty())
@@ -277,7 +487,78 @@ fn default_native_config() -> Option<PathBuf> {
         candidates.extend(config.map(|dir| dir.join("gallery-dl-rs").join("config.json")));
         candidates.extend(var("HOME").map(|home| home.join(".gallery-dl-rs.conf")));
     }
-    candidates.into_iter().find(|path| path.is_file())
+    candidates
+}
+
+/// Upstream `--config-status`, `--config-create` and `--config-open`.
+async fn config_command(args: &Args) -> Result<()> {
+    let candidates = native_config_candidates();
+    if args.config_status {
+        for path in args.native_config.iter().chain(&candidates) {
+            let status = match tokio::fs::read(path).await {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => "Not Present",
+                Err(_) => "Inaccessible",
+                Ok(_) => match Config::load(path).await {
+                    Ok(_) => "OK",
+                    Err(_) => "Invalid",
+                },
+            };
+            println!("{} : {status}", path.display());
+        }
+        return Ok(());
+    }
+    let path = match &args.native_config {
+        Some(path) => path.clone(),
+        None if args.config_open => default_native_config()
+            .ok_or_else(|| error("no configuration file found; use --config-create"))?,
+        None => candidates
+            .into_iter()
+            .find(|path| {
+                !path.ends_with(".gallery-dl-rs.conf") && !path.ends_with("gallery-dl-rs.conf")
+            })
+            .ok_or_else(|| error("no configuration location available"))?,
+    };
+    if args.config_create {
+        if path.exists() {
+            return Err(error(format!(
+                "configuration file {} already exists",
+                path.display()
+            )));
+        }
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        let (path, contents) = match args.config_type.as_deref() {
+            None | Some("json") => (path, "{\n    \"extractor\": {\n\n    }\n}\n"),
+            Some("yaml") => (path.with_extension("yaml"), "extractor: {}\n"),
+            Some("toml") => (path.with_extension("toml"), "[extractor]\n"),
+            Some(_) => return Err(error("--config-type must be json, yaml or toml")),
+        };
+        if path.exists() {
+            return Err(error(format!(
+                "configuration file {} already exists",
+                path.display()
+            )));
+        }
+        tokio::fs::write(&path, contents).await?;
+        eprintln!("Created a basic configuration file at '{}'", path.display());
+        return Ok(());
+    }
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(windows) {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    let status = tokio::process::Command::new(opener)
+        .arg(&path)
+        .status()
+        .await?;
+    if !status.success() && !cfg!(windows) {
+        return Err(error(format!("{opener} exited with {status}")));
+    }
+    Ok(())
 }
 
 /// Compatibility mode keeps plain Imgur file links as direct downloads, as
@@ -395,7 +676,38 @@ fn parse_timeout(value: &str) -> std::result::Result<Duration, String> {
 const MAIN_STACK_SIZE: usize = 8 * 1024 * 1024;
 
 fn main() {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    for (path, format) in [
+        (&args.config_json, gallery_dl_rs::config::Format::Json),
+        (&args.config_yaml, gallery_dl_rs::config::Format::Yaml),
+        (&args.config_toml, gallery_dl_rs::config::Format::Toml),
+    ] {
+        if let Some(path) = path {
+            gallery_dl_rs::config::set_format(path, format);
+        }
+    }
+    if args.config.is_none() {
+        args.config = args
+            .config_json
+            .clone()
+            .or_else(|| args.config_yaml.clone())
+            .or_else(|| args.config_toml.clone());
+    }
+    if let Some(path) = &args.write_unsupported
+        && let Err(e) = gallery_dl_rs::unsupported::set_file(path)
+    {
+        eprintln!("error: cannot open {}: {e}", path.display());
+        std::process::exit(1);
+    }
+    if args.print_traffic {
+        gallery_dl_rs::sites::http::PRINT_TRAFFIC.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    if let Some(path) = &args.write_log
+        && let Err(e) = gallery_dl_rs::logfile::start(path)
+    {
+        eprintln!("error: cannot write log to {}: {e}", path.display());
+        std::process::exit(1);
+    }
     let worker = std::thread::Builder::new()
         .name("main-runtime".into())
         .stack_size(MAIN_STACK_SIZE)
@@ -407,7 +719,9 @@ fn main() {
                 .block_on(async_main(args))
         })
         .expect("failed to start the main runtime thread");
-    if let Err(panic) = worker.join() {
+    let result = worker.join();
+    gallery_dl_rs::logfile::finish();
+    if let Err(panic) = result {
         std::panic::resume_unwind(panic);
     }
 }
@@ -423,10 +737,12 @@ async fn async_main(args: Args) {
     };
     if let Err(e) = result {
         eprintln!("error: {e}");
+        gallery_dl_rs::logfile::finish();
         std::process::exit(1);
     }
     if interrupted {
         eprintln!("cancelled");
+        gallery_dl_rs::logfile::finish();
         std::process::exit(130);
     }
 }
@@ -436,13 +752,247 @@ async fn run(args: Args) -> Result<()> {
         list_extractors(args.list_extractors);
         return Ok(());
     }
-    if matches!(args.extractor, Extractor::Native) && args.config.is_some() {
+    if let Some(list) = &args.whitelist {
+        let _ = CHILD_FILTER.set(ChildFilter::parse(list, true));
+    } else if let Some(list) = &args.blacklist {
+        let _ = CHILD_FILTER.set(ChildFilter::parse(list, false));
+    }
+    if !args.extractor_sources.is_empty() {
         return Err(error(
-            "--config is only supported with --extractor compatibility",
+            "-X/--extractors loads Python extractor modules, which gallery-dl-rs cannot run",
         ));
     }
-    let settings = resolved_settings(&args).await?;
-    let inputs = Inputs::new(args.urls.clone(), args.input_files.clone())?;
+    if args.compat {
+        return Err(error("--compat (legacy category names) is not supported"));
+    }
+    if args.cache_status
+        || args.cache_show.is_some()
+        || args.cache_clear.is_some()
+        || args.cache_vacuum
+    {
+        println!("gallery-dl-rs keeps no cache file; login sessions are not stored between runs");
+        return Ok(());
+    }
+    if args.config_status || args.config_create || args.config_open {
+        return config_command(&args).await;
+    }
+    if args.update || args.update_check || args.update_to.is_some() {
+        return Err(error(
+            "self-updating is not supported; install a newer gallery-dl-rs release instead",
+        ));
+    }
+    if matches!(args.extractor, Extractor::Native)
+        && args.config.is_some()
+        && args.native_config.is_some()
+    {
+        return Err(error(
+            "with --extractor native, --config is read natively; use either --config or --native-config",
+        ));
+    }
+    let settings = resolved_settings(&args, &[]).await?;
+    gallery_dl_rs::sites::configure_patterns(|category, key| {
+        settings
+            .get(category)?
+            .options
+            .site_options
+            .as_ref()?
+            .get(key)
+            .cloned()
+    });
+    if args
+        .urls
+        .iter()
+        .any(|url| gallery_dl_rs::oauth::is_oauth(url))
+    {
+        let options = |category: &str, key: &str| {
+            let options = &settings.get(category)?.options;
+            match key {
+                "client-id" => options.client_id.clone(),
+                "client-secret" => options.client_secret.clone(),
+                "api-key" => options.api_key.clone(),
+                _ => None,
+            }
+            .or_else(|| {
+                options
+                    .site_options
+                    .as_ref()?
+                    .get(key)
+                    .map(|value| match value {
+                        serde_json::Value::String(text) => text.clone(),
+                        other => other.to_string(),
+                    })
+            })
+        };
+        for url in args
+            .urls
+            .iter()
+            .filter(|url| gallery_dl_rs::oauth::is_oauth(url))
+        {
+            gallery_dl_rs::oauth::run(url, &options).await?;
+        }
+        if args
+            .urls
+            .iter()
+            .all(|url| gallery_dl_rs::oauth::is_oauth(url))
+        {
+            return Ok(());
+        }
+    }
+    if args.extractor_info {
+        for url in &args.urls {
+            print_extractor_info(url, &settings, args.extractor)?;
+        }
+        return Ok(());
+    }
+    // Upstream `skip`: false replaces files; "abort:N", "terminate:N" and
+    // "exit:N" stop after N consecutive skipped files.
+    let mut args = args;
+    let globals = GLOBAL_OPTIONS.get();
+    if globals.and_then(|g| g.get("download")) == Some(&serde_json::Value::Bool(false))
+        || !args.print.is_empty()
+        || !args.print_to_file.is_empty()
+    {
+        args.no_download = true;
+    }
+    if !args.print.is_empty() || !args.print_to_file.is_empty() {
+        args.no_skip = true;
+    }
+    if !args.print.is_empty() {
+        args.quiet = true;
+    }
+    // Upstream `output` section: files for logs, unsupported and failed
+    // URLs, `mode: null` and printing skipped files.
+    let mut print_skipped = true;
+    if let Some(output) = globals
+        .and_then(|g| g.get("output"))
+        .and_then(serde_json::Value::as_object)
+    {
+        let path = |key: &str| {
+            let value = output.get(key)?;
+            let raw = value
+                .as_str()
+                .or_else(|| value.get("path").and_then(serde_json::Value::as_str))?;
+            Some(gallery_dl_rs::postprocess::expand_path(raw))
+        };
+        if args.write_log.is_none()
+            && let Some(file) = path("logfile")
+        {
+            gallery_dl_rs::logfile::start(&file)?;
+        }
+        if args.write_unsupported.is_none()
+            && let Some(file) = path("unsupportedfile")
+        {
+            gallery_dl_rs::unsupported::set_file(&file)?;
+        }
+        if args.error_file.is_none() {
+            args.error_file = path("errorfile");
+        }
+        match output.get("mode") {
+            Some(serde_json::Value::Bool(false)) => args.quiet = true,
+            Some(serde_json::Value::String(mode)) if mode.eq_ignore_ascii_case("null") => {
+                args.quiet = true
+            }
+            _ => {}
+        }
+        if output.get("skip") == Some(&serde_json::Value::Bool(false)) {
+            print_skipped = false;
+        }
+    }
+    let global_sleep = |key: &str| {
+        globals.and_then(|g| g.get(key)).and_then(|value| {
+            gallery_dl_rs::sleep::SleepRange::from_value(value)
+                .ok()
+                .flatten()
+        })
+    };
+    // Upstream `cookies-update` given a path writes session cookies there;
+    // `true` (rewriting the input cookie file) is not supported.
+    if args.cookies_export.is_none()
+        && let Some(path) = globals
+            .and_then(|g| g.get("cookies-update"))
+            .and_then(serde_json::Value::as_str)
+    {
+        args.cookies_export = Some(gallery_dl_rs::postprocess::expand_path(path));
+    }
+    args.sleep = args.sleep.or_else(|| global_sleep("sleep"));
+    args.sleep_extractor = args
+        .sleep_extractor
+        .or_else(|| global_sleep("sleep-extractor"));
+    args.sleep_skip = args.sleep_skip.or_else(|| global_sleep("sleep-skip"));
+    if let Some(downloader) = globals
+        .and_then(|g| g.get("downloader"))
+        .and_then(serde_json::Value::as_object)
+    {
+        if args.limit_rate.is_none()
+            && let Some(rate) = downloader.get("rate")
+        {
+            // A "MIN-MAX" range uses its upper bound.
+            let text = match rate {
+                serde_json::Value::String(text) => text.rsplit('-').next().unwrap_or("").to_owned(),
+                other => other.to_string(),
+            };
+            args.limit_rate = parse_bytes(&text).ok();
+        }
+        if downloader.get("mtime") == Some(&serde_json::Value::Bool(false)) {
+            args.no_mtime = true;
+        }
+        if let Some(ytdl) = downloader.get("ytdl") {
+            download::YtdlOptions::parse(ytdl)?.install();
+        }
+    }
+    match globals.and_then(|g| g.get("skip")) {
+        Some(serde_json::Value::Bool(false)) => args.no_skip = true,
+        Some(serde_json::Value::String(value)) => {
+            let (mode, limit) = value.split_once(':').unwrap_or((value, ""));
+            let limit = limit
+                .split(':')
+                .next()
+                .and_then(|n| n.parse::<u64>().ok())
+                .filter(|n| *n > 0);
+            match mode {
+                "abort" => args.abort = args.abort.or(limit),
+                "terminate" | "exit" => args.terminate = args.terminate.or(limit),
+                "enumerate" => return Err(error("skip: enumerate is not supported natively")),
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    let args = args;
+    let inputs = Inputs::with_actions(
+        args.urls.clone(),
+        args.input_files
+            .iter()
+            .map(|path| (path.clone(), None))
+            .chain(
+                args.input_file_comment
+                    .iter()
+                    .map(|path| (path.clone(), Some(InputAction::Comment))),
+            )
+            .chain(
+                args.input_file_delete
+                    .iter()
+                    .map(|path| (path.clone(), Some(InputAction::Delete))),
+            )
+            .collect(),
+    )?;
+    // Settings for inputs with inline `-KEY=VALUE` options, by input index and
+    // by option list. Leaked so that streams can borrow them like `settings`.
+    type SettingsMap = BTreeMap<&'static str, Settings>;
+    let input_settings = std::cell::RefCell::new(BTreeMap::<usize, &'static SettingsMap>::new());
+    let option_settings =
+        std::cell::RefCell::new(BTreeMap::<Vec<String>, &'static SettingsMap>::new());
+    let input_origins = std::cell::RefCell::new(BTreeMap::<usize, InputOrigin>::new());
+    let settings_for = |index: usize| -> &SettingsMap {
+        input_settings
+            .borrow()
+            .get(&index)
+            .copied()
+            .unwrap_or(&settings)
+    };
+    // Archives named only by inline options, created on first use.
+    let extra_archives =
+        std::sync::Mutex::new(BTreeMap::<PathBuf, &'static OnceCell<Result<Archive>>>::new());
     let extractors = Extractors {
         ytdl: args.ytdl_command.clone(),
         ytdl_cookies: ytdl_cookies(&args),
@@ -491,11 +1041,68 @@ async fn run(args: Args) -> Result<()> {
             })
             .collect()
     });
+    let job_configurations_for = |settings: &SettingsMap| {
+        std::sync::Arc::new(if args.dump_json || args.get_urls {
+            BTreeMap::new()
+        } else {
+            settings
+                .iter()
+                .filter_map(|(category, settings)| {
+                    settings.postprocessors.as_ref().map(|processors| {
+                        (
+                            (*category).to_owned(),
+                            gallery_dl_rs::postprocess::jobs::JobConfiguration {
+                                processors: processors.clone(),
+                                root: settings.options.base_directory.clone().unwrap(),
+                                filename: settings.filename.clone(),
+                                directory: settings.directory.clone(),
+                                init: settings.options.init.unwrap_or(false),
+                            },
+                        )
+                    })
+                })
+                .collect()
+        })
+    };
     let media = inputs
-        .stream()
+        .items()
         .take_while(|_| std::future::ready(!terminated.load(std::sync::atomic::Ordering::Acquire)))
         .enumerate()
-        .flat_map(|(index, source)| {
+        .then(|(index, item)| {
+            let (args, option_settings, input_settings, input_origins) =
+                (&args, &option_settings, &input_settings, &input_origins);
+            async move {
+                let item = match item {
+                    Ok(item) => item,
+                    Err(e) => return (index, Err(e), None),
+                };
+                if let Some(origin) = item.origin {
+                    input_origins.borrow_mut().insert(index, origin);
+                }
+                if item.options.is_empty() {
+                    return (index, Ok(item.url), None);
+                }
+                let cached = option_settings.borrow().get(&item.options).copied();
+                let custom = match cached {
+                    Some(custom) => custom,
+                    None => match resolved_settings(args, &item.options).await {
+                        Ok(custom) => {
+                            let custom: &'static SettingsMap = Box::leak(Box::new(custom));
+                            option_settings
+                                .borrow_mut()
+                                .insert(item.options.clone(), custom);
+                            custom
+                        }
+                        Err(e) => return (index, Err(e), None),
+                    },
+                };
+                input_settings.borrow_mut().insert(index, custom);
+                (index, Ok(item.url), Some(job_configurations_for(custom)))
+            }
+        })
+        .flat_map(|(index, source, custom_jobs)| {
+            let settings = settings_for(index);
+            let job_configurations = custom_jobs.unwrap_or_else(|| job_configurations.clone());
             if args.error_file.is_some()
                 && let Ok(source) = &source
             {
@@ -574,7 +1181,7 @@ async fn run(args: Args) -> Result<()> {
                         .ok()
                         .map(|url| &settings[settings_key(&url, args.extractor)]);
                     let input =
-                        extract_input(source, &extractors, &backend, args.extractor, &settings);
+                        extract_input(source, &extractors, &backend, args.extractor, settings);
                     let input = match args.sleep_extractor {
                         Some(delay) => stream::once(async move {
                             tokio::time::sleep(delay.sample()).await;
@@ -642,13 +1249,15 @@ async fn run(args: Args) -> Result<()> {
             })
         })
         .map(|(index, mut job)| {
-            settings[media_settings_key(&job.media, args.extractor, &settings)]
+            let settings = settings_for(index);
+            settings[media_settings_key(&job.media, args.extractor, settings)]
                 .network
                 .apply_media(&mut job.media);
             (index, job)
         })
-        .filter(|(_, job)| {
+        .filter(|(index, job)| {
             let item = &job.media;
+            let settings = settings_for(*index);
             if item.category == "twitter" && settings["twitter"].options.unique == Some(false) {
                 return std::future::ready(true);
             }
@@ -719,9 +1328,10 @@ async fn run(args: Args) -> Result<()> {
                 .insert(index);
         }
     } else if args.simulate {
-        while let Some((_, job)) = media.next().await {
+        while let Some((index, job)) = media.next().await {
             let item = &job.media;
-            let settings = &settings[media_settings_key(item, args.extractor, &settings)];
+            let settings = settings_for(index);
+            let settings = &settings[media_settings_key(item, args.extractor, settings)];
             match download::destination_with_templates(
                 settings.options.base_directory.as_ref().unwrap(),
                 item,
@@ -745,6 +1355,8 @@ async fn run(args: Args) -> Result<()> {
     } else {
         let client = download::client(Duration::from_secs(60))?
             .with_resume(args.resume)
+            .with_overwrite(args.no_skip)
+            .with_no_download(args.no_download)
             .with_http_mtime(!args.no_mtime)
             .with_metadata_mtime(args.mtime.clone())
             .with_sleep(args.sleep)
@@ -756,18 +1368,24 @@ async fn run(args: Args) -> Result<()> {
         let results = media
             .map(|(index, job)| {
                 let gallery_dl_rs::postprocess::jobs::JobMedia { media: item, scope } = job;
-                let settings = &settings[media_settings_key(&item, args.extractor, &settings)];
+                let settings = settings_for(index);
+                let settings = &settings[media_settings_key(&item, args.extractor, settings)];
                 let client = client
                     .clone()
                     .with_timeout(settings.options.timeout.unwrap())
                     .with_fallback(settings.options.fallback.unwrap_or(true));
                 let cell = &settings.download_client;
                 let destination = settings.options.base_directory.as_ref().unwrap();
-                let archive = settings
-                    .options
-                    .archive
-                    .as_ref()
-                    .map(|path| (&archives[path], path));
+                let archive = settings.options.archive.as_ref().map(|path| {
+                    let cell = archives.get(path).unwrap_or_else(|| {
+                        *extra_archives
+                            .lock()
+                            .expect("archive map lock poisoned")
+                            .entry(path.clone())
+                            .or_insert_with(|| Box::leak(Box::new(OnceCell::new())))
+                    });
+                    (cell, path)
+                });
                 let filename = settings.filename.as_ref();
                 let options = DownloadOptions {
                     postprocessor_scope: None,
@@ -877,16 +1495,13 @@ async fn run(args: Args) -> Result<()> {
                     if !args.quiet {
                         eprintln!("downloaded {}", path.display());
                     }
-                    for command in &args.exec {
-                        if let Err(e) = gallery_dl_rs::exec::run(command, Some(&path)).await {
-                            eprintln!("postprocessing failed for {}: {e}", path.display());
-                            failed.set(failed.get() + 1);
-                        }
-                    }
                 }
                 Ok(ArchiveOutcome::Completed(Outcome::Skipped(path))) => {
-                    if !args.quiet {
+                    if !args.quiet && print_skipped {
                         eprintln!("skipped {}", path.display())
+                    }
+                    if let Some(sleep) = &args.sleep_skip {
+                        sleep.wait().await;
                     }
                 }
                 Ok(ArchiveOutcome::Completed(Outcome::Filtered(reason))) => {
@@ -907,10 +1522,34 @@ async fn run(args: Args) -> Result<()> {
             }
         }
     }
-    for command in &args.exec_after {
-        if let Err(e) = gallery_dl_rs::exec::run(command, None).await {
-            eprintln!("postprocessing failed: {e}");
+    if let Some(path) = &args.cookies_export {
+        let mut jar = CookieJar::default();
+        fn cell<T>(result: Option<&Result<T>>) -> Option<&T> {
+            result.and_then(|r| r.as_ref().ok())
+        }
+        for snapshot in cell(extractors.instagram.get())
+            .map(Instagram::cookie_snapshot)
+            .into_iter()
+            .chain(cell(extractors.twitter.get()).map(Twitter::cookie_snapshot))
+            .chain(cell(extractors.facebook.get()).map(Facebook::cookie_snapshot))
+            .chain(extractors.sites.cookie_snapshots())
+        {
+            jar.extend(snapshot);
+        }
+        if let Err(e) = tokio::fs::write(path, jar.to_netscape()).await {
+            eprintln!("cannot export cookies to {}: {e}", path.display());
             failed.set(failed.get() + 1);
+        }
+    }
+    {
+        let failed_inputs = failed_inputs.borrow();
+        let origins = input_origins.borrow();
+        let succeeded = origins
+            .iter()
+            .filter(|(index, _)| !failed_inputs.contains(index))
+            .map(|(_, origin)| origin);
+        if let Err(e) = gallery_dl_rs::input::apply(succeeded) {
+            eprintln!("unable to update input file: {e}");
         }
     }
     if let Some(path) = &args.error_file {
@@ -1106,9 +1745,44 @@ fn child_queue<'a>(
         (routed_site(&url, extractor).is_some()
             || extract::direct(&url).is_some()
             || matches!(extractor, Extractor::Compatibility))
-        .then(|| extract_input(url.to_string(), extractors, backend, extractor, settings))
+        .then_some(())
+        .filter(|_| {
+            CHILD_FILTER
+                .get()
+                .is_none_or(|filter| filter.allows(settings_category(&url, extractor)))
+        })
+        .map(|_| extract_input(url.to_string(), extractors, backend, extractor, settings))
     })
 }
+
+/// Upstream `whitelist`/`blacklist` for child extractors of external URLs,
+/// by category (`CATEGORY` or `CATEGORY:*`; subcategory entries are ignored).
+struct ChildFilter {
+    categories: Vec<String>,
+    whitelist: bool,
+}
+impl ChildFilter {
+    fn parse(list: &str, whitelist: bool) -> Self {
+        let categories = list
+            .split(',')
+            .filter_map(|item| {
+                let (category, subcategory) =
+                    item.trim().split_once(':').unwrap_or((item.trim(), ""));
+                (!category.is_empty() && category != "*" && matches!(subcategory, "" | "*"))
+                    .then(|| category.to_owned())
+            })
+            .collect();
+        Self {
+            categories,
+            whitelist,
+        }
+    }
+    fn allows(&self, category: &str) -> bool {
+        self.categories.iter().any(|c| c == category) == self.whitelist
+    }
+}
+
+static CHILD_FILTER: std::sync::OnceLock<ChildFilter> = std::sync::OnceLock::new();
 
 fn extract_input<'a>(
     source: String,
@@ -1864,6 +2538,7 @@ fn extract_input<'a>(
                             browser: configured.browser_spec.clone(),
                             proxy: configured.network.proxy().map(str::to_owned),
                             user_agent: configured.network.user_agent().map(str::to_owned),
+                            extra_args: configured.network.backend_args(),
                             retweets: (category == "twitter")
                                 .then_some(options.retweets)
                                 .flatten(),
@@ -2042,6 +2717,7 @@ fn extract_input<'a>(
                     browser: configured.browser_spec.clone(),
                     proxy: configured.network.proxy().map(str::to_owned),
                     user_agent: configured.network.user_agent().map(str::to_owned),
+                            extra_args: configured.network.backend_args(),
                     options: configured.cli_options.clone(),
                     ..BackendOptions::default()
                 },
@@ -2111,7 +2787,171 @@ impl Settings {
     }
 }
 
-async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Settings>> {
+/// Configured process-wide upstream options (`skip`, `download`), read with
+/// the first settings.
+static GLOBAL_OPTIONS: std::sync::OnceLock<serde_json::Map<String, serde_json::Value>> =
+    std::sync::OnceLock::new();
+
+/// Upstream `-E/--extractor-info` (`InfoJob`).
+fn print_extractor_info(
+    source: &str,
+    settings: &BTreeMap<&'static str, Settings>,
+    extractor: Extractor,
+) -> Result<()> {
+    let url = extract::http_url(source)?;
+    let json = |value: &serde_json::Value| value.to_string();
+    let category = settings_category(&url, extractor);
+    let configured = settings.get(category).map(|s| &s.options);
+    let custom = |title: &str, value: Option<serde_json::Value>, default: serde_json::Value| {
+        let empty = matches!(&default, serde_json::Value::Null)
+            || default.as_str() == Some("")
+            || default.as_array().is_some_and(Vec::is_empty);
+        if let Some(value) = value {
+            println!("{title} (custom):\n  {}", json(&value));
+            println!("{title} (default):\n  {}\n", json(&default));
+        } else if !empty {
+            println!("{title} (default):\n  {}\n", json(&default));
+        }
+    };
+    let filename = configured.and_then(|o| o.filename.clone()).map(Into::into);
+    let directory = configured
+        .and_then(|o| o.directory.clone())
+        .map(|d| serde_json::json!(d));
+    let site_option = |key: &str| {
+        configured
+            .and_then(|o| o.site_options.as_ref())
+            .and_then(|o| o.get(key))
+            .cloned()
+    };
+    match gallery_dl_rs::sites::find(&url) {
+        Some(site) => {
+            for route in site.routes {
+                println!(
+                    "Category / Subcategory\n  {} / {}\n",
+                    json(&site.category.into()),
+                    json(&route.subcategory.into())
+                );
+                custom("Filename format", filename.clone(), route.filename.into());
+                custom(
+                    "Directory format",
+                    directory.clone(),
+                    serde_json::json!(route.directory),
+                );
+                custom(
+                    "Archive format",
+                    site_option("archive-format"),
+                    route.archive.into(),
+                );
+                custom(
+                    "Request interval",
+                    site_option("sleep-request"),
+                    serde_json::Value::Null,
+                );
+            }
+        }
+        None => {
+            println!(
+                "Category / Subcategory\n  {} / \"\"\n",
+                json(&category.into())
+            );
+            custom("Filename format", filename, serde_json::Value::Null);
+            custom("Directory format", directory, serde_json::Value::Null);
+        }
+    }
+    Ok(())
+}
+
+/// Upstream `PrintAction`: a metadata postprocessor writing FORMAT.
+fn print_postprocessor(value: &str, file: Option<&str>) -> Option<serde_json::Value> {
+    const EVENTS: &[&str] = &[
+        "init",
+        "file",
+        "after",
+        "skip",
+        "error",
+        "prepare",
+        "prepare-after",
+        "post",
+        "post-after",
+        "finalize",
+        "finalize-success",
+        "finalize-error",
+        "child",
+        "child-after",
+    ];
+    let (event, format) = match value.split_once(':') {
+        Some((event, format)) if EVENTS.contains(&event.trim().to_lowercase().as_str()) => {
+            (event.trim().to_lowercase(), format.to_owned())
+        }
+        _ => ("prepare".to_owned(), value.to_owned()),
+    };
+    if format.is_empty() {
+        return None;
+    }
+    let mut format = match format.strip_prefix("\\f") {
+        Some(rest) => format!("\u{000c}{rest}"),
+        None => format,
+    };
+    if let Some(rest) = format.strip_prefix('\u{000c}') {
+        if rest.starts_with('F') && !format.ends_with('\n') {
+            format.push('\n');
+        }
+    } else if !format.contains('{') && !format.contains(' ') {
+        format = format!("{{{format}}}\n");
+    } else if !format.ends_with('\n') {
+        format.push('\n');
+    }
+    let (base, filename, open) = match file {
+        None => (".".to_owned(), "-".to_owned(), "w"),
+        Some(path) => {
+            let path = std::path::Path::new(path);
+            let base = path
+                .parent()
+                .map(|p| p.to_string_lossy().into_owned())
+                .filter(|p| !p.is_empty())
+                .unwrap_or_else(|| ".".into());
+            let name = path.file_name()?.to_string_lossy().into_owned();
+            (base, name, "a")
+        }
+    };
+    Some(serde_json::json!({
+        "name": "metadata",
+        "event": event,
+        "filename": filename,
+        "base-directory": base,
+        "content-format": format,
+        "open": open,
+    }))
+}
+
+/// Upstream's `--ugoira FMT` postprocessor presets.
+fn ugoira_postprocessor(format: &str) -> Result<serde_json::Value> {
+    use serde_json::json;
+    let mut pp = match format.trim().to_lowercase().as_str() {
+        "webm" | "vp9" => json!({"extension": "webm", "ffmpeg-args":
+            ["-c:v", "libvpx-vp9", "-crf", "12", "-b:v", "0", "-pix_fmt", "yuv420p", "-an"]}),
+        "vp9-lossless" => json!({"extension": "webm", "ffmpeg-args":
+            ["-c:v", "libvpx-vp9", "-lossless", "1", "-pix_fmt", "yuv420p", "-an"]}),
+        "vp8" => json!({"extension": "webm", "ffmpeg-args":
+            ["-c:v", "libvpx", "-crf", "4", "-b:v", "5M", "-pix_fmt", "yuv420p", "-an"]}),
+        "mp4" => json!({"extension": "mp4", "libx264-prevent-odd": true, "ffmpeg-args":
+            ["-c:v", "libx264", "-b:v", "5M", "-pix_fmt", "yuv420p", "-an"]}),
+        "gif" => json!({"extension": "gif", "repeat-last-frame": false, "ffmpeg-args":
+            ["-filter_complex", "[0:v] split [a][b];[a] palettegen [p];[b][p] paletteuse"]}),
+        "mkv" | "copy" => json!({"extension": "mkv", "repeat-last-frame": false,
+            "ffmpeg-args": ["-c:v", "copy"]}),
+        "zip" | "archive" => json!({"mode": "archive"}),
+        _ => return Err(error(format!("Unsupported Ugoira format '{format}'"))),
+    };
+    pp["name"] = "ugoira".into();
+    pp["whitelist"] = json!(["pixiv", "danbooru"]);
+    Ok(pp)
+}
+
+async fn resolved_settings(
+    args: &Args,
+    extra: &[String],
+) -> Result<BTreeMap<&'static str, Settings>> {
     let discovered = if args.native_config.is_none() && !args.native_config_ignore {
         default_native_config()
     } else {
@@ -2120,12 +2960,82 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
     let mut options = args
         .options
         .iter()
+        .chain(extra)
         .map(|option| gallery_dl_rs::config::parse_option(option))
         .collect::<Result<Vec<_>>>()?;
     // Upstream CLI postprocessor shortcuts.
     use gallery_dl_rs::config::CliOption;
     for name in &args.postprocessor {
         options.push(CliOption::postprocessor(serde_json::json!(name)));
+    }
+    for command in &args.exec {
+        options.push(CliOption::postprocessor(
+            serde_json::json!({"name": "exec", "command": command}),
+        ));
+    }
+    for command in &args.exec_after {
+        options.push(CliOption::postprocessor(
+            serde_json::json!({"name": "exec", "command": command, "event": "finalize"}),
+        ));
+    }
+    let ugoira = args
+        .ugoira
+        .iter()
+        .map(String::as_str)
+        .chain(args.ugoira_conv.then_some("vp8"))
+        .chain(args.ugoira_conv_lossless.then_some("vp9-lossless"))
+        .chain(args.ugoira_conv_copy.then_some("copy"));
+    for format in ugoira {
+        options.push(gallery_dl_rs::config::parse_option(
+            "extractor.ugoira=original",
+        )?);
+        options.push(CliOption::postprocessor(ugoira_postprocessor(format)?));
+    }
+    if let Some(format) = &args.rename {
+        options.push(CliOption::postprocessor(
+            serde_json::json!({"name": "rename", "from": format}),
+        ));
+    }
+    if let Some(format) = &args.rename_to {
+        options.push(CliOption::postprocessor(
+            serde_json::json!({"name": "rename", "to": format}),
+        ));
+    }
+    for format in &args.print {
+        options.extend(print_postprocessor(format, None).map(CliOption::postprocessor));
+    }
+    for pair in args.print_to_file.chunks(2) {
+        options.extend(
+            print_postprocessor(&pair[0], pair.get(1).map(String::as_str))
+                .map(CliOption::postprocessor),
+        );
+    }
+    if args.zip {
+        options.push(CliOption::postprocessor(serde_json::json!("zip")));
+    }
+    if args.cbz {
+        options.push(CliOption::postprocessor(
+            serde_json::json!({"name": "zip", "extension": "cbz"}),
+        ));
+    }
+    if args.mtime_from_date {
+        options.push(CliOption::postprocessor(
+            serde_json::json!({"name": "mtime", "value": "{date|status[date]}"}),
+        ));
+    }
+    if !args.postprocessor_options.is_empty() {
+        let mut values = serde_json::Map::new();
+        for option in &args.postprocessor_options {
+            let option = gallery_dl_rs::config::parse_option(option)?;
+            values.insert(option.key, option.value);
+        }
+        options.push(CliOption {
+            path: Vec::new(),
+            key: "postprocessor-options".into(),
+            value: values.into(),
+            raw: String::new(),
+            append: false,
+        });
     }
     if args.write_info_json {
         options.push(CliOption::postprocessor(serde_json::json!({
@@ -2144,16 +3054,186 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         .filter(|option| option.path.first().is_some_and(|part| part == "extractor"))
         .map(|option| option.raw.clone())
         .collect();
-    let config = match args.native_config.as_ref().or(discovered.as_ref()) {
+    // Natively, -c/--config names an upstream configuration file read in place
+    // of the native one.
+    let native_upstream = args
+        .config
+        .as_ref()
+        .filter(|_| matches!(args.extractor, Extractor::Native));
+    let config = match args
+        .native_config
+        .as_ref()
+        .or(native_upstream)
+        .or(discovered.as_ref())
+    {
         Some(path) => Config::load_with_options(path, &options).await?,
         None if options.is_empty() => Config::default(),
         None => Config::parse_with_options(b"{}", &std::env::current_dir()?, &options)?,
     };
+    // Upstream -u/-p set root-level options, which every scope may override.
+    let credentials = |username: Option<String>, password: Option<String>| {
+        let mut site = serde_json::Map::new();
+        if let Some(username) = &username {
+            site.insert("username".into(), username.clone().into());
+        }
+        if let Some(password) = &password {
+            site.insert("password".into(), password.clone().into());
+        }
+        (
+            username,
+            password,
+            (!site.is_empty()).then(|| Arc::new(site)),
+        )
+    };
+    let (username, password, mut site_options) =
+        credentials(args.username.clone(), args.password.clone());
+    if args.write_pages {
+        Arc::make_mut(site_options.get_or_insert_with(Default::default))
+            .insert("write-pages".into(), true.into());
+    }
+    // Upstream --sleep-* options are root-level too; registry sites read them.
+    for (key, value) in [
+        ("sleep-request", &args.sleep_request),
+        ("sleep-retries", &args.sleep_retries),
+        ("sleep-429", &args.sleep_429),
+    ] {
+        if let Some(value) = value {
+            gallery_dl_rs::sleep::SleepRange::parse(value)?;
+            Arc::make_mut(site_options.get_or_insert_with(Default::default))
+                .insert(key.into(), value.clone().into());
+        }
+    }
+    let _ = GLOBAL_OPTIONS.set({
+        let mut globals = config.globals().clone();
+        for section in ["downloader", "output"] {
+            if let Some(value) = config.sections().get(section) {
+                globals.insert(section.into(), value.clone());
+            }
+        }
+        globals
+    });
+    // Upstream `config2("whitelist-tags", "tags-whitelist")`, then blacklist.
+    let global = |key: &str| {
+        config
+            .globals()
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+    };
+    let whitelist = args
+        .tags_whitelist
+        .clone()
+        .or_else(|| global("whitelist-tags"))
+        .or_else(|| global("tags-whitelist"))
+        .filter(|list| !list.is_empty());
+    let blacklist = args
+        .tags_blacklist
+        .clone()
+        .or_else(|| global("blacklist-tags"))
+        .or_else(|| global("tags-blacklist"))
+        .filter(|list| !list.is_empty());
+    if whitelist.as_deref() == Some("/import") || blacklist.as_deref() == Some("/import") {
+        eprintln!("warning: Blacklist import unsupported");
+    }
+    let tags = match (whitelist, blacklist) {
+        (Some(list), _) if list != "/import" => {
+            Some(gallery_dl_rs::tag_filter::TagFilter::parse(&list, true))
+        }
+        (None, Some(list)) if list != "/import" => {
+            Some(gallery_dl_rs::tag_filter::TagFilter::parse(&list, false))
+        }
+        _ => None,
+    };
+    if let Some(map) = config.globals().get("extension-map") {
+        gallery_dl_rs::path_options::set_extension_map(map)?;
+    }
+    let mut path_options = config.globals().clone();
+    path_options.retain(|key, _| key.starts_with("path-"));
+    if let Some(value) = &args.restrict_filenames {
+        path_options.insert("path-restrict".into(), value.clone().into());
+    } else if args.windows_filenames {
+        path_options.insert("path-restrict".into(), "windows".into());
+    }
+    if let Some(options) = gallery_dl_rs::path_options::PathOptions::parse(&path_options)? {
+        options.install();
+    }
+    // Upstream `downloader` section defaults, below extractor settings.
+    let downloader = config
+        .sections()
+        .get("downloader")
+        .and_then(serde_json::Value::as_object);
+    let downloader_number = |key: &str| {
+        downloader
+            .and_then(|d| d.get(key))
+            .and_then(serde_json::Value::as_f64)
+            .filter(|value| *value >= 0.0)
+    };
+    let downloader_verify = downloader
+        .and_then(|d| d.get("verify"))
+        .and_then(serde_json::Value::as_bool)
+        != Some(false);
     let defaults = ConfigOptions {
         base_directory: Some(PathBuf::from("downloads")),
-        retries: Some(2),
-        timeout: Some(Duration::from_secs(60)),
+        retries: Some(downloader_number("retries").map_or(2, |retries| retries.min(10.0) as u8)),
+        timeout: Some(
+            downloader_number("timeout")
+                .filter(|timeout| *timeout > 0.0)
+                .map_or(Duration::from_secs(60), Duration::from_secs_f64),
+        ),
+        username,
+        password,
+        site_options,
         ..ConfigOptions::default()
+    };
+    // Process-wide upstream options that also have CLI forms.
+    let global_str = |key: &str| {
+        config.globals().get(key).and_then(|value| match value {
+            serde_json::Value::String(text) => Some(text.clone()),
+            serde_json::Value::Number(number) => Some(number.to_string()),
+            serde_json::Value::Array(items) => Some(
+                items
+                    .iter()
+                    .map(|item| item.to_string().trim_matches('"').to_owned())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
+            _ => None,
+        })
+    };
+    let geo_bypass = args.xff.clone().or_else(|| global_str("geo-bypass"));
+    let source_address = match args.source_address {
+        Some(address) => Some(address),
+        // Upstream also accepts `[address, port]`; the port is ignored.
+        None => match config.globals().get("source-address") {
+            Some(serde_json::Value::String(text)) => Some(
+                text.parse()
+                    .map_err(|_| error("source-address must be an IP address"))?,
+            ),
+            Some(serde_json::Value::Array(items)) => Some(
+                items
+                    .first()
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|text| text.parse().ok())
+                    .ok_or_else(|| error("source-address must be an IP address"))?,
+            ),
+            _ => None,
+        },
+    };
+    let netrc_enabled =
+        args.netrc || config.globals().get("netrc") == Some(&serde_json::Value::Bool(true));
+    let netrc = if netrc_enabled {
+        match gallery_dl_rs::netrc::default_path() {
+            Some(path) => match tokio::fs::read_to_string(&path).await {
+                Ok(text) => Some(text),
+                Err(e) => {
+                    eprintln!("netrc: {e}");
+                    None
+                }
+            },
+            None => None,
+        }
+    } else {
+        None
     };
     let overrides = ConfigOptions {
         init: None,
@@ -2321,7 +3401,30 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             Some((base, class)) => config.resolve_class(base, class)?,
             None => config.resolve(category)?,
         };
-        let options = defaults.overlay(&resolved).overlay(&overrides);
+        let mut options = defaults.overlay(&resolved).overlay(&overrides);
+        if let Some(archive) = &options.archive {
+            let base = category.split('.').next().unwrap_or(category);
+            options.archive = Some(gallery_dl_rs::config::render_archive(archive, base));
+        }
+        let has_username = options.username.as_ref().is_some_and(|u| !u.is_empty())
+            || options
+                .site_options
+                .as_ref()
+                .and_then(|o| o.get("username"))
+                .is_some_and(|u| u.as_str().is_some_and(|u| !u.is_empty()));
+        if !has_username
+            && let Some(text) = &netrc
+            && let Some((login, password)) =
+                gallery_dl_rs::netrc::lookup(text, category.split('.').next().unwrap_or(category))
+        {
+            let (username, password, site) = credentials(Some(login), Some(password));
+            options = options.overlay(&ConfigOptions {
+                username,
+                password,
+                site_options: site,
+                ..ConfigOptions::default()
+            });
+        }
         let browser_spec = args.cookies_from_browser.clone().or_else(|| {
             options.browser_cookies.as_ref().map(|profile| {
                 // Config parsing has already checked that this path is UTF-8.
@@ -2380,9 +3483,17 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
             .filter(|clauses| !clauses.is_empty())
             .map(FilterExpression::parse_all)
             .transpose()?;
-        let post_selection = (post_range.is_some() || post_filter.is_some())
-            .then(|| PostSelection::new(post_range, post_filter));
-        let network = NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?;
+        let post_selection = (post_range.is_some() || post_filter.is_some() || tags.is_some())
+            .then(|| PostSelection::new(post_range, post_filter).with_tags(tags.clone()));
+        let network = NetworkOptions::new(options.proxy.clone(), options.user_agent.clone())?
+            .with_insecure(args.no_check_certificate || !downloader_verify)
+            .with_geo_bypass(geo_bypass.as_deref())?
+            .with_source_address(source_address.or_else(|| {
+                use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+                (args.force_ipv4)
+                    .then_some(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+                    .or(args.force_ipv6.then_some(IpAddr::V6(Ipv6Addr::UNSPECIFIED)))
+            }));
         let limits = SizeLimits::new(options.filesize_min, options.filesize_max)?;
         let child_range = options
             .child_range
@@ -2399,6 +3510,7 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         let postprocessors = options
             .postprocessors
             .as_ref()
+            .filter(|_| !args.no_postprocessors)
             .map(|config| {
                 config.specifications().map(|specs| {
                     std::sync::Arc::new(gallery_dl_rs::postprocess::Postprocessors::new(specs))
@@ -2427,4 +3539,35 @@ async fn resolved_settings(args: &Args) -> Result<BTreeMap<&'static str, Setting
         );
     }
     Ok(settings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn child_filters_match_categories_like_upstream_lists() {
+        let black = ChildFilter::parse("pixiv, twitter:*,*:user,danbooru:tag", false);
+        assert!(!black.allows("pixiv"));
+        assert!(!black.allows("twitter"));
+        assert!(black.allows("danbooru"));
+        let white = ChildFilter::parse("imgur", true);
+        assert!(white.allows("imgur"));
+        assert!(!white.allows("pixiv"));
+    }
+
+    #[test]
+    fn print_formats_follow_upstream_print_action() {
+        let pp = print_postprocessor("id", None).unwrap();
+        assert_eq!(pp["content-format"], "{id}\n");
+        assert_eq!(pp["event"], "prepare");
+        let pp = print_postprocessor("after:{a} {b}", Some("dir/out.txt")).unwrap();
+        assert_eq!(pp["event"], "after");
+        assert_eq!(pp["content-format"], "{a} {b}\n");
+        assert_eq!(pp["base-directory"], "dir");
+        assert_eq!(pp["open"], "a");
+        let pp = print_postprocessor("nope:{x}", None).unwrap();
+        assert_eq!(pp["content-format"], "nope:{x}\n");
+        assert!(print_postprocessor("", None).is_none());
+    }
 }

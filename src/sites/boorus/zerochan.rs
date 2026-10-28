@@ -191,10 +191,28 @@ fn tag_api<'a>(
             };
             let mut url = http.api(&format!("{ROOT}/{tag}"))?;
             url.query_pairs_mut().extend_pairs(&params);
-            let body = match http.json(&url).await {
-                Ok(body) => body,
-                Err(e) if not_found(&e) => return Ok(None),
-                Err(e) => return Err(e),
+            // Upstream warns about tag redirects and follows them only with
+            // the `redirects` option.
+            let body = loop {
+                match http.text_or_location(&url, &[]).await? {
+                    Err(target) => {
+                        eprintln!("warning: HTTP redirect to {target}");
+                        if !http.option_bool("redirects", false) {
+                            return Err(error(
+                                "zerochan tag redirected; set 'redirects' to follow",
+                            ));
+                        }
+                        url = target;
+                    }
+                    Ok((404, _)) => return Ok(None),
+                    Ok((status, _)) if status >= 400 => {
+                        return Err(error(format!("zerochan returned HTTP {status}")));
+                    }
+                    Ok((_, body)) => {
+                        break serde_json::from_str::<Value>(&body)
+                            .map_err(|_| error("zerochan returned invalid JSON"))?;
+                    }
+                }
             };
             let Some(posts) = body.get("items").and_then(Value::as_array) else {
                 return Ok(None);

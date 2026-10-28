@@ -229,7 +229,7 @@ fn scope_accumulation_and_common_precedence_match_actual_source_config_helpers()
     }
 }
 #[test]
-fn category_selector_bounds_qualifier_errors_and_unsupported_exec_are_private() {
+fn category_selector_bounds_qualifier_errors_and_unsupported_processors_are_private() {
     const PRIVATE: &str = "PRIVATE_SELECTOR_OR_EXEC_COMMAND";
     for selector in [
         json!(vec!["pixiv"; 129]),
@@ -250,7 +250,7 @@ fn category_selector_bounds_qualifier_errors_and_unsupported_exec_are_private() 
         };
         assert!(!error.to_string().contains(PRIVATE));
     }
-    let configuration = config(json!({"postprocessors":[{"name":"exec","command":PRIVATE}]}));
+    let configuration = config(json!({"postprocessors":[{"name":"python","function":PRIVATE}]}));
     let Err(error) = configuration
         .resolve("pixiv")
         .unwrap()
@@ -258,7 +258,7 @@ fn category_selector_bounds_qualifier_errors_and_unsupported_exec_are_private() 
         .unwrap()
         .specifications()
     else {
-        panic!("exec accepted")
+        panic!("python accepted")
     };
     assert!(!error.to_string().contains(PRIVATE));
     assert!(error.to_string().contains("supported: ugoira"));

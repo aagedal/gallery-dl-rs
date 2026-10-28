@@ -2625,7 +2625,7 @@ mod tests {
             title.push(c);
         }
         assert!(title.len() <= 150 && title.len() > 140);
-        assert_eq!(name, format!("77_01 {title} [abc].jpeg"));
+        assert_eq!(name, format!("77_01 {title} [abc].jpg"));
         assert_eq!(archive, r#"["{id}_{num}_{file_id}",["77","1","abc"]]"#);
 
         let (root, _server) = serve(vec![page(detail(photo_item("78", "")))]);
@@ -2712,7 +2712,7 @@ mod tests {
         assert_eq!(k["num"], 0);
         assert_eq!(k["subcategory"], "avatar");
         let (name, dir, _) = render(&files[0]);
-        assert_eq!(name, "42 @someone [av1].jpeg");
+        assert_eq!(name, "42 @someone [av1].jpg");
         assert_eq!(dir, std::path::PathBuf::from("tiktok/someone"));
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /@someone "));

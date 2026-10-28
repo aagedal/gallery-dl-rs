@@ -259,7 +259,7 @@ async fn only_filtered_and_ranged_existing_media_receive_sidecars_and_archive_re
             .arg(&archive)
             .args([
                 "-f",
-                "{filename}",
+                "{filename}.{extension}",
                 "--write-metadata",
                 "--filter",
                 "width >= 1000",

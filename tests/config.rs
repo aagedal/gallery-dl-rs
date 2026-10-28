@@ -167,12 +167,9 @@ fn browser_cookie_arrays_validate_every_scope_without_private_diagnostics() {
 
 #[test]
 fn unsupported_schema_and_values_fail_without_echoing_private_input() {
+    // Like upstream, unknown keys are ignored (or passed to registry sites)
+    // and `~`/`$VAR` in paths are expanded; see `upstream_configs_load`.
     for json in [
-        r#"{"secret-key":"secret-value"}"#,
-        r#"{"extractor":{"secret-key":"secret-value"}}"#,
-        r#"{"extractor":{"instagram":{"secret-key":"secret-value"}}}"#,
-        r#"{"extractor":{"instagram":{"post":{"cookies":"secret-value"}}}}"#,
-        r#"{"extractor":{"unsupported-site":{"cookies":"secret-value"}}}"#,
         r#"{"extractor":{"cookies":{"sessionid":"secret-value"}}}"#,
         r#"{"extractor":{"cookies":["secret-value"]}}"#,
         r#"{"extractor":{"filename":{"secret-value(":"{filename}"}}}"#,
@@ -181,7 +178,6 @@ fn unsupported_schema_and_values_fail_without_echoing_private_input() {
         r#"{"extractor":{"filename":"secret-value/{filename}"}}"#,
         r#"{"extractor":{"postprocessors":["ugoira", {"secret-value": true}, 1]}}"#,
         r#"{"extractor":{"archive":"postgresql://secret-value"}}"#,
-        r#"{"extractor":{"archive":"$secret-value"}}"#,
         r#"{"extractor":{"archive":"~secret-value"}}"#,
         r#"{"extractor":{"archive":["{secret-value}"]}}"#,
         r#"{"extractor":{"archive":"{secret-value}"}}"#,
@@ -3917,4 +3913,49 @@ fn danbooru_pool_order_aliases_and_falsy_resets_are_independent_of_kemono() {
             None
         );
     }
+}
+
+#[test]
+fn upstream_configs_load_with_unknown_keys_and_sections() {
+    let config = parse(
+        r#"{
+            "extractor": {
+                "sleep-request": 1.5,
+                "pixiv": {"unknown-option": 1, "ugoira": true},
+                "imgur": {"mp4": true}
+            },
+            "downloader": {"rate": "1M", "retries": 4},
+            "output": {"mode": "auto"},
+            "custom-root": false
+        }"#,
+    )
+    .unwrap();
+    assert_eq!(
+        config.sections()["downloader"]["retries"],
+        serde_json::json!(4)
+    );
+    let site = config.resolve("4chan").unwrap().site_options.unwrap();
+    assert_eq!(site["sleep-request"], serde_json::json!(1.5));
+    assert_eq!(site["custom-root"], serde_json::json!(false));
+    let pixiv = config.resolve("pixiv").unwrap();
+    assert_eq!(
+        pixiv.site_options.unwrap()["unknown-option"],
+        serde_json::json!(1)
+    );
+    assert!(parse(r#"{"extractor":{"password":"x"}}"#).is_err());
+}
+
+#[tokio::test]
+async fn yaml_and_toml_configurations_load_by_extension_or_declaration() {
+    let root = tempfile::tempdir().unwrap();
+    let yaml = root.path().join("c.yml");
+    std::fs::write(&yaml, "extractor:\n  imgur:\n    mp4: false\n").unwrap();
+    let config = Config::load(&yaml).await.unwrap();
+    assert_eq!(config.resolve("imgur").unwrap().mp4, Some(false));
+    let toml = root.path().join("c.conf");
+    std::fs::write(&toml, "[extractor.imgur]\nmp4 = true\n").unwrap();
+    assert!(Config::load(&toml).await.is_err());
+    gallery_dl_rs::config::set_format(&toml, gallery_dl_rs::config::Format::Toml);
+    let config = Config::load(&toml).await.unwrap();
+    assert_eq!(config.resolve("imgur").unwrap().mp4, Some(true));
 }

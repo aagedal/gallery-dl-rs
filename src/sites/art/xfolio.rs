@@ -1,8 +1,7 @@
 //! xfolio works, portfolios and series, mirroring
 //! gallery_dl/extractor/xfolio.py: work pages list their images, while
-//! portfolio and series pages queue their works. Upstream's logged-in
-//! `fullsize` ZIP download needs the `xfolio_session` cookie and is not
-//! implemented; works always download their per-image files.
+//! portfolio and series pages queue their works. With an `xfolio_session`
+//! cookie, purchased works download their full-size ZIP (`fullsize`).
 use crate::error;
 use crate::sites::art::{Scan, ext_from_url, extr, extract_iter};
 use crate::sites::{Events, Http, Item, Route, Site, unescape};
@@ -16,7 +15,7 @@ pub static SITE: Site = Site {
     extract,
     routes: &[&WORK, &USER, &SERIES],
     api_key: false,
-    cookies: None,
+    cookies: Some("xfolio.jp"),
 };
 
 const ROOT: &str = "https://xfolio.jp";
@@ -75,7 +74,12 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
         Some(Target::Work { creator, work_id }) => crate::sites::once(async move {
             let url = http.api(&format!("{ROOT}/portfolio/{creator}/works/{work_id}"))?;
             let html = http.text(&url).await?;
-            let items = parse_work(&html, &creator, &work_id);
+            let logged_in = Url::parse(ROOT)
+                .ok()
+                .and_then(|root| http.cookie(&root, "xfolio_session"))
+                .is_some();
+            let fullsize = logged_in && http.option_bool("fullsize", true);
+            let items = parse_work(&html, &creator, &work_id, fullsize);
             Ok(crate::sites::events(crate::sites::post(
                 &SITE, http, &WORK, items,
             )))
@@ -169,9 +173,22 @@ fn work_data(html: &str, creator: &str, work_id: &str) -> Map<String, Value> {
 }
 
 /// Upstream `_extract_files` for a logged-out session.
-fn parse_work(html: &str, creator: &str, work_id: &str) -> Vec<Item> {
+fn parse_work(html: &str, creator: &str, work_id: &str, fullsize: bool) -> Vec<Item> {
     let mut work = work_data(html, creator, work_id);
     let mut files = Vec::new();
+    // Upstream: a purchased work's full-size ZIP, when logged in.
+    if fullsize
+        && let Some(position) = html.find("-fullscale_download_")
+        && extr(&html[position..], "data-is-purchased=\"", "\"") == "1"
+    {
+        files.push((
+            "0".to_owned(),
+            format!("{ROOT}/user_asset.php?id={work_id}&type=work_zip"),
+            "zip".to_owned(),
+            Vec::new(),
+        ));
+    }
+    let image_files = files.is_empty();
     // Each wrapper up to the next one: wrappers may nest a `<div>` before
     // their `<img>`, so upstream's `</div>` end loses those images.
     let marker = "class=\"article__wrap_img";
@@ -181,7 +198,7 @@ fn parse_work(html: &str, creator: &str, work_id: &str) -> Vec<Item> {
         .filter(|rest| !rest.starts_with("_hide"))
         .map(|rest| &rest[..rest.find(marker).unwrap_or(rest.len())])
         .collect();
-    for img in wraps {
+    for img in wraps.into_iter().filter(|_| image_files) {
         let image_id = extr(img, "/fullscale_image?image_id=", "&");
         if !image_id.is_empty() {
             let url = format!(
@@ -256,6 +273,27 @@ fn parse_work(html: &str, creator: &str, work_id: &str) -> Vec<Item> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn purchased_works_download_the_fullsize_zip_when_logged_in() {
+        let html = r#"<a class="x-fullscale_download_btn" data-is-purchased="1"></a>
+<div class="article__wrap_img"><a href="/fullscale_image?image_id=5&work_id=9"><img src="x"></a></div>"#;
+        let items = super::parse_work(html, "c", "9", true);
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0].url.as_str(),
+            "https://xfolio.jp/user_asset.php?id=9&type=work_zip"
+        );
+        let items = super::parse_work(html, "c", "9", false);
+        assert!(items[0].url.as_str().contains("type=work_image"));
+        let unpurchased = html.replace("purchased=\"1\"", "purchased=\"0\"");
+        assert!(
+            super::parse_work(&unpurchased, "c", "9", true)[0]
+                .url
+                .as_str()
+                .contains("type=work_image")
+        );
+    }
+
     use super::*;
     use crate::sites::testing::{html, http, keywords, media, response, serve};
 

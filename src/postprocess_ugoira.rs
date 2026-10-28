@@ -100,7 +100,8 @@ fn arguments(value: Option<&Value>, default: &[&str]) -> Result<Vec<OsString>> {
         })
         .collect()
 }
-fn expanded(raw: &str) -> String {
+/// Python `os.path.expandvars(os.path.expanduser(raw))`.
+pub(crate) fn expanded(raw: &str) -> String {
     let raw = if raw == "~" || raw.starts_with("~/") {
         std::env::var("HOME")
             .map(|home| format!("{home}{}", &raw[1..]))

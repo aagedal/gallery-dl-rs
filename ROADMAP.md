@@ -1525,6 +1525,109 @@ date validator and inline text from metadata.
 Native Instagram, Facebook, and Twitter session initialization failures now remain local to
 their inputs, allowing unrelated direct links and other inputs to proceed.
 
+**Implemented postprocessor parity, 2026-10-28:** native configuration accepts
+upstream's `exec` (string and list commands, `commands`, `async`, `output`,
+`verbose`, `session`; non-zero exits warn), `classify`, `directory`, `zip`
+(`extension`, `compression` store/zip, `mode` safe, `files`, `keep-files`) and
+`rename` (`from`/`to`, `skip`, with the prepare-after recheck) processors.
+`--exec`/`--exec-after` now configure `exec` processors like upstream, and the
+`--zip`, `--cbz`, `--rename`, `--rename-to`, `--ugoira FMT`, `--ugoira-conv*`,
+`--mtime-from-date`, `-O/--postprocessor-option` and `--no-postprocessors`
+shortcuts are available. `--no-check-certificate`, `--source-address`, `-4` and
+`-6` apply to every native HTTP client and are forwarded to the compatibility
+backend. Repeated CLI options override earlier ones, as with argparse.
+`--no-skip` and `skip: false` replace existing files (the previous file is
+kept until the replacement completes) and bypass archive checks; `skip`
+values `abort:N`, `terminate:N` and `exit:N` map to `-A`/`-T`. The `compare`
+processor (`action` replace/enumerate, `shallow`) is supported.
+**Remaining:** compare `equal`, `skip: enumerate`, `python` (no native equivalent), exec `archive`/`success`/`error` actions, and
+bzip2/lzma zip compression.
+
+**Implemented input, auth and pacing options, 2026-10-28:** input files accept
+upstream's `-KEY=VALUE` (next URL) and `-G KEY=VALUE` (all following URLs)
+option lines; such inputs re-resolve their settings. `-I/--input-file-comment`
+and `-x/--input-file-delete` comment out or delete the lines of URLs that
+completed without errors (applied when the run ends, not after each URL).
+`-u/--username`, `-p/--password` and `--netrc` (machine = category) provide
+lowest-priority credentials. `--write-unsupported FILE` records queued URLs no
+extractor handles. Registry sites honor `sleep-request`, `sleep-retries` and
+`sleep-429` (CLI flags or site options); `--sleep-skip` waits after skipped
+files. `-v`, `-w`, `--no-part`, `--chunk-size`, `--no-colors`, `--no-input`
+and `--config-ignore` are accepted for compatibility.
+
+**Implemented path cleaning options, 2026-10-28:** `path-restrict` (auto,
+unix, windows, windows+, ascii, ascii+, character sets or mappings),
+`path-replace`, `path-remove` and `path-strip` are read process-wide from the
+root or `extractor` scope or `-o`, with `--restrict-filenames VALUE` and
+`--windows-filenames`. Separators and NUL are always replaced. Without them,
+native filename templates keep the conservative ASCII cleaning. `{filename}`
+now excludes the extension for every extractor, as upstream.
+**Remaining divergences:** the default base directory (`downloads` versus
+upstream `./gallery-dl/`) and direct links (`direct/<digest>_NAME` versus
+upstream `directlink` with `{domain}`, `{path}`, `{query}` and `{fragment}`).
+
+**Implemented output and configuration commands, 2026-10-28:** `-N/--print
+[EVENT:]FORMAT` and `--print-to-file [EVENT:]FORMAT FILE` configure metadata
+processors like upstream and imply `download: false`, which (also via
+`--no-download` or the `download` option) runs preparation and `after` hooks
+without fetching files; `-s` remains the separate simulation mode.
+`--config-status`, `--config-create` and `--config-open` manage the native
+configuration file. `-U/--update`, `--update-check` and `--update-to` report
+that self-updating is unsupported. `--xff` sends a random `X-Forwarded-For` address from CIDR blocks or
+country codes (upstream's table), `--blacklist`/`--whitelist` filter child
+extractors for external URLs by category, `--write-log` copies standard error
+(Unix), and the `--cache-*` commands report that no cache is kept. `-X` and
+`--compat` fail explicitly. `--tags-blacklist`/`--tags-whitelist` (and the
+`tags-*`/`*-tags` options) filter posts by tags with Danbooru-style rules;
+`/import` is unsupported. `-E/--extractor-info` prints each registry route's
+category, subcategory and formats (all routes of the matching site, since
+routes are chosen during extraction) with configured custom values. `--cookies-export FILE` writes the session cookies of Instagram, Twitter/X,
+Facebook and every initialized registry site as a Netscape file.
+`--write-pages` (and the `write-pages` option: `true`, `all`, `ALL`) dumps
+registry responses to numbered files in the working directory, and
+`--print-traffic` shows registry requests and response headers. Dedicated
+extractors (Instagram, Twitter/X, Facebook, ...) do not report traffic.
+Configuration files may be YAML (`.yaml`/`.yml`) or TOML (`.toml`), or be
+declared with `--config-json`, `--config-yaml` or `--config-toml`;
+`--config-type` selects the `--config-create` format. Every upstream 1.32.17
+command-line option is now accepted; `-X` and `--compat` fail explicitly and
+the update options report that self-updating is unsupported.
+
+**Implemented upstream configuration compatibility, 2026-10-28:** native
+configuration files now load typical upstream `config.json` files. Unknown
+keys are ignored by dedicated extractors and passed to registry sites with
+upstream's root → `extractor` → category inheritance; the `downloader`
+section's `rate`, `retries`, `timeout`, `verify` and `mtime` apply; `output`
+and `cache` are ignored. Credentials stay confined to supporting categories,
+and `base-directory`, `archive` and cookie-file paths expand `~` and
+environment variables. The `output` section's `logfile`, `unsupportedfile`, `errorfile` (paths or
+`{"path": ...}`), `mode: null`/`false` and `skip: false` apply.
+`archive` also accepts upstream's list-of-segments form with `{category}`,
+and archive parent directories are created on demand.
+Registry sites apply user `keywords`/`keywords-global` (with `keywords-eval`
+format strings), `metadata-url` and `metadata-version`; `cookies-update` with
+a path writes session cookies there (rewriting the input file with `true` is
+not supported). `downloader.ytdl` `format`, `cmdline-args` (whitespace-split strings or
+lists) and `config-file` apply to yt-dlp downloads; `raw-options` cannot.
+`sleep`, `sleep-extractor`, `sleep-skip`, `source-address`, `geo-bypass` and
+`netrc` are also read from the root/`extractor` configuration scope.
+Upstream's `extension-map` applies to every extractor (default: `jpeg`,
+`jpe`, `jfif`, `jif` and `jfi` become `jpg`).
+**Remaining:** other `output` options (log formats, progress, colors), `downloader.http`/`ytdl` subsections, format-string archive paths,
+relative paths resolve against the configuration directory rather than the
+working directory, and the default base directory differs (`downloads`).
+
+**Implemented OAuth helpers, 2026-10-28:** `oauth:pixiv` (PKCE with a pasted
+code), `oauth:deviantart`, `oauth:reddit`, `oauth:mastodon:INSTANCE`
+(registering an application for unknown instances), `oauth:tumblr`,
+`oauth:smugmug` and `oauth:flickr` (OAuth 1.0a) open the authorization page,
+receive the callback on `localhost:6414` (`extractor.oauth.host`/`port`), and
+print the token with the configuration key to set. Tokens are never cached.
+
+**Implemented special inputs, 2026-10-28:** `recursive:URL`/`r:URL` (also
+`file://` documents) queues every URL found, and `ytdl:URL` hands any HTTP(S)
+page to the yt-dlp site (metadata from `yt-dlp -J --flat-playlist`).
+
 ### Companion yt-dlp-rs integration
 
 Prefer an optional Rust library adapter once yt-dlp-rs has a stable, consumable

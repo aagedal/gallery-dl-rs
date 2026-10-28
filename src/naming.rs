@@ -30,6 +30,11 @@ const FIELDS: &[&str] = &[
     "name",
     "extension",
     "category",
+    "subcategory",
+    "domain",
+    "path",
+    "query",
+    "fragment",
     "post_id",
     "media_id",
     "shortcode",
@@ -465,14 +470,21 @@ impl FilenameTemplate {
                         }
                         return Err(error(format!("filename field {name} is missing")));
                     };
-                    output.extend(value.chars().map(safe_char));
+                    if crate::path_options::PathOptions::get().is_some() {
+                        output.push_str(&value);
+                    } else {
+                        output.extend(value.chars().map(safe_char));
+                    }
                     if output.len() > 65536 {
                         return Err(error("filename template output exceeds limits"));
                     }
                 }
             }
         }
-        let output: String = output.chars().map(safe_char).collect();
+        let output: String = match crate::path_options::PathOptions::get() {
+            Some(options) => options.clean(&output, directory_component),
+            None => output.chars().map(safe_char).collect(),
+        };
         let mut output = output.trim_matches('.').to_string();
         if output.is_empty() {
             return Err(error("filename template produced an empty basename"));
@@ -560,6 +572,13 @@ fn clean_source_segment(mut output: String, directory_component: bool) -> Result
     }
     if directory_component {
         output = output.trim().to_owned();
+    }
+    if let Some(options) = crate::path_options::PathOptions::get() {
+        let output = options.clean(&output, directory_component);
+        if matches!(output.as_str(), "." | "..") || output.is_empty() && !directory_component {
+            return Err(error("source filename must produce a safe basename"));
+        }
+        return Ok(output);
     }
     let output: String = output
         .chars()
@@ -963,11 +982,19 @@ fn lookup(
     {
         return context.get(name).map(|value| convert(value, name));
     }
+    if media.category == "direct"
+        && let Some((_, value)) = crate::filter::direct_keywords(&media.url)
+            .into_iter()
+            .find(|(key, _)| *key == name)
+    {
+        return Some(Value::Str(value));
+    }
     Some(match name {
-        // Legacy native filename includes its extension without a source snapshot.
-        "filename" => Value::Str(media.filename.clone()),
-        "name" => Value::Str(stem.into()),
-        "extension" => Value::Str(extension.into()),
+        // Like upstream, `filename` excludes the extension.
+        "filename" | "name" => Value::Str(stem.into()),
+        "extension" => Value::Str(
+            crate::path_options::map_extension(extension).unwrap_or_else(|| extension.into()),
+        ),
         "num" if metadata?.source_num.is_some() => convert(context.get("num")?, "num"),
         "num" if metadata?.pixiv_novel_metadata.is_some() => convert(context.get("num")?, "num"),
         "index" | "num" => match metadata?.index {

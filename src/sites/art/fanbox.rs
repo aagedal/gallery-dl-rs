@@ -679,7 +679,7 @@ mod tests {
             (Some("Hi"), Some("pack"), Some("f"))
         );
         let (file, dir) = crate::sites::default_templates(&files[0]).unwrap();
-        assert_eq!(file.render(&files[0]).unwrap(), "1910054_0.jpeg");
+        assert_eq!(file.render(&files[0]).unwrap(), "1910054_0.jpg");
         assert_eq!(
             dir.render(&files[0]).unwrap().unwrap(),
             std::path::PathBuf::from("fanbox/xub")

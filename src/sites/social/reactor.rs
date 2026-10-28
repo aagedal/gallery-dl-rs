@@ -348,7 +348,7 @@ mod tests {
         );
         assert_eq!(k["tags"], serde_json::json!(["anime", "art"]));
         let (file, _) = crate::sites::default_templates(&files[0]).unwrap();
-        assert_eq!(file.render(&files[0]).unwrap(), "4282_01_Title.jpeg");
+        assert_eq!(file.render(&files[0]).unwrap(), "4282_01_Title.jpg");
         server.join().unwrap();
     }
 }

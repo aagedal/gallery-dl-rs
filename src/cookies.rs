@@ -31,12 +31,13 @@ impl YtdlCookies {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct CookieJar {
     cookies: Vec<Cookie>,
 }
 
 // Deliberately omit Debug: session credentials must not appear in diagnostics.
+#[derive(Clone)]
 struct Cookie {
     domain: String,
     subdomains: bool,
@@ -289,6 +290,28 @@ impl CookieJar {
         self.cookies.extend(other.cookies);
     }
 
+    /// Netscape cookie file contents, like upstream's `cookies-update`.
+    pub fn to_netscape(&self) -> String {
+        let mut out = String::from("# Netscape HTTP Cookie File\n\n");
+        for cookie in &self.cookies {
+            let domain = if cookie.subdomains && !cookie.domain.starts_with('.') {
+                format!(".{}", cookie.domain)
+            } else {
+                cookie.domain.clone()
+            };
+            out.push_str(&format!(
+                "{domain}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+                if cookie.subdomains { "TRUE" } else { "FALSE" },
+                cookie.path,
+                if cookie.secure { "TRUE" } else { "FALSE" },
+                cookie.expires.max(0),
+                cookie.name,
+                cookie.value,
+            ));
+        }
+        out
+    }
+
     pub fn is_empty(&self) -> bool {
         self.cookies.is_empty()
     }
@@ -410,6 +433,19 @@ mod ytdl_tests {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn netscape_export_round_trips() {
+        let text = "# Netscape HTTP Cookie File\n.example.com\tTRUE\t/\tTRUE\t0\ta\t1\nhost.test\tFALSE\t/p\tFALSE\t2000000000\tb\t2\n";
+        let jar = CookieJar::parse(text).unwrap();
+        let exported = jar.to_netscape();
+        let again = CookieJar::parse(&exported).unwrap();
+        let url = url::Url::parse("https://www.example.com/").unwrap();
+        assert_eq!(again.value(&url, "a").as_deref(), Some("1"));
+        let url = url::Url::parse("http://host.test/p/x").unwrap();
+        assert_eq!(again.value(&url, "b").as_deref(), Some("2"));
+        assert_eq!(exported, again.to_netscape());
+    }
+
     use super::*;
 
     fn url(value: &str) -> Url {

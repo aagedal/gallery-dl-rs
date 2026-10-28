@@ -343,6 +343,8 @@ impl JobSelection {
                                 selection.post_selection.as_ref().is_none_or(|selection| {
                                     selection.filter.as_ref().is_none_or(|filter| {
                                         filter.matches_post(&post).unwrap_or(false)
+                                    }) && selection.tags.as_ref().is_none_or(|tags| {
+                                        tags.allows(crate::filter::post_tags(&post).as_deref())
                                     })
                                 });
                             if selected {

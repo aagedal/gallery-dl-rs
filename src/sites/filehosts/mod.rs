@@ -12,7 +12,7 @@ use std::time::Duration;
 use url::Url;
 
 mod bellazon;
-mod bunkr;
+pub(super) mod bunkr;
 mod chevereto;
 mod cyberdrop;
 mod cyberfile;
@@ -32,6 +32,7 @@ mod koofr;
 mod lensdump;
 mod lolisafe;
 mod mixdrop;
+mod recursive;
 mod telegraph;
 mod tenor;
 mod turbo;
@@ -99,6 +100,7 @@ pub(super) static SITES: &[&Site] = &[
     &itchio::SITE,
     &uploadir::SITE,
     &generic::SITE,
+    &recursive::SITE,
 ];
 
 // ---------------------------------------------------------------------------

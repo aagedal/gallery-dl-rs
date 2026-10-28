@@ -252,6 +252,9 @@ impl<'a> Api<'a> {
     ) -> futures_util::stream::BoxStream<'a, crate::Result<Vec<Value>>> {
         params.push(("lang".into(), "en".into()));
         params.push(("limit".into(), PER_PAGE.to_string()));
+        if self.http.option_bool("refresh", false) {
+            return self.keyset_refresh(endpoint, params);
+        }
         futures_util::stream::try_unfold((self, Some(params)), move |(api, state)| async move {
             let Some(mut params) = state else {
                 return Ok(None);
@@ -267,6 +270,99 @@ impl<'a> Api<'a> {
                     params
                 });
             Ok(Some((posts, (api, next))))
+        })
+        .boxed()
+    }
+}
+
+impl<'a> Api<'a> {
+    /// Upstream `refresh`: posts one at a time; once the first post's
+    /// download URL (`e=` expiry) is within a minute of expiring, the same
+    /// page is requested again and already yielded posts are skipped.
+    fn keyset_refresh(
+        self,
+        endpoint: &'static str,
+        params: Vec<(String, String)>,
+    ) -> futures_util::stream::BoxStream<'a, crate::Result<Vec<Value>>> {
+        struct State<'a> {
+            api: Api<'a>,
+            /// The current page's parameters, `None` after the last page.
+            params: Option<Vec<(String, String)>>,
+            /// Whether the current page was requested.
+            fetched: bool,
+            page: std::collections::VecDeque<Value>,
+            next: Option<Vec<(String, String)>>,
+            /// Posts of the current page already yielded.
+            offset: usize,
+            expires: i64,
+        }
+        let now = || {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64
+        };
+        let state = State {
+            api: self,
+            params: Some(params),
+            fetched: false,
+            page: Default::default(),
+            next: None,
+            offset: 0,
+            expires: 0,
+        };
+        futures_util::stream::try_unfold(state, move |mut state| async move {
+            loop {
+                if state.page.is_empty() {
+                    if state.fetched {
+                        state.params = state.next.take();
+                        state.fetched = false;
+                        state.offset = 0;
+                        state.expires = 0;
+                    }
+                    let Some(params) = state.params.clone() else {
+                        return Ok(None);
+                    };
+                    let data = state.api.call(endpoint, &params).await?;
+                    state.fetched = true;
+                    state.next =
+                        data["meta"]["next"]
+                            .as_str()
+                            .filter(|n| !n.is_empty())
+                            .map(|next| {
+                                let mut params = params.clone();
+                                params.retain(|(k, _)| k != "next");
+                                params.push(("next".into(), next.to_owned()));
+                                params
+                            });
+                    state.page = data["data"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .skip(state.offset)
+                        .collect();
+                    continue;
+                }
+                let post = state.page.pop_front().expect("nonempty page");
+                if state.expires == 0 {
+                    let expiry = post["file_url"]
+                        .as_str()
+                        .and_then(|url| crate::sites::extr(url, "e=", "&"))
+                        .and_then(|e| e.parse::<i64>().ok())
+                        .unwrap_or(0);
+                    state.expires = expiry - 60;
+                }
+                if state.expires > 0 && state.expires <= now() {
+                    // Request this page again; `offset` skips yielded posts.
+                    state.page.clear();
+                    state.fetched = false;
+                    state.expires = 0;
+                    continue;
+                }
+                state.offset += 1;
+                return Ok(Some((vec![post], state)));
+            }
         })
         .boxed()
     }
@@ -593,6 +689,34 @@ mod tests {
     fn post(id: &str) -> Value {
         json!({"id": id, "md5": "abc", "file_url": "http://v.sankakucomplex.com/data/ab/abc.jpg?e=1",
             "created_at": {"s": 1600000000}, "tag_names": ["bonocho", "1girl"], "has_notes": false})
+    }
+
+    #[tokio::test]
+    async fn refresh_requests_the_page_again_once_urls_expire() {
+        let with_expiry = |id: &str, e: &str| {
+            let mut post = post(id);
+            post["file_url"] =
+                format!("http://v.sankakucomplex.com/data/ab/{id}.jpg?e={e}&x=1").into();
+            post
+        };
+        let (root, server) = serve(vec![
+            reply(json!({"data": [with_expiry("a1", "100"), post("a2")], "meta": {"next": null}})),
+            reply(
+                json!({"data": [with_expiry("a1", "99999999999"), post("a2")], "meta": {"next": null}}),
+            ),
+        ]);
+        let options = json!({"refresh": true});
+        let http = client("sankaku", root).with_options(Some(std::sync::Arc::new(
+            options.as_object().unwrap().clone(),
+        )));
+        let files = media((SITE.extract)(
+            &http,
+            Url::parse("https://sankaku.app/?tags=bonocho").unwrap(),
+        ))
+        .await;
+        assert_eq!(files.len(), 2);
+        assert!(files[0].url.as_str().contains("e=99999999999"));
+        assert_eq!(server.join().unwrap().len(), 2);
     }
 
     #[tokio::test]

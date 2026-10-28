@@ -10,6 +10,7 @@ use crate::{
     cookies::CookieJar,
     error,
     network::NetworkOptions,
+    sleep::SleepRange,
     transport::{RateLimits, Redirects, retry_after},
 };
 use reqwest::{Client, StatusCode};
@@ -41,7 +42,55 @@ pub struct Http {
     cookies: std::sync::Mutex<CookieJar>,
     ytdl: std::path::PathBuf,
     ytdl_cookies: Option<crate::cookies::YtdlCookies>,
+    /// Upstream `sleep-request`, `sleep-retries` and `sleep-429`.
+    sleep_request: Option<SleepRange>,
+    sleep_retries: Option<SleepRange>,
+    sleep_429: Option<SleepRange>,
 }
+
+/// Upstream `--print-traffic`: show requests and responses on stderr.
+pub static PRINT_TRAFFIC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static DUMP_INDEX: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Upstream `_dump_response` for `write-pages`: `true` writes bodies, "all"
+/// adds headers without authentication values, "ALL" includes them.
+fn dump_response(
+    mode: &Value,
+    url: &Url,
+    status: StatusCode,
+    headers: &reqwest::header::HeaderMap,
+    body: &[u8],
+) {
+    let index = DUMP_INDEX.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let name: String = format!(
+        "{index:02}_{}",
+        crate::sites::gdl::re!(r#"[\\|/<>:"?*&=#]+"#).replace_all(url.as_str(), "_")
+    );
+    let name: String = name.chars().take(251).collect();
+    let mut out = Vec::new();
+    let with_headers = matches!(mode.as_str(), Some("all" | "ALL"));
+    if with_headers {
+        out.extend_from_slice(format!("{} {}\n", status.as_u16(), url).as_bytes());
+        for (key, value) in headers {
+            let value = if mode.as_str() != Some("ALL") && sensitive(key.as_str()) {
+                "***".to_owned()
+            } else {
+                String::from_utf8_lossy(value.as_bytes()).into_owned()
+            };
+            out.extend_from_slice(format!("{key}: {value}\n").as_bytes());
+        }
+        out.push(b'\n');
+    }
+    out.extend_from_slice(body);
+    match std::fs::write(format!("{name}.txt"), out) {
+        Ok(()) => eprintln!("Writing '{url}' response to '{name}.txt'"),
+        Err(e) => eprintln!("warning: Failed to dump HTTP request ({e})"),
+    }
+}
+
+/// Upstream `Extractor.request_timestamp`: when any extractor last sent a
+/// request, shared so `sleep-request` spaces requests across sites.
+static LAST_REQUEST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
 /// A request body.
 #[derive(Clone, Copy)]
@@ -54,6 +103,14 @@ pub enum Body<'b> {
 }
 
 impl Http {
+    /// A copy of the session cookies, for `--cookies-export`.
+    pub fn cookie_snapshot(&self) -> crate::cookies::CookieJar {
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
     pub fn new(name: &'static str, timeout: Duration) -> Result<Self> {
         let network = NetworkOptions::default();
         Ok(Self {
@@ -70,6 +127,9 @@ impl Http {
             cookies: std::sync::Mutex::new(CookieJar::default()),
             ytdl: "yt-dlp".into(),
             ytdl_cookies: None,
+            sleep_request: None,
+            sleep_retries: None,
+            sleep_429: None,
         })
     }
 
@@ -205,7 +265,41 @@ impl Http {
         options: Option<std::sync::Arc<serde_json::Map<String, Value>>>,
     ) -> Self {
         self.options = options;
+        let sleep = |key: &str| {
+            self.option(key).and_then(|value| {
+                SleepRange::from_value(value).unwrap_or_else(|_| {
+                    eprintln!("warning: invalid '{key}' value; ignoring it");
+                    None
+                })
+            })
+        };
+        let (request, retries, too_many) = (
+            sleep("sleep-request"),
+            sleep("sleep-retries"),
+            sleep("sleep-429"),
+        );
+        self.sleep_request = request;
+        self.sleep_retries = retries;
+        self.sleep_429 = too_many;
         self
+    }
+
+    /// Wait until `sleep-request` has passed since the last request.
+    async fn pace(&self) {
+        let Some(interval) = self.sleep_request else {
+            return;
+        };
+        let wait = {
+            let last = LAST_REQUEST.lock().unwrap_or_else(|e| e.into_inner());
+            last.map(|last| interval.sample().saturating_sub(last.elapsed()))
+        };
+        if let Some(wait) = wait.filter(|wait| !wait.is_zero()) {
+            tokio::time::sleep(wait).await;
+        }
+    }
+
+    fn mark_request(&self) {
+        *LAST_REQUEST.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::time::Instant::now());
     }
 
     /// A site-specific configuration value.
@@ -309,6 +403,30 @@ impl Http {
     /// One GET without status handling or redirects: status and body text,
     /// for sites whose error pages carry data (e.g. 429 challenges).
     pub async fn get_status(&self, url: &Url, headers: &[(&str, &str)]) -> Result<(u16, String)> {
+        self.get_unredirected(url, headers)
+            .await
+            .map(|(status, _, body)| (status, body))
+    }
+
+    /// GET without following redirects: the response text, or the
+    /// validated redirect target.
+    pub async fn text_or_location(
+        &self,
+        url: &Url,
+        headers: &[(&str, &str)],
+    ) -> Result<std::result::Result<(u16, String), Url>> {
+        let (status, location, body) = self.get_unredirected(url, headers).await?;
+        Ok(match location.filter(|_| (300..400).contains(&status)) {
+            Some(target) => Err(target),
+            None => Ok((status, body)),
+        })
+    }
+
+    async fn get_unredirected(
+        &self,
+        url: &Url,
+        headers: &[(&str, &str)],
+    ) -> Result<(u16, Option<Url>, String)> {
         self.rate_limits.wait(url, self.timeout).await?;
         let mut request = self.client.get(url.clone()).timeout(self.request_timeout);
         if let Some(cookie) = self.cookie_header(url) {
@@ -331,6 +449,17 @@ impl Http {
             .unwrap_or_else(|e| e.into_inner())
             .store_response(url, response.headers());
         let status = response.status().as_u16();
+        let location = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| value.len() <= 8192)
+            .and_then(|value| url.join(value).ok())
+            .filter(|target| {
+                matches!(target.scheme(), "http" | "https")
+                    && target.username().is_empty()
+                    && target.password().is_none()
+            });
         let content_type = content_type(response.headers()).map(str::to_owned);
         let bytes = response
             .bytes()
@@ -339,7 +468,11 @@ impl Http {
         if bytes.len() > MAX_RESPONSE {
             return Err(error(format!("{} response exceeded 16 MiB", self.name)));
         }
-        Ok((status, decode_text(&bytes, content_type.as_deref())))
+        Ok((
+            status,
+            location,
+            decode_text(&bytes, content_type.as_deref()),
+        ))
     }
 
     /// The status of one HEAD request without following redirects.
@@ -556,12 +689,23 @@ impl Http {
         body: Option<Body<'_>>,
         strict: bool,
     ) -> Result<(Vec<u8>, Url, reqwest::header::HeaderMap)> {
+        self.pace().await;
         tokio::time::timeout(self.timeout, async {
             for attempt in 0..=self.retries {
-                match self.attempt(url, headers, body, attempt, strict).await {
+                let result = self.attempt(url, headers, body, attempt, strict).await;
+                self.mark_request();
+                match result {
                     Ok(body) => return Ok(body),
                     Err(failure) if failure.retry && attempt < self.retries => {
-                        tokio::time::sleep(backoff(attempt)).await;
+                        let configured = if failure.rate_limited {
+                            self.sleep_429.or(self.sleep_retries)
+                        } else {
+                            self.sleep_retries
+                        };
+                        tokio::time::sleep(
+                            configured.map_or_else(|| backoff(attempt), |range| range.sample()),
+                        )
+                        .await;
                     }
                     Err(failure) => return Err(failure.error),
                 }
@@ -627,9 +771,25 @@ impl Http {
             for (key, value) in headers {
                 request = request.header(*key, *value);
             }
+            let traffic = PRINT_TRAFFIC.load(std::sync::atomic::Ordering::Relaxed);
+            if traffic {
+                eprintln!(
+                    "send: {} {target}",
+                    if body.is_some() { "POST" } else { "GET" }
+                );
+            }
             let response = request.send().await.map_err(|_| {
                 Failure::transient(format!("{name} request failed; check network access"))
             })?;
+            if traffic {
+                eprintln!("reply: {:?} {}", response.version(), response.status());
+                for (key, value) in response.headers() {
+                    eprintln!(
+                        "header: {key}: {}",
+                        String::from_utf8_lossy(value.as_bytes())
+                    );
+                }
+            }
             self.cookies
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -647,18 +807,18 @@ impl Http {
             let delay = retry_after(response.headers(), SystemTime::now());
             self.rate_limits
                 .defer(endpoint, delay.unwrap_or_else(|| backoff(attempt)));
-            return Err(Failure::transient(
-                if status == StatusCode::TOO_MANY_REQUESTS {
-                    match delay {
-                        Some(delay) => {
-                            format!("{name} rate limit; retry after {} seconds", delay.as_secs())
-                        }
-                        None => format!("{name} rate limit; retry later"),
+            let mut failure = Failure::transient(if status == StatusCode::TOO_MANY_REQUESTS {
+                match delay {
+                    Some(delay) => {
+                        format!("{name} rate limit; retry after {} seconds", delay.as_secs())
                     }
-                } else {
-                    format!("{name} returned HTTP {status}")
-                },
-            ));
+                    None => format!("{name} rate limit; retry later"),
+                }
+            } else {
+                format!("{name} returned HTTP {status}")
+            });
+            failure.rate_limited = status == StatusCode::TOO_MANY_REQUESTS;
+            return Err(failure);
         }
         if matches!(status.as_u16(), 404 | 410) {
             return Err(error(format!("{name} resource not found")).into());
@@ -686,11 +846,14 @@ impl Http {
             }
             bytes.extend_from_slice(&chunk);
         }
-        Ok((
-            crate::transport::decode_api_body(bytes, &headers, MAX_RESPONSE).await?,
-            target,
-            headers,
-        ))
+        let bytes = crate::transport::decode_api_body(bytes, &headers, MAX_RESPONSE).await?;
+        if let Some(mode) = self
+            .option("write-pages")
+            .filter(|_| self.option_bool("write-pages", false))
+        {
+            dump_response(mode, &target, status, &headers, &bytes);
+        }
+        Ok((bytes, target, headers))
     }
 }
 
@@ -781,6 +944,7 @@ fn backoff(attempt: u8) -> Duration {
 struct Failure {
     error: crate::Error,
     retry: bool,
+    rate_limited: bool,
 }
 
 impl Failure {
@@ -788,6 +952,7 @@ impl Failure {
         Self {
             error: error(message),
             retry: true,
+            rate_limited: false,
         }
     }
 }
@@ -797,6 +962,7 @@ impl From<crate::Error> for Failure {
         Self {
             error,
             retry: false,
+            rate_limited: false,
         }
     }
 }
@@ -805,6 +971,52 @@ impl From<crate::Error> for Failure {
 mod tests {
     use super::*;
     use crate::sites::testing::{http, json, response, serve};
+
+    #[tokio::test]
+    async fn write_pages_dumps_response_bodies() {
+        let (root, server) = serve(vec![json(serde_json::json!({"dumped": true}))]);
+        let options = serde_json::Map::from_iter([("write-pages".into(), "all".into())]);
+        let client = http("Test", root.clone()).with_options(Some(std::sync::Arc::new(options)));
+        client.json(&root.join("page").unwrap()).await.unwrap();
+        server.join().unwrap();
+        let dumped: Vec<_> = std::fs::read_dir(".")
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                name.ends_with(".txt") && name.contains(&format!("{}_page", root.port().unwrap()))
+            })
+            .collect();
+        assert_eq!(dumped.len(), 1);
+        let text = std::fs::read_to_string(dumped[0].path()).unwrap();
+        std::fs::remove_file(dumped[0].path()).unwrap();
+        assert!(text.starts_with("200 http://"), "{text}");
+        assert!(text.ends_with("{\"dumped\":true}"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn sleep_request_spaces_consecutive_requests() {
+        let body = || json(serde_json::json!({}));
+        let (root, server) = serve(vec![body(), body()]);
+        let options = serde_json::Map::from_iter([("sleep-request".into(), "0.3".into())]);
+        let client = http("Test", root.clone()).with_options(Some(std::sync::Arc::new(options)));
+        client.json(&root.join("a").unwrap()).await.unwrap();
+        let start = std::time::Instant::now();
+        client.json(&root.join("b").unwrap()).await.unwrap();
+        assert!(
+            start.elapsed() >= Duration::from_millis(250),
+            "{:?}",
+            start.elapsed()
+        );
+        server.join().unwrap();
+        let invalid = serde_json::Map::from_iter([("sleep-request".into(), "x".into())]);
+        assert!(
+            http("Test", root)
+                .with_options(Some(std::sync::Arc::new(invalid)))
+                .sleep_request
+                .is_none()
+        );
+    }
 
     #[tokio::test]
     async fn cookies_are_sent_and_updated_from_responses() {

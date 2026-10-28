@@ -77,8 +77,9 @@ and `/USER/highlights` URLs, root profiles, search, hashtags, likes, bookmarks,
 lists, home feeds, and community feeds.
 X conversation extraction is also available through scoped settings. Other
 unsupported profiles and album listings still need the compatibility backend.
-Native extraction does not fall back to that backend automatically. Native mode
-rejects `--config`, which contains gallery-dl settings.
+Native extraction does not fall back to that backend automatically. In native
+mode, `--config` names a gallery-dl configuration file that Rust reads in place
+of `--native-config`.
 Use `--native-config` for settings applied by Rust with either extractor backend.
 
 The native Instagram extractor reads Netscape cookies scoped to the API URL's domain, path,
@@ -2037,7 +2038,7 @@ order after the file, and are validated like file settings. Options under
       "filename": "{post_id}_{media_id}.{extension}"
     },
     "direct": {
-      "filename": "{filename}"
+      "filename": "{filename}.{extension}"
     }
   }
 }
@@ -2076,17 +2077,22 @@ extraction without creating configured destinations or opening archives.
 The CLI also accepts fractional `--timeout` seconds; zero, non-finite values, and
 timeouts outside the monotonic clock's range or precision are rejected.
 
-Files are limited to 1 MiB. Unknown settings/categories, duplicate keys, null settings
+Files are limited to 1 MiB. Like upstream, unknown settings are ignored by
+dedicated extractors and passed to registry sites, inheriting from the root
+and `extractor` scopes; the `downloader` section's `rate`, `retries`,
+`timeout`, `verify` and `mtime` apply, and `output`/`cache` are ignored.
+Credentials (`username`, `password`, `api-key`, tokens, client IDs) remain
+confined to the categories that support them. Duplicate keys, null settings
 (except the optional browser-array placeholders described above),
 unsupported types, executable hooks, and unsupported conditional values fail
-explicitly. Native processor events are described below. Processor directory
-options support home/environment expansion without shell execution; the other
-native configuration paths remain literal. Filenames use the native template subset described below; archive
+explicitly. Native processor events are described below. `base-directory`,
+`archive`, cookie files and processor directories support `~` and
+environment variable expansion without shell execution. Filenames use the native template subset described below; archive
 files use the Rust archive format.
 
 Like upstream, `filename` may be an object mapping filter expressions to
 templates and `directory` an object mapping them to component lists, e.g.
-`{"filename": {"media_type == 'video'": "{post_id}.{extension}", "": "{filename}"}}`.
+`{"filename": {"media_type == 'video'": "{post_id}.{extension}", "": "{filename}.{extension}"}}`.
 Conditions are tried in file order with the `--filter` evaluator; the first match
 wins, then the `""` entry, then the default name or category folder. Condition
 errors (such as missing keys) fail that file. A plain value or CLI flag in a
@@ -2366,7 +2372,7 @@ available from upstream.
   `{height_original}`, `{duration}`, `{bitrate}`, `{media_type}`/`{type}`,
   `{sensitive_flags}`, and `{source_id}`/`{source_username}`; X adds
   `{tweet_id}`, `{retweet_id}`, and `{quote_id}`, and Facebook adds `{id}`.
-  Outside boorus, `{filename}` includes the extension. `{url}` is
+  As upstream, `{filename}` excludes the extension. `{url}` is
   unavailable so signed transport URLs cannot leak into paths.
   Fields use gallery-dl's replacement-field syntax: `.key`/`[key]`, `[index]`,
   and `[start:stop]` accessors; `{a|b|'literal'}` alternatives; the `!l`, `!u`,

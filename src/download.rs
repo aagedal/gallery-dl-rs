@@ -22,6 +22,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tokio::io::AsyncWriteExt;
+pub use ytdl::YtdlOptions;
 
 /// Clones share the HTTP connection pool and per-origin rate-limit cooldowns.
 #[derive(Clone)]
@@ -42,6 +43,10 @@ pub struct DownloadClient {
     ytdl: Option<std::sync::Arc<Path>>,
     /// Session cookies forwarded to yt-dlp.
     ytdl_cookies: Option<std::sync::Arc<crate::cookies::YtdlCookies>>,
+    /// Upstream `skip: false`: download and replace existing files.
+    pub(crate) overwrite: bool,
+    /// Upstream `download: false`: run hooks without fetching files.
+    pub(crate) no_download: bool,
 }
 
 /// Per-attempt state shared between the attempt and its deadline. Throttling
@@ -135,9 +140,7 @@ impl DownloadClient {
 
     /// Apply transport overrides while retaining shared per-origin cooldowns.
     pub fn with_network(mut self, network: &NetworkOptions) -> Result<Self> {
-        if self.network.proxy() != network.proxy()
-            || self.network.user_agent() != network.user_agent()
-        {
+        if self.network != *network {
             self.http = network.client(
                 concat!("gallery-dl-rs/", env!("CARGO_PKG_VERSION")),
                 self.wait_limit,
@@ -226,6 +229,19 @@ impl DownloadClient {
         }
     }
 
+    /// Replace existing files instead of skipping them (`--no-skip`). The
+    /// previous file is kept until the replacement is complete.
+    pub fn with_overwrite(mut self, enabled: bool) -> Self {
+        self.overwrite = enabled;
+        self
+    }
+
+    /// Run preparation hooks but do not fetch files (`download: false`).
+    pub fn with_no_download(mut self, enabled: bool) -> Self {
+        self.no_download = enabled;
+        self
+    }
+
     /// Retain validated partial HTTP downloads for retries and later invocations.
     pub fn with_resume(mut self, enabled: bool) -> Self {
         self.resume = enabled;
@@ -253,6 +269,8 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         rate: None,
         ytdl: Some(Path::new("yt-dlp").into()),
         ytdl_cookies: None,
+        overwrite: false,
+        no_download: false,
     })
 }
 
@@ -452,6 +470,14 @@ pub async fn download_with_template(
         let prepared = processing::prepare(client, root, media, options, template).await?;
         return processing::download(client, root, media, options, template, prepared).await;
     }
+    if client.no_download {
+        return Ok(Outcome::Skipped(destination_with_templates(
+            root,
+            media,
+            template,
+            options.directory,
+        )?));
+    }
     let prepared = options.postprocessors.map(|pp| pp.prepared_media(media));
     let output_media = prepared.as_ref().unwrap_or(media);
     let original_frames = media
@@ -482,6 +508,8 @@ pub async fn download_with_template(
             &selected,
         )
         .await?
+    } else if client.overwrite {
+        download_replacing(client, root, media, options, template).await?
     } else {
         download_media(client, root, media, options, template, None).await?
     };
@@ -506,6 +534,38 @@ pub async fn download_with_template(
             })?;
     }
     Ok(outcome)
+}
+
+/// Download over an existing destination: move it aside, then remove it
+/// after a successful download or restore it otherwise.
+async fn download_replacing(
+    client: &DownloadClient,
+    root: &Path,
+    media: &Media,
+    options: DownloadOptions<'_>,
+    template: Option<&FilenameTemplate>,
+) -> Result<Outcome> {
+    let path = destination_with_templates(root, media, template, options.directory)?;
+    let backup = if crate::postprocess::regular_file(&path)? {
+        let name = path
+            .file_name()
+            .ok_or_else(|| error("invalid media filename"))?
+            .to_string_lossy();
+        let backup = path.with_file_name(format!(".{name}.gdl-rs-replaced"));
+        std::fs::rename(&path, &backup)?;
+        Some(backup)
+    } else {
+        None
+    };
+    let result = download_media(client, root, media, options, template, None).await;
+    if let Some(backup) = backup {
+        if matches!(result, Ok(Outcome::Downloaded(_))) || path.exists() {
+            let _ = std::fs::remove_file(&backup);
+        } else {
+            std::fs::rename(&backup, &path)?;
+        }
+    }
+    result
 }
 
 pub(crate) async fn complete_original(

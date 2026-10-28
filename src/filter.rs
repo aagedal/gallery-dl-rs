@@ -169,6 +169,62 @@ impl FilterExpression {
         if self.expressions.is_empty() {
             return Ok(true);
         }
+        let context = post_context(post);
+        for expression in self.expressions.iter() {
+            if !eval::truthy(&eval::evaluate(expression, &context)?) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+}
+
+/// A post's `tags` (or `tag_string`) as upstream's `predicate_tags` reads
+/// them, or `None` when absent or empty.
+pub(crate) fn post_tags(post: &crate::event::Post) -> Option<Vec<String>> {
+    let context = post_context(post);
+    let value = [context.get("tags"), context.get("tag_string")]
+        .into_iter()
+        .flatten()
+        .map(unwrap_primitive)
+        .find(|value| eval::truthy(value))?;
+    Some(match value {
+        Value::String(tags) => {
+            let list: Vec<&str> = tags.split(", ").collect();
+            if (list.len() as f64) < tags.len() as f64 / 16.0 {
+                tags.split(' ').map(str::to_owned).collect()
+            } else {
+                list.into_iter().map(str::to_owned).collect()
+            }
+        }
+        Value::List(items) | Value::Tuple(items) => items
+            .iter()
+            .flat_map(|item| match unwrap_primitive(item) {
+                Value::String(tag) => vec![tag.to_string()],
+                // Pixiv "original" tag objects: every string value.
+                Value::Map(map) => map
+                    .iter()
+                    .filter_map(|(_, value)| match unwrap_primitive(value) {
+                        Value::String(tag) => Some(tag.to_string()),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            })
+            .collect(),
+        _ => return None,
+    })
+}
+
+fn unwrap_primitive(value: &Value) -> &Value {
+    match value {
+        Value::SourcePrimitive(inner) => unwrap_primitive(inner),
+        value => value,
+    }
+}
+
+fn post_context(post: &crate::event::Post) -> BTreeMap<String, Value> {
+    {
         let mut context = context_parts(&post.category, post.metadata.as_ref(), None);
         if let crate::event::KeywordPolicy::Shared { post_fields, .. } = &post.keywords {
             context.extend(
@@ -192,13 +248,11 @@ impl FilterExpression {
                     .map(|(key, value)| (key, artist_value(&value))),
             );
         }
-        for expression in self.expressions.iter() {
-            if !eval::truthy(&eval::evaluate(expression, &context)?) {
-                return Ok(false);
-            }
-        }
-        Ok(true)
+        context
     }
+}
+
+impl FilterExpression {
     /// Evaluate the allowlisted public metadata of a queued child before
     /// opening that child's extractor or validating its identity.
     pub fn matches_child(&self, child: &crate::event::ChildMetadata) -> Result<bool> {
@@ -567,6 +621,36 @@ pub(crate) fn source_selection_date(post: &crate::event::Post) -> Result<Option<
         .and_then(|metadata| metadata.timestamp))
 }
 
+/// Upstream `directlink` keywords: unquoted `domain`, `path` (without the
+/// filename), `filename` (without the extension), lowercase `extension`,
+/// `query`, `fragment`, and the `subcategory` (registrable domain).
+pub(crate) fn direct_keywords(url: &url::Url) -> Vec<(&'static str, String)> {
+    let unquote = crate::sites::gdl::unquote;
+    let host = url.host_str().unwrap_or_default();
+    let domain = match url.port() {
+        Some(port) => format!("{host}:{port}"),
+        None => host.to_owned(),
+    };
+    let full = unquote(url.path().trim_start_matches('/'));
+    let (path, name) = full.rsplit_once('/').unwrap_or(("", &full));
+    let (filename, extension) = name.rsplit_once('.').unwrap_or((name, ""));
+    let labels: Vec<&str> = host.rsplit('.').take(2).collect();
+    let subcategory = labels.into_iter().rev().collect::<Vec<_>>().join(".");
+    vec![
+        ("domain", unquote(&domain)),
+        ("path", path.to_owned()),
+        ("filename", filename.to_owned()),
+        ("name", filename.to_owned()),
+        ("extension", {
+            let extension = extension.to_lowercase();
+            crate::path_options::map_extension(&extension).unwrap_or(extension)
+        }),
+        ("query", url.query().map(unquote).unwrap_or_default()),
+        ("fragment", url.fragment().map(unquote).unwrap_or_default()),
+        ("subcategory", subcategory),
+    ]
+}
+
 pub(crate) fn context(media: &Media) -> BTreeMap<String, Value> {
     context_parts(&media.category, media.metadata.as_ref(), Some(media))
 }
@@ -581,6 +665,8 @@ fn context_parts(
             .filename
             .rsplit_once('.')
             .unwrap_or((&media.filename, ""));
+        let extension =
+            crate::path_options::map_extension(extension).unwrap_or_else(|| extension.into());
         values.extend(BTreeMap::from([
             ("filename".into(), text(stem)),
             ("name".into(), text(stem)),
@@ -588,6 +674,11 @@ fn context_parts(
             ("url".into(), text(media.url.as_str())),
             ("_url".into(), text(media.url.as_str())),
         ]));
+        if media.category == "direct" {
+            for (key, value) in direct_keywords(&media.url) {
+                values.insert(key.into(), text(value));
+            }
+        }
     }
     for (name, extensions) in [
         (

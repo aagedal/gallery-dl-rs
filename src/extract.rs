@@ -1009,6 +1009,8 @@ pub struct BackendOptions {
     pub parent_metadata: Option<Value>,
     pub metadata_parent: Option<Value>,
     pub favorites: Option<crate::kemono::Favorites>,
+    /// Additional upstream CLI arguments, such as network settings.
+    pub extra_args: Vec<String>,
 }
 impl std::fmt::Debug for BackendOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1083,6 +1085,7 @@ impl Backend {
         if let Some(agent) = &options.user_agent {
             command.arg("--user-agent").arg(agent);
         }
+        command.args(&options.extra_args);
         if let Some(retweets) = options.retweets {
             let value = match retweets {
                 crate::twitter::RetweetMode::Skip => "false",

@@ -4,10 +4,16 @@ use reqwest::{Client, Proxy, header::HeaderValue};
 use std::{fmt, time::Duration};
 use url::Url;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub struct NetworkOptions {
     proxy: Option<String>,
     user_agent: Option<String>,
+    /// Upstream `verify: false`: accept invalid TLS certificates.
+    insecure: bool,
+    /// Upstream `source-address`: bind outgoing connections to this address.
+    source_address: Option<std::net::IpAddr>,
+    /// Upstream `geo-bypass`: the configured value and the generated address.
+    xff: Option<(String, std::net::Ipv4Addr)>,
 }
 impl fmt::Debug for NetworkOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -45,7 +51,50 @@ impl NetworkOptions {
                 "user-agent must be a nonempty ASCII HTTP header of at most 1024 bytes",
             ));
         }
-        Ok(Self { proxy, user_agent })
+        Ok(Self {
+            proxy,
+            user_agent,
+            ..Self::default()
+        })
+    }
+    /// Disable TLS certificate verification (`--no-check-certificate`).
+    pub fn with_insecure(mut self, insecure: bool) -> Self {
+        self.insecure = insecure;
+        self
+    }
+    /// Equivalent upstream CLI arguments for the compatibility backend.
+    pub fn backend_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+        if self.insecure {
+            args.push("--no-check-certificate".into());
+        }
+        if let Some(address) = self.source_address {
+            args.extend(["--source-address".into(), address.to_string()]);
+        }
+        if let Some((value, _)) = &self.xff {
+            args.extend(["--xff".into(), value.clone()]);
+        }
+        args
+    }
+    /// Send a fake `X-Forwarded-For` address from CIDR blocks or country
+    /// codes (`--xff`). Like upstream, invalid values only warn.
+    pub fn with_geo_bypass(mut self, value: Option<&str>) -> Result<Self> {
+        self.xff = value.and_then(|value| match crate::geo::random_ipv4(value) {
+            Some(address) => Some((value.to_owned(), address)),
+            None => {
+                static WARNED: std::sync::Once = std::sync::Once::new();
+                WARNED.call_once(|| {
+                    eprintln!("warning: xff: Invalid ISO 3166 country code '{value}'")
+                });
+                None
+            }
+        });
+        Ok(self)
+    }
+    /// Bind outgoing connections to a local address (`--source-address`, `-4`, `-6`).
+    pub fn with_source_address(mut self, address: Option<std::net::IpAddr>) -> Self {
+        self.source_address = address;
+        self
     }
     pub fn proxy(&self) -> Option<&str> {
         self.proxy.as_deref()
@@ -61,6 +110,21 @@ impl NetworkOptions {
             .timeout(timeout)
             .user_agent(self.user_agent().unwrap_or(default_agent))
             .redirect(reqwest::redirect::Policy::none());
+        if self.insecure {
+            builder = builder.danger_accept_invalid_certs(true);
+        }
+        if let Some(address) = self.source_address {
+            builder = builder.local_address(address);
+        }
+        if let Some((_, address)) = &self.xff {
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                "X-Forwarded-For",
+                HeaderValue::from_str(&address.to_string())
+                    .map_err(|_| error("invalid X-Forwarded-For address"))?,
+            );
+            builder = builder.default_headers(headers);
+        }
         if let Some(proxy) = self.proxy() {
             builder = if proxy.is_empty() {
                 builder.no_proxy()

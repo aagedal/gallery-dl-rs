@@ -31,6 +31,29 @@ impl SleepRange {
         Ok(Self { min, max })
     }
 
+    /// Upstream duration values: a number, a `MIN-MAX` string, or a
+    /// `[MIN, MAX]` list. `None` for null/absent; `Err` for invalid values.
+    pub fn from_value(value: &serde_json::Value) -> Result<Option<Self>> {
+        use serde_json::Value;
+        match value {
+            Value::Null => Ok(None),
+            Value::Number(n) => Self::parse(&n.to_string()).map(Some),
+            Value::String(s) => Self::parse(s).map(Some),
+            Value::Array(values) if (1..=2).contains(&values.len()) => {
+                let text: Vec<String> = values
+                    .iter()
+                    .map(|v| match v {
+                        Value::Number(n) => Ok(n.to_string()),
+                        Value::String(s) => Ok(s.clone()),
+                        _ => Err(error("invalid sleep duration")),
+                    })
+                    .collect::<Result<_>>()?;
+                Self::parse(&text.join("-")).map(Some)
+            }
+            _ => Err(error("invalid sleep duration")),
+        }
+    }
+
     /// A uniformly chosen duration within the range. Jitter needs no
     /// cryptographic quality, so the clock's sub-second bits suffice.
     pub fn sample(&self) -> Duration {

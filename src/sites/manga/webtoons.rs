@@ -1,8 +1,9 @@
 //! WEBTOON episodes, comics and artists, mirroring
 //! gallery_dl/extractor/webtoons.py.
 //!
-//! Not ported: the `thumbnails`, `banners` and `bgm` options (extra assets;
-//! background music needs ytdl/HLS handoff) and the age-gate redirect check.
+//! Episode `thumbnails` and background music (`bgm`, HLS through yt-dlp)
+//! are gallery assets like upstream. Not ported: `banners` and the
+//! age-gate redirect check.
 use super::{Gallery, keywords, set, text};
 use crate::sites::media::{parse_query, query_get};
 use crate::sites::{Events, Http, Route, Site};
@@ -196,8 +197,9 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
             query,
         }) => crate::sites::once(async move {
             let page = fetch(http, &format!("{ROOT}/{base}/viewer?{query}")).await?;
+            let assets = assets(http, &page).await?;
             Ok(crate::sites::events(episode_events(
-                http, &page, &lang, &genre, &comic, &query,
+                http, &page, &lang, &genre, &comic, &query, assets,
             )))
         }),
         Some(Target::Comic {
@@ -336,6 +338,134 @@ fn images(page: &str, quality: Option<&Map<String, Value>>) -> Vec<String> {
     urls
 }
 
+/// Image URL paths (without host) mapped to their page numbers.
+fn image_paths(page: &str) -> std::collections::HashMap<String, usize> {
+    let mut paths = std::collections::HashMap::new();
+    let mut extr = Extr::new(page);
+    let mut number = 0;
+    while let Some(url) = extr.find(r#"class="_images" data-url=""#, "\"") {
+        number += 1;
+        let path = url.rsplit_once('?').map_or(url, |(path, _)| path);
+        if let Some(start) = path.get(8..).and_then(|rest| rest.find('/')) {
+            paths.insert(path[8 + start..].to_owned(), number);
+        }
+    }
+    paths
+}
+
+/// `WebtoonsEpisodeExtractor.assets`: the episode thumbnail (`thumbnails`,
+/// default off) and background music (`bgm`, default on; a string selects
+/// the remux container).
+async fn assets(http: &Http, page: &str) -> Result<Vec<Map<String, Value>>> {
+    let mut assets = Vec::new();
+    if http.option_bool("thumbnails", false) {
+        let active = crate::sites::extr(page, "class=\"on", "</a>").unwrap_or_default();
+        let url = crate::sites::extr(active, "data-url=\"", "\"").unwrap_or_default();
+        let mut asset = Map::new();
+        asset.insert("url".into(), image_host(url).into());
+        asset.insert("type".into(), "thumbnail".into());
+        assets.push(asset);
+    }
+    let bgm_option = http.option("bgm").cloned().unwrap_or(Value::Bool(true));
+    if !truthy(&bgm_option) {
+        return Ok(assets);
+    }
+    let Some(list) = crate::sites::extr(page, "episodeBgmList:", ",\n")
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .and_then(|value| value.as_array().cloned())
+    else {
+        return Ok(assets);
+    };
+    let (extension, remux) = match &bgm_option {
+        Value::String(container) => (
+            container.to_lowercase(),
+            Value::from(container.to_lowercase()),
+        ),
+        _ => ("mp4".to_owned(), Value::Bool(false)),
+    };
+    let paths = image_paths(page);
+    for bgm in list {
+        let Some(bgm) = bgm.as_object() else { continue };
+        let audio_id = bgm
+            .get("audioId")
+            .map(crate::sites::scalar)
+            .unwrap_or_default();
+        let mut url = http.api(&format!(
+            "https://apis.naver.com/audiocweb/audiocplayogwweb/play/audio/{audio_id}/hls/token"
+        ))?;
+        url.query_pairs_mut()
+            .append_pair("quality", "HIGH")
+            .append_pair("acceptCodecs", "AAC,MP3");
+        let data = http
+            .json_with(
+                &url,
+                &[
+                    ("Accept", "application/json"),
+                    ("Content-Type", "application/json"),
+                    ("Origin", ROOT),
+                    ("Referer", "https://www.webtoons.com/"),
+                    ("Sec-Fetch-Dest", "empty"),
+                    ("Sec-Fetch-Mode", "cors"),
+                    ("Sec-Fetch-Site", "cross-site"),
+                ],
+            )
+            .await?;
+        use base64::Engine;
+        let token = data
+            .pointer("/result/playToken")
+            .and_then(Value::as_str)
+            .and_then(|token| base64::engine::general_purpose::STANDARD.decode(token).ok())
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .ok_or_else(|| error("invalid WEBTOON background music token"))?;
+        let Some(audio) = token.get("audioInfo").and_then(Value::as_object) else {
+            continue;
+        };
+        let mut asset = bgm.clone();
+        asset.extend(audio.clone());
+        let image = |key: &str| {
+            bgm.get(key)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let stem = |path: &str| {
+            let start = path.rfind('/').map_or(0, |i| i + 1);
+            let end = path
+                .rfind('.')
+                .filter(|end| *end >= start)
+                .unwrap_or(path.len());
+            path[start..end].to_owned()
+        };
+        let (play, stop) = (image("playImageUrl"), image("stopImageUrl"));
+        asset.insert(
+            "num_play".into(),
+            paths.get(&play).copied().unwrap_or(0).into(),
+        );
+        asset.insert(
+            "num_stop".into(),
+            paths.get(&stop).copied().unwrap_or(0).into(),
+        );
+        asset.insert("filename_play".into(), stem(&play).into());
+        asset.insert("filename_stop".into(), stem(&stop).into());
+        asset.insert("extension".into(), extension.clone().into());
+        asset.insert("type".into(), "bgm".into());
+        let stream = audio.get("url").and_then(Value::as_str).unwrap_or_default();
+        asset.insert("url".into(), format!("ytdl:{stream}").into());
+        asset.insert(
+            "_ytdl_manifest".into(),
+            audio
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("hls")
+                .to_lowercase()
+                .into(),
+        );
+        asset.insert("_ytdl_manifest_remux".into(), remux.clone());
+        assets.push(asset);
+    }
+    Ok(assets)
+}
+
 fn episode_events(
     http: &Http,
     page: &str,
@@ -343,6 +473,7 @@ fn episode_events(
     genre: &str,
     comic: &str,
     query: &str,
+    assets: Vec<Map<String, Value>>,
 ) -> Vec<crate::event::ExtractionEvent> {
     let data = metadata(page, lang, genre, comic, query);
     let id = format!(
@@ -361,6 +492,7 @@ fn episode_events(
     let mut gallery = Gallery::chapter(&EPISODE, data, pages)
         .id(id)
         .header("Referer", "https://www.webtoons.com/");
+    gallery.assets = assets;
     gallery.enum_key = "num";
     gallery.events(&SITE, http)
 }
@@ -545,6 +677,34 @@ mod tests {
 <img class="_images" data-url="https://webtoon-phinf.pstatic.net/a/001.jpg?type=q90" />
 <img class="_images" data-url="https://webtoon-phinf.pstatic.net/a/002.gif?type=q90" />
 "#;
+
+    #[tokio::test]
+    async fn background_music_is_an_hls_asset_numbered_zero() {
+        use base64::Engine;
+        let page = PAGE.replace(
+            "<img class=\"_images\"",
+            "episodeBgmList: [{\"audioId\":\"A1\",\"playImageUrl\":\"/a/002.gif\",\"stopImageUrl\":\"\"}],\n<img class=\"_images\"",
+        );
+        let token = base64::engine::general_purpose::STANDARD.encode(
+            json!({"audioInfo": {"url": "https://audio.test/a.m3u8", "type": "HLS"}}).to_string(),
+        );
+        let (root, requests) = serve(vec![
+            html(&page),
+            json(json!({"result": {"playToken": token}})),
+        ]);
+        let http = http("WEBTOON", root);
+        let files = media(extract(&http, Url::parse(EPISODE_URL).unwrap())).await;
+        assert_eq!(files.len(), 3);
+        assert_eq!(files[0].url.as_str(), "ytdl:https://audio.test/a.m3u8");
+        let k = kw(&files[0]);
+        assert_eq!(k["type"], "bgm");
+        assert_eq!(k["num"], 0);
+        assert_eq!(k["num_play"], 2);
+        assert_eq!(k["extension"], "mp4");
+        assert_eq!(k["filename_play"], "002");
+        let requests = requests.join().unwrap();
+        assert!(requests[1].contains("/audio/A1/hls/token?quality=HIGH&acceptCodecs=AAC%2CMP3"));
+    }
 
     #[tokio::test]
     async fn extracts_episode() {

@@ -79,8 +79,8 @@ use enrichment::WorkFailure;
 mod following;
 
 /// Upstream gallery-dl's public iOS app constants.
-const CLIENT_ID: &str = "MOBrBDS8blbauoSck0ZfDbtuzpyT";
-const CLIENT_SECRET: &str = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj";
+pub(crate) const CLIENT_ID: &str = "MOBrBDS8blbauoSck0ZfDbtuzpyT";
+pub(crate) const CLIENT_SECRET: &str = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj";
 const HASH_SECRET: &str = "28c1fdd170a5204386cb1313c7077b34f83e4aaf4aa829ce78c231e05b0bae2c";
 const APP_USER_AGENT: &str = "PixivIOSApp/7.13.3 (iOS 14.6; iPhone13,2)";
 const APP_OS_VERSION: &str = "14.6";

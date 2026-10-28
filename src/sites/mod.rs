@@ -9,7 +9,7 @@
 pub(crate) mod gdl;
 pub mod http;
 
-mod art;
+pub(crate) mod art;
 mod boorus;
 mod filehosts;
 mod galleries;
@@ -143,6 +143,18 @@ pub struct Site {
     pub cookies: Option<&'static str>,
 }
 
+/// Apply options that upstream reads when building URL patterns, such as
+/// `extractor.bunkr.tlds`. `option(category, key)` looks up site options.
+pub fn configure_patterns(option: impl Fn(&str, &str) -> Option<Value>) {
+    let truthy = |value: Option<Value>| {
+        value.is_some_and(|value| !matches!(value, Value::Null | Value::Bool(false)))
+    };
+    filehosts::bunkr::ANY_TLD.store(
+        truthy(option("bunkr", "tlds")),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
 /// Every registry site, in matching order.
 pub fn sites() -> &'static [&'static Site] {
     static ALL: std::sync::OnceLock<Vec<&'static Site>> = std::sync::OnceLock::new();
@@ -179,6 +191,15 @@ impl Default for Runtime {
 }
 
 impl Runtime {
+    /// Session cookies of every initialized site.
+    pub fn cookie_snapshots(&self) -> Vec<crate::cookies::CookieJar> {
+        self.cells
+            .iter()
+            .filter_map(|cell| cell.get()?.as_ref().ok())
+            .map(Http::cookie_snapshot)
+            .collect()
+    }
+
     /// Whether the site's HTTP state was already created.
     pub fn initialized(&self, site: &Site) -> bool {
         sites()
@@ -285,7 +306,11 @@ pub fn with_external_children<'a>(
                 Ok(child) => {
                     let ExternalChild(url) = *child;
                     // Like upstream, URLs no extractor supports are skipped.
-                    queue(url).unwrap_or_else(|| stream::empty().boxed())
+                    let text = url.to_string();
+                    queue(url).unwrap_or_else(|| {
+                        crate::unsupported::record(&text);
+                        stream::empty().boxed()
+                    })
                 }
                 Err(error) => stream::once(async move { Err(error) }).boxed(),
             },
@@ -448,6 +473,45 @@ pub(crate) fn events<'a>(events: Vec<ExtractionEvent>) -> Events<'a> {
     stream::iter(events.into_iter().map(Ok)).boxed()
 }
 
+/// Upstream `Job.update_kwdict` additions: `metadata-url`,
+/// `metadata-version` and user-supplied `keywords`/`keywords-global`
+/// (format strings with `keywords-eval`).
+fn user_keywords(http: &Http, url: &Url, keywords: &mut Map<String, Value>) {
+    let option = |primary: &str, alias: &str| http.option(primary).or_else(|| http.option(alias));
+    if let Some(name) = option("metadata-url", "url-metadata").and_then(Value::as_str) {
+        keywords.insert(name.into(), url.as_str().into());
+    }
+    if let Some(name) = option("metadata-version", "version-metadata").and_then(Value::as_str) {
+        keywords.insert(
+            name.into(),
+            serde_json::json!({
+                "version": env!("CARGO_PKG_VERSION"),
+                "is_executable": true,
+                "current_git_head": null,
+            }),
+        );
+    }
+    let mut user = http
+        .option("keywords-global")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(local) = http.option("keywords").and_then(Value::as_object) {
+        user.extend(local.clone());
+    }
+    let eval = http.option_bool("keywords-eval", false);
+    for (key, value) in user {
+        let value = match (&value, eval) {
+            (Value::String(format), true) => crate::postprocess::template::Template::parse(format)
+                .and_then(|template| template.render(keywords))
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+            _ => value,
+        };
+        keywords.insert(key, value);
+    }
+}
+
 fn media(site: &Site, http: &Http, route: &'static Route, item: Item, index: usize) -> Media {
     let mut keywords = item.keywords;
     // Upstream downloader hints are also passed to the handoff.
@@ -466,6 +530,13 @@ fn media(site: &Site, http: &Http, route: &'static Route, item: Item, index: usi
         keywords.entry("filename").or_insert(name.into());
         keywords.entry("extension").or_insert(ext.into());
     }
+    if let Some(mapped) = keywords
+        .get("extension")
+        .and_then(Value::as_str)
+        .and_then(crate::path_options::map_extension)
+    {
+        keywords.insert("extension".into(), mapped.into());
+    }
     // Sites with per-URL categories (upstream `generic`, `fandom`) pass
     // them in `_category`/`_subcategory`; lookups keep the site's category.
     let category = keywords
@@ -476,6 +547,7 @@ fn media(site: &Site, http: &Http, route: &'static Route, item: Item, index: usi
         .remove("_subcategory")
         .unwrap_or_else(|| route.subcategory.into());
     keywords.insert("subcategory".into(), subcategory);
+    user_keywords(http, &item.url, &mut keywords);
     let stem = keywords.get("filename").map(scalar).unwrap_or_default();
     let extension = keywords.get("extension").map(scalar).unwrap_or_default();
     let filename = if extension.is_empty() {
@@ -882,6 +954,33 @@ mod tests {
         assert_eq!(nameext(&url), ("noext".into(), String::new()));
         assert_eq!(scalar(&Value::Bool(true)), "True");
         assert_eq!(percent_decode("a&b=c+d%20e"), "a&b=c+d e");
+    }
+
+    #[test]
+    fn user_keywords_follow_upstream_update_kwdict() {
+        let options = serde_json::json!({
+            "keywords-global": {"source": "global", "kept": 1},
+            "keywords": {"source": "local", "label": "{category}-{id}"},
+            "keywords-eval": true,
+            "metadata-url": "_page",
+            "version-metadata": "_version",
+        });
+        let http = Http::new("Test", std::time::Duration::from_secs(1))
+            .unwrap()
+            .with_options(Some(std::sync::Arc::new(
+                options.as_object().unwrap().clone(),
+            )));
+        let url = Url::parse("https://x.test/1.jpg").unwrap();
+        let mut keywords = Map::from_iter([
+            ("category".into(), Value::from("site")),
+            ("id".into(), Value::from(7)),
+        ]);
+        user_keywords(&http, &url, &mut keywords);
+        assert_eq!(keywords["source"], "local");
+        assert_eq!(keywords["kept"], 1);
+        assert_eq!(keywords["label"], "site-7");
+        assert_eq!(keywords["_page"], "https://x.test/1.jpg");
+        assert_eq!(keywords["_version"]["version"], env!("CARGO_PKG_VERSION"));
     }
 
     #[test]

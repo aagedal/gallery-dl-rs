@@ -259,3 +259,139 @@ fn file_only_download_uses_category_destination_metadata_and_archive() {
     );
     assert!(!saved.exists());
 }
+
+/// Serves `body` for paths other than `/missing.jpg` until `count` requests.
+fn serve(count: usize) -> (String, std::thread::JoinHandle<()>) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let handle = std::thread::spawn(move || {
+        for _ in 0..count {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 4096];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = socket.read(&mut buffer).unwrap();
+                assert!(n > 0);
+                request.extend_from_slice(&buffer[..n]);
+            }
+            let response: &[u8] = if request.starts_with(b"GET /missing.jpg ") {
+                b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            } else {
+                b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndata"
+            };
+            socket.write_all(response).unwrap();
+        }
+    });
+    (origin, handle)
+}
+
+#[test]
+fn inline_options_apply_per_url_and_delete_removes_successful_lines() {
+    let root = tempfile::tempdir().unwrap();
+    let (origin, handle) = serve(3);
+    let list = root.path().join("urls.txt");
+    std::fs::write(
+        &list,
+        format!(
+            "-filename=\"custom.{{extension}}\"\n{origin}/a.jpg\n{origin}/b.jpg\n{origin}/missing.jpg\n"
+        ),
+    )
+    .unwrap();
+    let output = binary()
+        .args(["--retries", "0", "--jobs", "1", "-d"])
+        .arg(root.path().join("out"))
+        .arg("-x")
+        .arg(&list)
+        .output()
+        .unwrap();
+    handle.join().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(root.path().join("out/direct/custom.jpg").is_file());
+    assert_eq!(
+        std::fs::read_dir(root.path().join("out/direct"))
+            .unwrap()
+            .count(),
+        2
+    );
+    assert_eq!(
+        std::fs::read_to_string(&list).unwrap(),
+        format!("{origin}/missing.jpg\n")
+    );
+}
+
+#[test]
+fn no_skip_replaces_files_and_compare_enumerates_differing_downloads() {
+    let root = tempfile::tempdir().unwrap();
+    let out = root.path().join("out");
+    std::fs::create_dir_all(out.join("direct")).unwrap();
+    let existing = out.join("direct/a.jpg");
+    let run = |extra: &[&str]| {
+        let (origin, handle) = serve(1);
+        let output = binary()
+            .args(["--retries", "0", "-f", "{filename}.{extension}", "-d"])
+            .arg(&out)
+            .args(extra)
+            .arg(format!("{origin}/a.jpg"))
+            .output()
+            .unwrap();
+        handle.join().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    std::fs::write(&existing, b"old").unwrap();
+    run(&[
+        "--no-skip",
+        "-o",
+        r#"postprocessors=[{"name":"compare","action":"enumerate"}]"#,
+    ]);
+    assert_eq!(std::fs::read(&existing).unwrap(), b"old");
+    assert_eq!(std::fs::read(out.join("direct/a.1.jpg")).unwrap(), b"data");
+    run(&["--no-skip"]);
+    assert_eq!(std::fs::read(&existing).unwrap(), b"data");
+}
+
+#[test]
+fn print_writes_formats_without_downloading() {
+    let root = tempfile::tempdir().unwrap();
+    let list = root.path().join("list.txt");
+    let output = binary()
+        .args(["-d"])
+        .arg(root.path().join("out"))
+        .args(["-N", "filename", "-N", "after:{domain} {extension}"])
+        .arg("--print-to-file")
+        .arg("{filename}.{extension}")
+        .arg(&list)
+        .arg("http://127.0.0.1:9/a.jpg")
+        .arg("http://127.0.0.1:9/b.png")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "a\n127.0.0.1:9 jpg\nb\n127.0.0.1:9 png\n"
+    );
+    assert_eq!(std::fs::read_to_string(&list).unwrap(), "a.jpg\nb.png\n");
+    assert!(!root.path().join("out").exists());
+}
+
+#[test]
+fn extractor_info_prints_route_formats_without_requests() {
+    let output = binary()
+        .args(["-E", "-o", "extractor.4chan.sleep-request=2"])
+        .arg("https://boards.4chan.org/a/thread/1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Category / Subcategory\n  \"4chan\" / \"thread\"\n"));
+    assert!(stdout.contains("Filename format (default):\n  \"{tim} {filename}.{extension}\"\n"));
+    assert!(stdout.contains("Request interval (custom):\n  2\n"));
+}

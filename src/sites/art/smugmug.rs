@@ -9,6 +9,8 @@ use url::Url;
 
 const API_KEY: &str = "RCVHDGjcbc4Fhzq4qzqLdZmvwmwB6LM2";
 const API_SECRET: &str = "jGrdndvJqhTx8XSNs7TFTSSthhZHq92ddMpbpDpkDVNM7TDgnvLFMtfB5Mg5kH73";
+/// Default OAuth 1.0a consumer key and secret, for `oauth:smugmug`.
+pub(crate) const API_CREDENTIALS: (&str, &str) = (API_KEY, API_SECRET);
 const FILENAME: &str =
     "{category}_{User[NickName]:?/_/}{Image[UploadKey]}_{Image[ImageKey]}.{extension}";
 

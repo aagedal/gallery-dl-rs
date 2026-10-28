@@ -290,7 +290,7 @@ async fn selected_post_files_alone_receive_archive_and_sidecars() {
             .arg(&archive)
             .args([
                 "-f",
-                "{filename}",
+                "{filename}.{extension}",
                 "--write-metadata",
                 "--post-range",
                 "2",
@@ -384,4 +384,48 @@ async fn raw_media_without_boundaries_stays_compatible_until_post_selection_is_r
     assert_eq!(urls(&result), [url("later-input")]);
     assert!(String::from_utf8_lossy(&result.stderr).contains("explicit post boundaries"));
     assert!(String::from_utf8_lossy(&result.stderr).contains("1 operation(s) failed"));
+}
+
+#[tokio::test]
+async fn tag_blacklist_and_whitelist_select_posts_by_tags() {
+    let root = tempfile::tempdir().unwrap();
+    let tagged = |id: &str, tags: Value| json!([2,{"category":"zz","id":id,"count":1,"tags":tags}]);
+    let file = |name: &str, id: &str| json!([3,format!("https://cdn.example/{name}.jpg"),{"category":"zz","filename":name,"extension":"jpg","id":id,"num":1}]);
+    let rows = [
+        tagged("1", json!(["cat", "dog"])),
+        file("one", "1"),
+        tagged("2", json!("bird fish tags joined by single spaces")),
+        file("two", "2"),
+        tagged("3", json!([])),
+        file("three", "3"),
+    ];
+    let backend = fixture(root.path(), &rows, &[]);
+    for (flags, expected) in [
+        (
+            ["--tags-blacklist", "dog"],
+            "https://cdn.example/two.jpg\nhttps://cdn.example/three.jpg\n",
+        ),
+        (
+            ["--tags-whitelist", "fish,cat"],
+            "https://cdn.example/one.jpg\nhttps://cdn.example/two.jpg\nhttps://cdn.example/three.jpg\n",
+        ),
+        (
+            ["--tags-blacklist", "bird -fish"],
+            "https://cdn.example/one.jpg\nhttps://cdn.example/two.jpg\nhttps://cdn.example/three.jpg\n",
+        ),
+    ] {
+        let result = output(
+            binary(root.path(), &backend)
+                .arg("-g")
+                .args(flags)
+                .arg("https://unknown.example/g/1"),
+        )
+        .await;
+        success(&result);
+        assert_eq!(
+            String::from_utf8_lossy(&result.stdout),
+            expected,
+            "{flags:?}"
+        );
+    }
 }
