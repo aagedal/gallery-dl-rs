@@ -1,4 +1,4 @@
-//! Experimental native Newgrounds art extraction.
+//! Experimental native Newgrounds extraction.
 //!
 //! Mirrors the art parts of gallery_dl/extractor/newgrounds.py. Art posts
 //! (`www.newgrounds.com/art/view/USER/SLUG`) are scraped from page HTML: the
@@ -7,9 +7,12 @@
 //! posts, the title from `og:title` and the date from
 //! `itemprop="datePublished"`. User art listings (`USER.newgrounds.com/art`)
 //! page through `art/page/N` with `X-Requested-With: XMLHttpRequest` (capped
-//! at 200 pages) and fetch every listed post. Audio, movies and games are
-//! not supported, and there is no login, so adult-rated posts are skipped by
-//! the site. Media must be HTTPS on `*.ngfiles.com`.
+//! at 200 pages) and fetch every listed post. Audio and portal pages
+//! (`/audio/listen/ID`, `/portal/view/ID`, with `portal/video` JSON for
+//! movies), user audio/movies/games listings, favorites, following and
+//! search follow upstream. There is no login, so adult-rated posts are
+//! skipped by the site. Media must be HTTPS on `*.ngfiles.com` or
+//! `*.ungrounded.net`.
 use crate::{
     Result, error,
     event::{ExtractionEvent, group},
@@ -59,8 +62,34 @@ fn valid_name(name: &str) -> bool {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
-    Post { user: String, slug: String },
-    User { user: String },
+    Post {
+        user: String,
+        slug: String,
+    },
+    /// `/portal/view/ID` (movies, games) or `/audio/listen/ID`.
+    Media {
+        path: String,
+    },
+    /// `USER.newgrounds.com/{art,audio,movies,games}`; the bare user page
+    /// dispatches to `art` like upstream.
+    User {
+        user: String,
+        kind: &'static str,
+    },
+    /// `USER.newgrounds.com/favorites[/KIND]`.
+    Favorites {
+        user: String,
+        kind: Option<&'static str>,
+    },
+    /// `USER.newgrounds.com/favorites/following`: queued user galleries.
+    Following {
+        user: String,
+    },
+    /// `www.newgrounds.com/search/conduct/KIND?QUERY`.
+    Search {
+        kind: String,
+        query: Vec<(String, String)>,
+    },
 }
 
 fn plain(url: &Url) -> bool {
@@ -83,6 +112,15 @@ pub fn target(url: &Url) -> Result<Target> {
         .path_segments()
         .map(|s| s.filter(|s| !s.is_empty()).collect())
         .unwrap_or_default();
+    let digits =
+        |id: &str| !id.is_empty() && id.len() <= 20 && id.bytes().all(|b| b.is_ascii_digit());
+    let kind = |name: &str| match name {
+        "art" => Some("art"),
+        "audio" => Some("audio"),
+        "movies" => Some("movies"),
+        "games" => Some("games"),
+        _ => None,
+    };
     match url.host_str().ok_or_else(unsupported)? {
         "www.newgrounds.com" | "newgrounds.com" => match parts[..] {
             ["art", "view", user, slug] if valid_name(user) && valid_name(slug) => {
@@ -91,17 +129,59 @@ pub fn target(url: &Url) -> Result<Target> {
                     slug: slug.into(),
                 })
             }
+            ["portal", "view", id, ..] | ["audio", "listen", id, ..] if digits(id) => {
+                Ok(Target::Media {
+                    path: format!("{}/{}/{id}", parts[0], parts[1]),
+                })
+            }
+            ["search", "conduct", kind] if url.query().is_some() => Ok(Target::Search {
+                kind: kind.to_owned(),
+                query: url
+                    .query_pairs()
+                    .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                    .collect(),
+            }),
+            _ => Err(unsupported()),
+        },
+        // Upstream `NewgroundsImageExtractor` also accepts image files.
+        "art.ngfiles.com" => match parts[..] {
+            ["images", _, file] => {
+                let stem = file.split('.').next().unwrap_or_default();
+                let mut fields = stem.splitn(3, '_');
+                match (fields.next(), fields.next(), fields.next()) {
+                    (Some(id), Some(user), Some(slug))
+                        if digits(id) && valid_name(user) && valid_name(slug) =>
+                    {
+                        Ok(Target::Post {
+                            user: user.to_ascii_lowercase(),
+                            slug: slug.to_owned(),
+                        })
+                    }
+                    _ => Err(unsupported()),
+                }
+            }
             _ => Err(unsupported()),
         },
         host => {
             let user = host
                 .strip_suffix(".newgrounds.com")
                 .filter(|u| valid_name(u) && !RESERVED_HOSTS.contains(u))
-                .ok_or_else(unsupported)?;
+                .ok_or_else(unsupported)?
+                .to_ascii_lowercase();
             match parts[..] {
-                ["art"] => Ok(Target::User {
-                    user: user.to_ascii_lowercase(),
+                [] => Ok(Target::User { user, kind: "art" }),
+                [name, ..] if kind(name).is_some() => Ok(Target::User {
+                    user,
+                    kind: kind(name).unwrap_or("art"),
                 }),
+                ["favorites", "following", ..] => Ok(Target::Following { user }),
+                ["favorites"] => Ok(Target::Favorites { user, kind: None }),
+                ["favorites", name, ..] if kind(name).is_some_and(|k| k != "games") => {
+                    Ok(Target::Favorites {
+                        user,
+                        kind: kind(name),
+                    })
+                }
                 _ => Err(unsupported()),
             }
         }
@@ -112,7 +192,7 @@ pub fn is_newgrounds_url(url: &Url) -> bool {
     target(url).is_ok()
 }
 
-/// HTTPS media on `*.ngfiles.com`.
+/// HTTPS media on `*.ngfiles.com` or `*.ungrounded.net`.
 pub fn media_url(raw: &str) -> Option<Url> {
     let raw = unescape(raw.trim());
     let raw = match raw.strip_prefix("//") {
@@ -120,7 +200,11 @@ pub fn media_url(raw: &str) -> Option<Url> {
         None => raw,
     };
     let url = Url::parse(&raw).ok()?;
-    let label = url.host_str()?.strip_suffix(".ngfiles.com")?;
+    // Images and audio on ngfiles.com, movies on ungrounded.net.
+    let host = url.host_str()?;
+    let label = host
+        .strip_suffix(".ngfiles.com")
+        .or_else(|| host.strip_suffix(".ungrounded.net"))?;
     (url.scheme() == "https"
         && plain(&url)
         && !label.is_empty()
@@ -246,6 +330,103 @@ pub fn parse_post(bytes: &[u8], user: &str) -> Result<Vec<Media>> {
         .collect())
 }
 
+/// Upstream `_extract_audio_data`/`_extract_media_data`: the file of an
+/// audio or portal page (`src` may come from `portal/video`).
+pub fn parse_media(html: &str, path: &str, video: Option<&Value>) -> Result<Vec<Media>> {
+    let index = path.rsplit('/').next().unwrap_or_default().to_owned();
+    let audio = path.starts_with("audio/");
+    let mut candidates: Vec<String> = Vec::new();
+    if let Some(src) = between(html, "{\"url\":\"", "\"").filter(|s| !s.is_empty()) {
+        candidates.push(src.replace("\\/", "/"));
+    } else if let Some(sources) = video.and_then(|v| v.get("sources")) {
+        // Original first (the 360p name without its resolution), then the
+        // largest listed resolutions, like upstream's default `format`.
+        if let Some(base) = sources
+            .pointer("/360p/0/src")
+            .and_then(Value::as_str)
+            .map(|s| s.replace("\\/", "/"))
+        {
+            let regex = crate::sites::gdl::re!(r"\.360p\.\w+");
+            for ext in ["mp4", "webm", "m4v", "mov", "mkv"] {
+                candidates.push(regex.replacen(&base, 1, format!(".{ext}")).into_owned());
+            }
+        }
+        for size in ["1080p", "720p", "360p"] {
+            if let Some(src) = sources
+                .get(size)
+                .and_then(|v| v.pointer("/0/src"))
+                .and_then(Value::as_str)
+            {
+                candidates.push(src.replace("\\/", "/"));
+            }
+        }
+    }
+    let mut urls = candidates.iter().filter_map(|raw| media_url(raw));
+    let url = urls.next().ok_or_else(|| {
+        error("Newgrounds media has no downloadable file (adult posts need a login)")
+    })?;
+    let fallback: Vec<Value> = urls.map(|u| Value::String(u.to_string())).collect();
+    let caption = meta_property(html, "og:title")
+        .and_then(clean_text)
+        .map(Arc::<str>::from);
+    let timestamp =
+        itemprop(html, "datePublished").and_then(|d| crate::date::parse_date(d.trim()).ok());
+    let username = between(html, "<div class=\"item-user\">", ">")
+        .and_then(|tag| between(tag, "//", "."))
+        .filter(|u| valid_name(u))
+        .map(Arc::<str>::from);
+    // Audio and portal IDs are separate namespaces (upstream `_type`).
+    let media_id = if audio {
+        format!("{index}_0")
+    } else {
+        format!("{index}_00")
+    };
+    let mut handoff = BTreeMap::new();
+    if !fallback.is_empty() {
+        handoff.insert("_fallback".to_owned(), Value::Array(fallback));
+    }
+    Ok(vec![Media {
+        filename: format!("{index}.{}", extension(&url)),
+        job: MediaJob::DirectHttp,
+        category: "newgrounds".into(),
+        metadata: Some(PostMetadata {
+            file: Some(FileMetadata {
+                media_type: Some(Arc::from(if audio { "audio" } else { "video" })),
+                ..FileMetadata::default()
+            }),
+            post_id: index,
+            media_id,
+            username,
+            caption,
+            timestamp,
+            index: 1,
+            ..PostMetadata::default()
+        }),
+        url,
+        headers: BTreeMap::new(),
+        handoff,
+    }])
+}
+
+/// Post links (`href="..."`) of an HTML fragment, made absolute.
+fn post_links(html: &str) -> Vec<String> {
+    let mut links = Vec::new();
+    for href in between_all(html, "href=\"", "\"") {
+        let href = match href.strip_prefix("//") {
+            Some(rest) => format!("https://{rest}"),
+            None if href.starts_with('/') => format!("https://www.newgrounds.com{href}"),
+            None => href.to_owned(),
+        };
+        if let Ok(url) = Url::parse(&href)
+            && matches!(target(&url), Ok(Target::Post { .. } | Target::Media { .. }))
+            && !links.contains(&href)
+        {
+            links.push(href);
+        }
+    }
+    links
+}
+
 /// Parse one `art/page/N` response into (user, slug) posts and `more`.
 pub fn parse_listing(bytes: &[u8]) -> Result<(Vec<(String, String)>, bool)> {
     let body: Value =
@@ -293,6 +474,7 @@ pub struct Newgrounds {
 
 struct ListingState {
     user: String,
+    kind: &'static str,
     page: u64,
     done: bool,
     pending: VecDeque<ExtractionEvent>,
@@ -363,24 +545,241 @@ impl Newgrounds {
         Ok(group(items, "newgrounds"))
     }
 
+    /// Upstream `extract_post` for an art, audio or portal page URL.
+    async fn by_url(&self, link: &str) -> Result<VecDeque<ExtractionEvent>> {
+        let url = Url::parse(link).map_err(|_| error("invalid Newgrounds link"))?;
+        match target(&url)? {
+            Target::Post { user, slug } => self.post(&user, &slug).await,
+            Target::Media { path } => self.media(&path).await,
+            _ => Err(error("unsupported Newgrounds post link")),
+        }
+    }
+
+    /// Audio and portal pages (`flash` format for games, like upstream).
+    async fn media(&self, path: &str) -> Result<VecDeque<ExtractionEvent>> {
+        let page_path = if path.starts_with("portal/") {
+            format!("{path}/format/flash")
+        } else {
+            path.to_owned()
+        };
+        let endpoint = self
+            .root
+            .join(&page_path)
+            .map_err(|_| error("invalid Newgrounds path"))?;
+        let body = self.call(endpoint, false).await?;
+        let html = String::from_utf8_lossy(&body).into_owned();
+        let has_source = between(&html, "{\"url\":\"", "\"").is_some_and(|s| !s.is_empty());
+        let video = if !has_source && path.starts_with("portal/") {
+            let index = path.rsplit('/').next().unwrap_or_default();
+            let endpoint = self
+                .root
+                .join(&format!("portal/video/{index}"))
+                .map_err(|_| error("invalid Newgrounds path"))?;
+            serde_json::from_slice::<Value>(&self.call(endpoint, true).await?).ok()
+        } else {
+            None
+        };
+        let mut items = parse_media(&html, path, video.as_ref())?;
+        for item in &mut items {
+            self.network.apply_media(item);
+        }
+        Ok(group(items, "newgrounds"))
+    }
+
     async fn next_page(&self, state: &mut ListingState) -> Result<()> {
         state.page += 1;
         let endpoint = self
             .user_root(&state.user)
-            .join(&format!("art/page/{}", state.page))
+            .join(&format!("{}/page/{}", state.kind, state.page))
             .map_err(|_| error("invalid Newgrounds path"))?;
         let body = self.call(endpoint, true).await?;
-        let (posts, more) = parse_listing(&body)?;
-        state.done = posts.is_empty() || !more || state.page >= MAX_PAGES;
-        for (user, slug) in posts {
-            match self.post(&user, &slug).await {
+        let value: Value =
+            serde_json::from_slice(&body).map_err(|_| error("Newgrounds returned invalid JSON"))?;
+        let mut links = Vec::new();
+        if let Some(years) = value.get("items").and_then(Value::as_object) {
+            for fragment in years.values().filter_map(Value::as_array).flatten() {
+                for link in post_links(fragment.as_str().unwrap_or_default()) {
+                    if !links.contains(&link) {
+                        links.push(link);
+                    }
+                }
+            }
+        }
+        let more = match value.get("more").or_else(|| value.get("load_more")) {
+            Some(Value::Bool(b)) => *b,
+            Some(Value::String(s)) => !s.trim().is_empty(),
+            Some(Value::Null) | None => false,
+            Some(_) => true,
+        };
+        state.done = links.is_empty() || !more || state.page >= MAX_PAGES;
+        for link in links {
+            match self.by_url(&link).await {
                 Ok(events) => state.pending.extend(events),
                 // Adult or removed posts do not abort the whole listing.
-                Err(e) if e.to_string().contains("contains no images") => {}
+                Err(e)
+                    if e.to_string().contains("contains no images")
+                        || e.to_string().contains("no downloadable file") => {}
                 Err(e) => return Err(e),
             }
         }
         Ok(())
+    }
+
+    /// Upstream `_pagination_favorites` (24 entries per page) for one kind;
+    /// `following` yields user URLs instead of posts.
+    fn favorites(
+        &self,
+        user: String,
+        kind: &'static str,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::try_unfold(Some(1u64), move |page| {
+            let user = user.clone();
+            async move {
+                let Some(page) = page.filter(|p| *p <= MAX_PAGES) else {
+                    return Ok(None);
+                };
+                let mut endpoint = self
+                    .user_root(&user)
+                    .join(&format!("favorites/{kind}"))
+                    .map_err(|_| error("invalid Newgrounds path"))?;
+                endpoint
+                    .query_pairs_mut()
+                    .append_pair("page", &page.to_string())
+                    .append_pair("isAjaxRequest", "1");
+                let value: Value = serde_json::from_slice(&self.call(endpoint, true).await?)
+                    .map_err(|_| error("Newgrounds returned invalid JSON"))?;
+                let component = value
+                    .get("component")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                if kind == "following" {
+                    let users: Vec<String> =
+                        between_all(&component, "class=\"item-user", "\"><img")
+                            .filter_map(|tag| tag.rsplit('"').next())
+                            .filter_map(|href| {
+                                let href =
+                                    href.trim_start_matches("https:").trim_start_matches("//");
+                                let name = href.split('.').next()?;
+                                valid_name(name).then(|| name.to_ascii_lowercase())
+                            })
+                            .collect();
+                    let next = (users.len() >= 24).then_some(page + 1);
+                    let children: Vec<_> = users
+                        .into_iter()
+                        .map(|name| {
+                            crate::event::child_job(
+                                crate::event::ChildMetadata::from_raw(
+                                    "newgrounds",
+                                    "following",
+                                    &serde_json::Map::new(),
+                                ),
+                                move || {
+                                    let url =
+                                        Url::parse(&format!("https://{name}.newgrounds.com/"))
+                                            .expect("validated user");
+                                    self.events(&url)
+                                },
+                            )
+                        })
+                        .collect();
+                    return Ok::<_, crate::Error>(Some((
+                        stream::iter(children).flatten().boxed(),
+                        next,
+                    )));
+                }
+                let links: Vec<String> =
+                    between_all(&component, "href=\"https://www.newgrounds.com/", "\"")
+                        .map(|path| format!("https://www.newgrounds.com/{path}"))
+                        .filter(|link| {
+                            Url::parse(link).is_ok_and(|u| {
+                                matches!(target(&u), Ok(Target::Post { .. } | Target::Media { .. }))
+                            })
+                        })
+                        .collect();
+                let next = (links.len() >= 24).then_some(page + 1);
+                Ok(Some((self.links(links), next)))
+            }
+        })
+        .map(|result| match result {
+            Ok(events) => events,
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
+    /// Posts for links, skipping adult or removed ones.
+    fn links(&self, links: Vec<String>) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::iter(links)
+            .then(move |link| async move {
+                match self.by_url(&link).await {
+                    Err(e)
+                        if e.to_string().contains("contains no images")
+                            || e.to_string().contains("no downloadable file") =>
+                    {
+                        Ok(VecDeque::new())
+                    }
+                    result => result,
+                }
+            })
+            .map(|result| match result {
+                Ok(events) => stream::iter(events.into_iter().map(Ok)).boxed(),
+                Err(e) => stream::once(async move { Err(e) }).boxed(),
+            })
+            .flatten()
+            .boxed()
+    }
+
+    /// Upstream `_pagination_search`: `inner=1` JSON pages until no links.
+    fn search(
+        &self,
+        kind: String,
+        query: Vec<(String, String)>,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let start = query
+            .iter()
+            .find(|(k, _)| k == "page")
+            .and_then(|(_, v)| v.parse::<u64>().ok())
+            .unwrap_or(1);
+        stream::try_unfold(Some(start), move |page| {
+            let (kind, query) = (kind.clone(), query.clone());
+            async move {
+                let Some(page) = page.filter(|p| *p < start + MAX_PAGES) else {
+                    return Ok(None);
+                };
+                let mut endpoint = self
+                    .root
+                    .join(&format!("search/conduct/{kind}"))
+                    .map_err(|_| error("invalid Newgrounds path"))?;
+                {
+                    let mut pairs = endpoint.query_pairs_mut();
+                    for (key, value) in query.iter().filter(|(k, _)| k != "page" && k != "inner") {
+                        pairs.append_pair(key, value);
+                    }
+                    pairs
+                        .append_pair("inner", "1")
+                        .append_pair("page", &page.to_string());
+                }
+                let value: Value = serde_json::from_slice(&self.call(endpoint, true).await?)
+                    .map_err(|_| error("Newgrounds returned invalid JSON"))?;
+                let content = value
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let links: Vec<String> = post_links(content);
+                if links.is_empty() {
+                    return Ok(None);
+                }
+                Ok::<_, crate::Error>(Some((self.links(links), Some(page + 1))))
+            }
+        })
+        .map(|result| match result {
+            Ok(events) => events,
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
     }
 
     pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
@@ -389,8 +788,27 @@ impl Newgrounds {
 
     /// Emit one post boundary per art post; listings paginate lazily.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
-        let user = match target(url) {
-            Ok(Target::User { user }) => user,
+        let (user, kind) = match target(url) {
+            Ok(Target::User { user, kind }) => (user, kind),
+            Ok(Target::Media { path }) => {
+                return stream::once(async move { self.media(&path).await })
+                    .map(|result| match result {
+                        Ok(events) => stream::iter(events.into_iter().map(Ok)).boxed(),
+                        Err(e) => stream::once(async move { Err(e) }).boxed(),
+                    })
+                    .flatten()
+                    .boxed();
+            }
+            Ok(Target::Favorites { user, kind }) => {
+                return match kind {
+                    Some(kind) => self.favorites(user, kind),
+                    None => stream::iter(["art", "audio", "movies"])
+                        .flat_map(move |kind| self.favorites(user.clone(), kind))
+                        .boxed(),
+                };
+            }
+            Ok(Target::Following { user }) => return self.favorites(user, "following"),
+            Ok(Target::Search { kind, query }) => return self.search(kind, query),
             Ok(Target::Post { user, slug }) => {
                 return stream::once(async move { self.post(&user, &slug).await })
                     .map(|result| match result {
@@ -404,6 +822,7 @@ impl Newgrounds {
         };
         let state = ListingState {
             user,
+            kind,
             page: 0,
             done: false,
             pending: VecDeque::new(),
@@ -599,6 +1018,43 @@ mod tests {
     }
 
     #[test]
+    fn parses_audio_and_movie_pages() {
+        let audio = r#"<meta property="og:title" content="Song">
+<div class="item-user"><a href="//tomfulp.newgrounds.com">
+<script>var player = {"url":"https:\/\/audio.ngfiles.com\/609000\/609768_song.mp3?f1"}</script>"#;
+        let media = parse_media(audio, "audio/listen/609768", None).unwrap();
+        assert_eq!(
+            media[0].url.as_str(),
+            "https://audio.ngfiles.com/609000/609768_song.mp3?f1"
+        );
+        let meta = media[0].metadata.as_ref().unwrap();
+        assert_eq!(
+            (meta.post_id.as_str(), meta.media_id.as_str()),
+            ("609768", "609768_0")
+        );
+        assert_eq!(meta.username.as_deref(), Some("tomfulp"));
+        assert_eq!(meta.caption.as_deref(), Some("Song"));
+
+        let video = json!({"sources": {
+            "360p": [{"src": "https://uploads.ungrounded.net/a/595355.360p.mp4?1"}],
+            "720p": [{"src": "https://uploads.ungrounded.net/a/595355.720p.mp4?1"}],
+        }});
+        let media = parse_media("<html></html>", "portal/view/595355", Some(&video)).unwrap();
+        assert_eq!(
+            media[0].url.as_str(),
+            "https://uploads.ungrounded.net/a/595355.mp4?1"
+        );
+        let fallback = media[0].handoff["_fallback"].as_array().unwrap();
+        assert!(
+            fallback
+                .iter()
+                .any(|u| u == "https://uploads.ungrounded.net/a/595355.720p.mp4?1")
+        );
+        assert_eq!(media[0].metadata.as_ref().unwrap().media_id, "595355_00");
+        assert!(parse_media("<html></html>", "portal/view/1", None).is_err());
+    }
+
+    #[test]
     fn classifies_urls_and_hosts() {
         let t = |raw: &str| target(&Url::parse(raw).unwrap());
         assert_eq!(
@@ -611,15 +1067,71 @@ mod tests {
         assert_eq!(
             t("https://alice.newgrounds.com/art/").unwrap(),
             Target::User {
+                user: "alice".into(),
+                kind: "art"
+            }
+        );
+        for (raw, kind) in [
+            ("https://alice.newgrounds.com/", "art"),
+            ("https://alice.newgrounds.com/audio?page=3", "audio"),
+            ("https://alice.newgrounds.com/movies/", "movies"),
+            ("https://alice.newgrounds.com/games", "games"),
+        ] {
+            assert_eq!(
+                t(raw).unwrap(),
+                Target::User {
+                    user: "alice".into(),
+                    kind
+                },
+                "{raw}"
+            );
+        }
+        assert_eq!(
+            t("https://www.newgrounds.com/portal/view/161181/format/flash").unwrap(),
+            Target::Media {
+                path: "portal/view/161181".into()
+            }
+        );
+        assert_eq!(
+            t("https://www.newgrounds.com/audio/listen/609768").unwrap(),
+            Target::Media {
+                path: "audio/listen/609768".into()
+            }
+        );
+        assert_eq!(
+            t("https://alice.newgrounds.com/favorites/art?page=3").unwrap(),
+            Target::Favorites {
+                user: "alice".into(),
+                kind: Some("art")
+            }
+        );
+        assert_eq!(
+            t("https://alice.newgrounds.com/favorites/").unwrap(),
+            Target::Favorites {
+                user: "alice".into(),
+                kind: None
+            }
+        );
+        assert_eq!(
+            t("https://alice.newgrounds.com/favorites/following").unwrap(),
+            Target::Following {
                 user: "alice".into()
+            }
+        );
+        assert!(matches!(
+            t("https://www.newgrounds.com/search/conduct/art?terms=tree").unwrap(),
+            Target::Search { ref kind, .. } if kind == "art"
+        ));
+        assert_eq!(
+            t("https://art.ngfiles.com/images/1/1234567_alice_ship.png?f1").unwrap(),
+            Target::Post {
+                user: "alice".into(),
+                slug: "ship".into()
             }
         );
         for raw in [
             "https://www.newgrounds.com/",
-            "https://www.newgrounds.com/portal/view/1",
             "https://www.newgrounds.com/art",
-            "https://alice.newgrounds.com/",
-            "https://alice.newgrounds.com/audio",
             "https://www.newgrounds.com/art/view/alice",
             "https://art.ngfiles.com/images/1/1_a.png",
             "https://www.newgrounds.com.evil.example/art/view/a/b",

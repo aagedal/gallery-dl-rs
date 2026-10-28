@@ -1718,8 +1718,10 @@ Affinity folders, user dispatch, search, watchlist, `/msg/submissions` and
 mirror hosts; DeviantArt `/view/ID`, `fav.me`, `view.php`, favourites and
 collections, tags, avatar, banner, watching and fxdeviantart; Facebook
 `profile.php?id=ID/TAB`; `i.reddituploads.com`; remaining directlink
-extensions. **Remaining:** Newgrounds audio/movies/games/favorites/search
-(the site now serves an "NG Guard" browser check), VSCO collection/spaces/
+extensions. Newgrounds audio/movie pages, user audio/movies/games
+listings, favorites, following and search were ported from upstream but
+only tested against local fixtures (the site serves an "NG Guard" browser
+check to this host). **Remaining:** VSCO collection/spaces/
 avatar/video (HTTP 403 here), ArtStation albums/collections/likes/search/
 challenges (Cloudflare), DeviantArt scraps/search/statuses/
 watch (Eclipse API needing a CSRF session, or login); journals and literature are saved as `.htm`
