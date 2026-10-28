@@ -1581,8 +1581,9 @@ extractors for external URLs by category, `--write-log` copies standard error
 `tags-*`/`*-tags` options) filter posts by tags with Danbooru-style rules;
 `/import` is unsupported. `-E/--extractor-info` prints each registry route's
 category, subcategory and formats (all routes of the matching site, since
-routes are chosen during extraction) with configured custom values. **Remaining CLI gaps:** `--cookies-export`,
-`--write-pages`,
+routes are chosen during extraction) with configured custom values. `--cookies-export FILE` writes the session cookies of Instagram, Twitter/X,
+Facebook and every initialized registry site as a Netscape file.
+**Remaining CLI gaps:** `--write-pages`,
 `--print-traffic`, and YAML/TOML configuration files.
 
 **Implemented upstream configuration compatibility, 2026-10-28:** native

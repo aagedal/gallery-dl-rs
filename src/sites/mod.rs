@@ -179,6 +179,15 @@ impl Default for Runtime {
 }
 
 impl Runtime {
+    /// Session cookies of every initialized site.
+    pub fn cookie_snapshots(&self) -> Vec<crate::cookies::CookieJar> {
+        self.cells
+            .iter()
+            .filter_map(|cell| cell.get()?.as_ref().ok())
+            .map(Http::cookie_snapshot)
+            .collect()
+    }
+
     /// Whether the site's HTTP state was already created.
     pub fn initialized(&self, site: &Site) -> bool {
         sites()

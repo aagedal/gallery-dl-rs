@@ -297,6 +297,9 @@ struct Args {
     /// Enable .netrc authentication data
     #[arg(long)]
     netrc: bool,
+    /// Export session cookies to FILE
+    #[arg(long, value_name = "FILE")]
+    cookies_export: Option<PathBuf>,
     /// Write logging output to FILE
     #[arg(long, value_name = "FILE")]
     write_log: Option<PathBuf>,
@@ -1363,6 +1366,25 @@ async fn run(args: Args) -> Result<()> {
                 // Stop new work while draining active files and finalization hooks.
                 eprintln!("stopping after {skipped} consecutive skipped files");
             }
+        }
+    }
+    if let Some(path) = &args.cookies_export {
+        let mut jar = CookieJar::default();
+        fn cell<T>(result: Option<&Result<T>>) -> Option<&T> {
+            result.and_then(|r| r.as_ref().ok())
+        }
+        for snapshot in cell(extractors.instagram.get())
+            .map(Instagram::cookie_snapshot)
+            .into_iter()
+            .chain(cell(extractors.twitter.get()).map(Twitter::cookie_snapshot))
+            .chain(cell(extractors.facebook.get()).map(Facebook::cookie_snapshot))
+            .chain(extractors.sites.cookie_snapshots())
+        {
+            jar.extend(snapshot);
+        }
+        if let Err(e) = tokio::fs::write(path, jar.to_netscape()).await {
+            eprintln!("cannot export cookies to {}: {e}", path.display());
+            failed.set(failed.get() + 1);
         }
     }
     {

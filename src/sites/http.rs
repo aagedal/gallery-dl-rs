@@ -63,6 +63,14 @@ pub enum Body<'b> {
 }
 
 impl Http {
+    /// A copy of the session cookies, for `--cookies-export`.
+    pub fn cookie_snapshot(&self) -> crate::cookies::CookieJar {
+        self.cookies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
     pub fn new(name: &'static str, timeout: Duration) -> Result<Self> {
         let network = NetworkOptions::default();
         Ok(Self {
