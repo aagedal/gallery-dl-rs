@@ -49,6 +49,7 @@ pub mod reddit;
 mod reddit_rss;
 mod resume;
 pub mod selection;
+pub mod signature;
 pub mod sites;
 pub mod size;
 pub mod sleep;

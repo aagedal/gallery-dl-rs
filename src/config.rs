@@ -551,6 +551,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     "archive-event",
     "archive-mode",
     "skip-filter",
+    "retry-codes",
     "keywords-default",
     "path-restrict",
     "path-replace",

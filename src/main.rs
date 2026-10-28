@@ -1405,6 +1405,17 @@ async fn run(args: Args) -> Result<()> {
             .with_resume(args.resume)
             .with_overwrite(args.no_skip)
             .with_enumerate(args.skip_enumerate)
+            .with_http_options(
+                downloader_option("adjust-extensions").is_none_or(|v| v != false),
+                downloader_option("validate-html").is_none_or(|v| v != false),
+                downloader_option("retry-codes")
+                    .or_else(|| GLOBAL_OPTIONS.get()?.get("retry-codes").cloned())
+                    .and_then(|v| v.as_array().cloned())
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|code| code.as_u64()?.try_into().ok())
+                    .collect(),
+            )
             .with_no_download(args.no_download)
             .with_http_mtime(!args.no_mtime)
             .with_metadata_mtime(args.mtime.clone())
@@ -2984,6 +2995,16 @@ fn print_extractor_info(
         }
     }
     Ok(())
+}
+
+/// A `downloader.http.KEY` or `downloader.KEY` setting.
+fn downloader_option(key: &str) -> Option<serde_json::Value> {
+    let downloader = GLOBAL_OPTIONS.get()?.get("downloader")?;
+    downloader
+        .get("http")
+        .and_then(|http| http.get(key))
+        .or_else(|| downloader.get(key))
+        .cloned()
 }
 
 /// Upstream `PrintAction`: a metadata postprocessor writing FORMAT.

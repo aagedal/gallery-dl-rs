@@ -45,6 +45,12 @@ pub struct DownloadClient {
     ytdl_cookies: Option<std::sync::Arc<crate::cookies::YtdlCookies>>,
     /// Upstream `skip: false`: download and replace existing files.
     pub(crate) overwrite: bool,
+    /// Upstream `adjust-extensions`: correct extensions from file signatures.
+    pub(crate) adjust_extensions: bool,
+    /// Upstream `validate-html`: reject HTML responses for media files.
+    pub(crate) validate_html: bool,
+    /// Upstream `retry-codes`: further HTTP status codes to retry.
+    pub(crate) retry_codes: std::sync::Arc<[u16]>,
     /// Upstream `skip: "enumerate"`: save under `NAME.N.EXT` next to
     /// existing files instead of skipping them.
     pub(crate) enumerate: bool,
@@ -239,6 +245,20 @@ impl DownloadClient {
         self
     }
 
+    /// Upstream downloader `adjust-extensions`, `validate-html` and
+    /// `retry-codes`.
+    pub fn with_http_options(
+        mut self,
+        adjust_extensions: bool,
+        validate_html: bool,
+        retry_codes: Vec<u16>,
+    ) -> Self {
+        self.adjust_extensions = adjust_extensions;
+        self.validate_html = validate_html;
+        self.retry_codes = retry_codes.into();
+        self
+    }
+
     /// Save next to existing files as `NAME.1.EXT`, `NAME.2.EXT`, ...
     /// (upstream `skip: "enumerate"`).
     pub fn with_enumerate(mut self, enabled: bool) -> Self {
@@ -303,6 +323,9 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         ytdl: Some(Path::new("yt-dlp").into()),
         ytdl_cookies: None,
         overwrite: false,
+        adjust_extensions: true,
+        validate_html: true,
+        retry_codes: std::sync::Arc::new([]),
         enumerate: false,
         no_download: false,
     })
@@ -989,6 +1012,23 @@ async fn download_media(
             }
         };
         let failure = match result {
+            Ok(Outcome::Downloaded(saved))
+                if client.adjust_extensions
+                    && matches!(candidate.job, MediaJob::DirectHttp)
+                    && ytdl::source(&candidate).is_none()
+                    && media
+                        .handoff
+                        .get("_http_adjust_extension")
+                        .is_none_or(|v| v.as_bool() != Some(false)) =>
+            {
+                // Upstream `adjust-extensions`: fix extensions that do not
+                // match the file's signature.
+                return Ok(match crate::signature::adjust_file(&saved)? {
+                    Some((target, true)) => Outcome::Skipped(target),
+                    Some((target, false)) => Outcome::Downloaded(target),
+                    None => Outcome::Downloaded(saved),
+                });
+            }
             Ok(outcome) => return Ok(outcome),
             Err(failure) if failure.fallback && client.fallback => failure,
             Err(failure) => return Err(failure.error),
@@ -1237,7 +1277,7 @@ async fn attempt_download(
     let expected = response.content_length();
     client.capture_http_mtime(response.headers());
     let modified = mtime.select(response.headers());
-    validate_media(&response)?;
+    validate_media(client, path, &response)?;
     if let Some(rejection) = expected.and_then(|size| limits.check(size)) {
         return Ok(Outcome::Filtered(rejection));
     }
@@ -1486,7 +1526,8 @@ fn check_status(
         && !expected_status(media, response.status())
     {
         let retry = response.status().is_server_error()
-            || response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS;
+            || response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+            || client.retry_codes.contains(&response.status().as_u16());
         if retry && let Some(delay) = retry_after(response.headers(), SystemTime::now()) {
             // Record even on the final attempt so other workers honor the server.
             client.rate_limits.defer(&media.url, delay);
@@ -1513,7 +1554,11 @@ fn expected_status(media: &Media, status: reqwest::StatusCode) -> bool {
         })
 }
 
-fn validate_media(response: &reqwest::Response) -> std::result::Result<(), Failure> {
+fn validate_media(
+    client: &DownloadClient,
+    path: &Path,
+    response: &reqwest::Response,
+) -> std::result::Result<(), Failure> {
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
@@ -1524,6 +1569,16 @@ fn validate_media(response: &reqwest::Response) -> std::result::Result<(), Failu
         .unwrap_or("")
         .trim()
         .to_ascii_lowercase();
+    // Upstream `validate-html`: HTML is accepted when disabled or when the
+    // file is meant to be a web page.
+    let html_wanted = !client.validate_html
+        || path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("html") || e.eq_ignore_ascii_case("htm"));
+    if html_wanted && matches!(content_type.as_str(), "text/html" | "application/xhtml+xml") {
+        return Ok(());
+    }
     if matches!(
         content_type.as_str(),
         "text/html"
@@ -1665,7 +1720,7 @@ async fn attempt_resume(
                     });
             }
             crate::range::Plan::Full(checkpoint) => {
-                validate_media(&response)?;
+                validate_media(client, path, &response)?;
                 if let Some(rejection) = response
                     .content_length()
                     .and_then(|size| limits.check(size))
@@ -1680,7 +1735,7 @@ async fn attempt_resume(
                 (0, response.content_length(), response.content_length())
             }
             crate::range::Plan::Append { end, total } => {
-                validate_media(&response)?;
+                validate_media(client, path, &response)?;
                 if let Some(rejection) = limits.check(total) {
                     return filter_partial(partial, rejection).await;
                 }
