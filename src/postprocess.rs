@@ -61,6 +61,11 @@ pub mod template;
 #[path = "postprocess_zipfile.rs"]
 pub mod zipfile;
 
+/// Python `os.path.expandvars(os.path.expanduser(path))`.
+pub fn expand_path(path: &str) -> PathBuf {
+    ugoira::expanded(path).into()
+}
+
 /// Expand a leading `~` like Python's `os.path.expanduser`.
 pub(crate) fn expand_home(path: &str) -> PathBuf {
     match path.strip_prefix('~') {

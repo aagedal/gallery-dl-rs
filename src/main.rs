@@ -851,6 +851,44 @@ async fn run(args: Args) -> Result<()> {
     if !args.print.is_empty() {
         args.quiet = true;
     }
+    // Upstream `output` section: files for logs, unsupported and failed
+    // URLs, `mode: null` and printing skipped files.
+    let mut print_skipped = true;
+    if let Some(output) = globals
+        .and_then(|g| g.get("output"))
+        .and_then(serde_json::Value::as_object)
+    {
+        let path = |key: &str| {
+            let value = output.get(key)?;
+            let raw = value
+                .as_str()
+                .or_else(|| value.get("path").and_then(serde_json::Value::as_str))?;
+            Some(gallery_dl_rs::postprocess::expand_path(raw))
+        };
+        if args.write_log.is_none()
+            && let Some(file) = path("logfile")
+        {
+            gallery_dl_rs::logfile::start(&file)?;
+        }
+        if args.write_unsupported.is_none()
+            && let Some(file) = path("unsupportedfile")
+        {
+            gallery_dl_rs::unsupported::set_file(&file)?;
+        }
+        if args.error_file.is_none() {
+            args.error_file = path("errorfile");
+        }
+        match output.get("mode") {
+            Some(serde_json::Value::Bool(false)) => args.quiet = true,
+            Some(serde_json::Value::String(mode)) if mode.eq_ignore_ascii_case("null") => {
+                args.quiet = true
+            }
+            _ => {}
+        }
+        if output.get("skip") == Some(&serde_json::Value::Bool(false)) {
+            print_skipped = false;
+        }
+    }
     if let Some(downloader) = globals
         .and_then(|g| g.get("downloader"))
         .and_then(serde_json::Value::as_object)
@@ -1426,7 +1464,7 @@ async fn run(args: Args) -> Result<()> {
                     }
                 }
                 Ok(ArchiveOutcome::Completed(Outcome::Skipped(path))) => {
-                    if !args.quiet {
+                    if !args.quiet && print_skipped {
                         eprintln!("skipped {}", path.display())
                     }
                     if let Some(sleep) = &args.sleep_skip {
@@ -3034,8 +3072,10 @@ async fn resolved_settings(
     }
     let _ = GLOBAL_OPTIONS.set({
         let mut globals = config.globals().clone();
-        if let Some(downloader) = config.sections().get("downloader") {
-            globals.insert("downloader".into(), downloader.clone());
+        for section in ["downloader", "output"] {
+            if let Some(value) = config.sections().get(section) {
+                globals.insert(section.into(), value.clone());
+            }
         }
         globals
     });

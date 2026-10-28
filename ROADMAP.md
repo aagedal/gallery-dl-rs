@@ -1600,8 +1600,9 @@ upstream's root → `extractor` → category inheritance; the `downloader`
 section's `rate`, `retries`, `timeout`, `verify` and `mtime` apply; `output`
 and `cache` are ignored. Credentials stay confined to supporting categories,
 and `base-directory`, `archive` and cookie-file paths expand `~` and
-environment variables. **Remaining:** `output` options (log formats,
-progress), `downloader.http`/`ytdl` subsections, format-string archive paths,
+environment variables. The `output` section's `logfile`, `unsupportedfile`, `errorfile` (paths or
+`{"path": ...}`), `mode: null`/`false` and `skip: false` apply.
+**Remaining:** other `output` options (log formats, progress, colors), `downloader.http`/`ytdl` subsections, format-string archive paths,
 relative paths resolve against the configuration directory rather than the
 working directory, and the default base directory differs (`downloads`).
 
