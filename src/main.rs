@@ -1113,6 +1113,43 @@ async fn run(args: Args) -> Result<()> {
                 .collect()
         })
     };
+    // Upstream `output.progress`: `[CURRENT/TOTAL] URL` before each input
+    // when there is more than one (and not with -q). Standard input cannot
+    // be counted in advance, so it shows no progress.
+    let progress_format = match GLOBAL_OPTIONS
+        .get()
+        .and_then(|g| g.get("output"))
+        .and_then(|o| o.get("progress"))
+    {
+        None | Some(serde_json::Value::Bool(true)) => Some("[{current}/{total}] {url}".to_owned()),
+        Some(serde_json::Value::String(format)) => Some(format.clone()),
+        _ => None,
+    };
+    let progress_total = (!args.quiet && progress_format.is_some())
+        .then(|| {
+            let mut total = args.urls.len();
+            for path in args
+                .input_files
+                .iter()
+                .chain(&args.input_file_comment)
+                .chain(&args.input_file_delete)
+            {
+                if path.as_os_str() == "-" {
+                    return None;
+                }
+                let text = std::fs::read_to_string(path).ok()?;
+                total += text
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with('-'))
+                    .count();
+            }
+            Some(total)
+        })
+        .flatten()
+        .filter(|total| *total > 1);
+    let progress = progress_format.as_deref();
+    let progress_total = &progress_total;
     let media = inputs
         .items()
         .take_while(|_| std::future::ready(!terminated.load(std::sync::atomic::Ordering::Acquire)))
@@ -1120,6 +1157,7 @@ async fn run(args: Args) -> Result<()> {
         .then(|(index, item)| {
             let (args, option_settings, input_settings, input_origins) =
                 (&args, &option_settings, &input_settings, &input_origins);
+            let progress_total = *progress_total;
             async move {
                 let item = match item {
                     Ok(item) => item,
@@ -1127,6 +1165,17 @@ async fn run(args: Args) -> Result<()> {
                 };
                 if let Some(origin) = item.origin {
                     input_origins.borrow_mut().insert(index, origin);
+                }
+                if let Some(format) = progress
+                    && let Some(total) = progress_total
+                {
+                    eprintln!(
+                        "{}",
+                        format
+                            .replace("{current}", &(index + 1).to_string())
+                            .replace("{total}", &total.to_string())
+                            .replace("{url}", &item.url)
+                    );
                 }
                 if item.options.is_empty() {
                     return (index, Ok(item.url), None);

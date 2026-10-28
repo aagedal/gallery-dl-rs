@@ -1618,7 +1618,9 @@ lists) and `config-file` apply to yt-dlp downloads; `raw-options` cannot.
 `netrc` are also read from the root/`extractor` configuration scope.
 Upstream's `extension-map` applies to every extractor (default: `jpeg`,
 `jpe`, `jfif`, `jif` and `jfi` become `jpg`).
-**Remaining:** other `output` options (log formats, progress, colors), most
+`output.progress` (default on, or a format string) prints
+`[CURRENT/TOTAL] URL` before each of several inputs.
+**Remaining:** other `output` options (log formats, colors), most
 `downloader.ytdl` options, and relative paths
 resolve against the configuration directory rather than the working directory.
 
