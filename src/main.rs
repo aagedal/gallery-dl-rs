@@ -896,6 +896,15 @@ async fn run(args: Args) -> Result<()> {
                 .flatten()
         })
     };
+    // Upstream `cookies-update` given a path writes session cookies there;
+    // `true` (rewriting the input cookie file) is not supported.
+    if args.cookies_export.is_none()
+        && let Some(path) = globals
+            .and_then(|g| g.get("cookies-update"))
+            .and_then(serde_json::Value::as_str)
+    {
+        args.cookies_export = Some(gallery_dl_rs::postprocess::expand_path(path));
+    }
     args.sleep = args.sleep.or_else(|| global_sleep("sleep"));
     args.sleep_extractor = args
         .sleep_extractor

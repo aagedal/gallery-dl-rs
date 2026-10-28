@@ -1602,7 +1602,10 @@ and `cache` are ignored. Credentials stay confined to supporting categories,
 and `base-directory`, `archive` and cookie-file paths expand `~` and
 environment variables. The `output` section's `logfile`, `unsupportedfile`, `errorfile` (paths or
 `{"path": ...}`), `mode: null`/`false` and `skip: false` apply.
-`downloader.ytdl` `format`, `cmdline-args` (whitespace-split strings or
+Registry sites apply user `keywords`/`keywords-global` (with `keywords-eval`
+format strings), `metadata-url` and `metadata-version`; `cookies-update` with
+a path writes session cookies there (rewriting the input file with `true` is
+not supported). `downloader.ytdl` `format`, `cmdline-args` (whitespace-split strings or
 lists) and `config-file` apply to yt-dlp downloads; `raw-options` cannot.
 `sleep`, `sleep-extractor`, `sleep-skip`, `source-address`, `geo-bypass` and
 `netrc` are also read from the root/`extractor` configuration scope.

@@ -553,6 +553,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     "path-strip",
     "skip",
     "download",
+    "cookies-update",
     "extension-map",
     "geo-bypass",
     "netrc",
