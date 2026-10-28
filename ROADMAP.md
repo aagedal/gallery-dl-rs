@@ -1540,7 +1540,7 @@ backend. Repeated CLI options override earlier ones, as with argparse.
 kept until the replacement completes) and bypass archive checks; `skip`
 values `abort:N`, `terminate:N` and `exit:N` map to `-A`/`-T`. The `compare`
 processor (`action` replace/enumerate, `shallow`) is supported.
-**Remaining:** compare `equal`, `skip: enumerate`, `python` (no native equivalent), exec `archive`/`success`/`error` actions, and
+**Remaining:** `python` (no native equivalent), exec `archive`, and
 bzip2/lzma zip compression.
 
 **Implemented input, auth and pacing options, 2026-10-28:** input files accept
@@ -1627,6 +1627,34 @@ print the token with the configuration key to set. Tokens are never cached.
 **Implemented special inputs, 2026-10-28:** `recursive:URL`/`r:URL` (also
 `file://` documents) queues every URL found, and `ytdl:URL` hands any HTTP(S)
 page to the yt-dlp site (metadata from `yt-dlp -J --flat-playlist`).
+
+**Implemented actions, archives and downloader options, 2026-10-28:**
+`skip: "enumerate"` saves next to existing files as `NAME.N.EXT`; compare
+`equal` (`abort`, `terminate`, `exit`, with `:N`) stops after consecutive
+equal files; exec `success`/`error` run upstream actions. The `actions`
+option runs actions for matching error and warning messages (download and
+extraction failures, exec warnings) with `print`, `status`, `level`, `exec`,
+`wait`, `keyword`, `raise`, `abort`, `terminate`, `restart` (as `abort`) and
+`exit`; `status` and `exit` set the exit status. `flag` and signal actions
+are not supported. `keywords-default` fills missing path keywords.
+Existing Python gallery-dl archives (an `archive` table of `entry` keys)
+are read and updated with upstream keys (category + `archive_fmt`); new
+archives keep the native schema. `archive-event` (`file`, `skip`, `after`;
+upstream archives default to `file`, native ones also record existing
+files), `archive-mode: memory` (written after a run without errors) and
+`skip-filter` are supported. Downloader `adjust-extensions` (file signature
+checks, default on), `validate-html`, `retry-codes` and `part-directory`
+apply. `-j/--dump-json` prints upstream's `[2, post]`/`[3, url, file]`
+message list (`output.private`, `num-to-str`, `jsonl`, `ascii`); the native
+media dump is the hidden `--dump-media-json`.
+**Remaining divergences:** direct links keep `direct/<digest>_NAME` paths
+(request-identity separation) rather than `directlink/{domain}_{path}_NAME`;
+without `path-restrict`, filenames use conservative ASCII cleaning rather
+than upstream's `auto`; exit codes are 0/1 rather than upstream's bit flags;
+`metadata-http`, `metadata-extractor`, `parent-*`, `category-transfer`,
+`file-unique`/`child-unique`, `path-extended`/`path-convert`, `tls12`,
+`ciphers`, `truststore`, `proxy-env`, `cookies-select`, `category-map` and
+`config-map` are not implemented.
 
 ### Companion yt-dlp-rs integration
 
