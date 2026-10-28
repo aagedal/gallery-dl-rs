@@ -204,6 +204,11 @@ impl ExecOptions {
             if self.session {
                 process.process_group(0);
             }
+            // Upstream: `CREATE_NEW_PROCESS_GROUP` on Windows.
+            #[cfg(windows)]
+            if self.session {
+                process.creation_flags(0x0000_0200);
+            }
             let mut child = process
                 .spawn()
                 .map_err(|e| error(format!("exec failed to start '{display}': {e}")))?;
