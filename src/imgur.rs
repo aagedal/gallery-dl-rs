@@ -130,9 +130,11 @@ pub fn target(url: &Url) -> Result<Target> {
     match segments.as_slice() {
         [file] if direct => {
             let stem = file.split_once('.').map_or(*file, |(stem, _)| stem);
-            // Thumbnail suffixes (s, b, t, m, l, h) follow a 7-character ID.
-            let id = if stem.len() == 8 && b"sbtmlh".contains(&stem.as_bytes()[7]) {
-                &stem[..7]
+            // Thumbnail suffixes (s, b, t, m, l, h) follow the ID.
+            let id = if matches!(stem.len(), 6 | 8)
+                && b"sbtmlh".contains(&stem.as_bytes()[stem.len() - 1])
+            {
+                &stem[..stem.len() - 1]
             } else {
                 stem
             };
@@ -141,7 +143,8 @@ pub fn target(url: &Url) -> Result<Target> {
                 .ok_or_else(unsupported)
         }
         _ if direct => Err(unsupported()),
-        ["a", segment] => slug_id(segment).map(Target::Album).ok_or_else(unsupported),
+        // Like upstream's unanchored pattern, trailing segments (`/all`) are ignored.
+        ["a", segment, ..] => slug_id(segment).map(Target::Album).ok_or_else(unsupported),
         ["gallery", segment] | ["t", _, segment] => slug_id(segment)
             .map(Target::Gallery)
             .ok_or_else(unsupported),
@@ -184,10 +187,9 @@ pub fn target(url: &Url) -> Result<Target> {
             Ok(Target::Image((*id).into()))
         }
         [segment] => {
-            let id = segment.split_once('.').map_or(*segment, |(stem, _)| stem);
-            valid_id(id)
-                .then(|| Target::Image(id.into()))
-                .ok_or_else(unsupported)
+            let stem = segment.split_once('.').map_or(*segment, |(stem, _)| stem);
+            // `title-ID` slugs, as for albums.
+            slug_id(stem).map(Target::Image).ok_or_else(unsupported)
         }
         _ => Err(unsupported()),
     }
@@ -771,6 +773,18 @@ mod tests {
             ),
             ("https://imgur.com/21yMxCS", Target::Image("21yMxCS".into())),
             (
+                "https://imgur.com/test-21yMxCS",
+                Target::Image("21yMxCS".into()),
+            ),
+            (
+                "https://i.imgur.com/zxaY6s.gif",
+                Target::Image("zxaY6".into()),
+            ),
+            (
+                "https://imgur.com/a/RhJXhVT/all",
+                Target::Album("RhJXhVT".into()),
+            ),
+            (
                 "https://imgur.com/r/pics/21yMxCS",
                 Target::Image("21yMxCS".into()),
             ),
@@ -831,7 +845,6 @@ mod tests {
             "https://imgur.com/user/me",
             "https://imgur.com/search?q=",
             "https://imgur.com/a/toolongid",
-            "https://imgur.com/a/ab/cd",
             "https://i.imgur.com/a/TcBmP",
             "https://imgur.com.evil.test/a/TcBmP",
             "https://imgur.com:444/a/TcBmP",

@@ -277,6 +277,29 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
     }
     let host = url.host_str().ok_or_else(unsupported)?;
     let host = host.strip_prefix("www.").unwrap_or(host);
+    // Upstream `GelbooruRedirectExtractor`: a base64-encoded post URL.
+    if site == Site::Gelbooru && host == "gelbooru.com" && url.path() == "/redirect.php" {
+        use base64::Engine;
+        let encoded = url
+            .query_pairs()
+            .find(|(k, _)| k == "s")
+            .map(|(_, v)| v.into_owned())
+            .ok_or_else(unsupported)?;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(encoded.trim())
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .ok_or_else(unsupported)?;
+        let decoded = match decoded.strip_prefix("//") {
+            Some(rest) => format!("https://{rest}"),
+            None => decoded,
+        };
+        let inner = Url::parse(&decoded).map_err(|_| unsupported())?;
+        if inner.path() == "/redirect.php" {
+            return Err(unsupported());
+        }
+        return target(site, &inner);
+    }
     let root = match (site, host) {
         (Site::Danbooru, "danbooru.donmai.us" | "donmai.us") => "https://danbooru.donmai.us/",
         // Mirrors keep their own origin (`safebooru` filters content).
@@ -284,7 +307,19 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
         (Site::Danbooru, "sonohara.donmai.us") => "https://sonohara.donmai.us/",
         (Site::Danbooru, "safebooru.donmai.us") => "https://safebooru.donmai.us/",
         (Site::Danbooru, "donmai.moe") => "https://donmai.moe/",
-        (Site::E621, "e621.net") => "https://e621.net/",
+        (Site::E621, "e621.net" | "e621.cc") => "https://e621.net/",
+        // Upstream `E621FrontendExtractor`: queue the tag search on e621.net.
+        (Site::E621, "e621.anthro.fr") if url.path() == "/" => {
+            let tags = url
+                .query_pairs()
+                .find(|(k, _)| k == "q")
+                .map(|(_, v)| v.into_owned())
+                .ok_or_else(unsupported)?;
+            return Ok((
+                Target::Tags { tags },
+                Url::parse("https://e621.net/").unwrap(),
+            ));
+        }
         (Site::E621, "e926.net") => "https://e926.net/",
         (Site::Gelbooru, "gelbooru.com") => "https://gelbooru.com/",
         (Site::Safebooru, "safebooru.org") => "https://safebooru.org/",
@@ -335,7 +370,16 @@ pub fn target(site: Site, url: &Url) -> Result<(Target, Url)> {
         })
     } else if site.danbooru_dialect() {
         match segments.as_slice() {
-            ["posts", id] => post_id(id).map(|id| Target::Post { id }),
+            ["posts", id] | ["post", "show", id] => post_id(id).map(|id| Target::Post { id }),
+            // e621 short links: base-32 post IDs (`int(ID, 32)`).
+            ["p", code] if site == Site::E621 => u64::from_str_radix(code, 32)
+                .ok()
+                .filter(|id| *id > 0)
+                .map(|id| Target::Post { id }),
+            // e621.cc's front page search.
+            [] if site == Site::E621 && host == "e621.cc" => query("tags")
+                .filter(|t| valid_tags(t))
+                .map(|tags| Target::Tags { tags }),
             ["posts"] => source_tags
                 .clone()
                 .or_else(|| query("tags"))
@@ -728,7 +772,7 @@ fn defaults(
 pub(crate) fn defaults_for_url(url: &Url) -> Option<Arc<crate::naming::SourceDefaults>> {
     let category = match url.host_str()? {
         host if danbooru_host(host) => "danbooru",
-        "e621.net" => "e621",
+        "e621.net" | "e621.cc" | "e621.anthro.fr" => "e621",
         "e926.net" => "e926",
         "gelbooru.com" => "gelbooru",
         "safebooru.org" => "safebooru",
@@ -2448,6 +2492,50 @@ mod tests {
         assert!(parse_post(Site::E621, &e621).is_none());
         let gel = json!({"id": 5, "file_url": "https://gelbooru.com.evil.test/a.jpg"});
         assert!(parse_post(Site::Gelbooru, &gel).is_none());
+    }
+
+    #[test]
+    fn classifies_upstream_url_variants() {
+        let t = |site, raw: &str| target(site, &Url::parse(raw).unwrap()).unwrap();
+        assert_eq!(
+            t(
+                Site::Danbooru,
+                "https://danbooru.donmai.us/post/show/294929"
+            )
+            .0,
+            Target::Post { id: 294929 }
+        );
+        assert_eq!(
+            t(Site::E621, "https://e621.net/post/show/535").0,
+            Target::Post { id: 535 }
+        );
+        assert_eq!(
+            t(Site::E621, "https://e621.net/p/312fs").0,
+            Target::Post { id: 3181052 }
+        );
+        for raw in [
+            "https://e621.cc/?tags=rating:safe",
+            "https://e621.anthro.fr/?q=rating:safe",
+            "https://e621.cc/posts?tags=rating:safe",
+        ] {
+            let (target, root) = t(Site::E621, raw);
+            assert_eq!(
+                target,
+                Target::Tags {
+                    tags: "rating:safe".into()
+                },
+                "{raw}"
+            );
+            assert_eq!(root.as_str(), "https://e621.net/");
+        }
+        assert_eq!(
+            t(
+                Site::Gelbooru,
+                "https://gelbooru.com/redirect.php?s=Ly9nZWxib29ydS5jb20vaW5kZXgucGhwP3BhZ2U9cG9zdCZzPXZpZXcmaWQ9MTgzMDA0Ng=="
+            )
+            .0,
+            Target::Post { id: 1830046 }
+        );
     }
 
     #[test]
