@@ -100,7 +100,10 @@ pub(crate) async fn prepare(
         directory.as_deref(),
     )
     .or_else(|failure| {
+        // With `metadata-http`, templates may need the response headers;
+        // the path is built again after the download.
         if source_filename
+            || client.metadata_http.is_some()
             || pp
                 .specifications
                 .iter()
@@ -544,8 +547,12 @@ pub(crate) async fn download(
         recovery,
     };
     let captured_mtime = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let captured_headers = std::sync::Arc::new(std::sync::Mutex::new(None));
     let mut source_client = client.clone();
     source_client.response_mtime = Some(captured_mtime.clone());
+    if client.metadata_http.is_some() {
+        source_client.response_headers = Some(captured_headers.clone());
+    }
     let result = download_media(
         &source_client,
         source.directory.path(),
@@ -600,6 +607,35 @@ pub(crate) async fn download(
             prepared
                 .keywords
                 .insert("_mtime_http".into(), seconds.into());
+        }
+    }
+    // Upstream `metadata-http`: headers become a keyword, and the path is
+    // built afterwards so templates can use them.
+    if let Some(name) = &client.metadata_http
+        && let Some(headers) = captured_headers
+            .lock()
+            .map_err(|_| error("HTTP metadata lock poisoned"))?
+            .take()
+    {
+        prepared
+            .keywords
+            .insert(name.to_string(), Value::Object(headers));
+        let rebuilt = logical_path(
+            root,
+            &prepared.media,
+            &prepared.keywords,
+            options,
+            template,
+            prepared.directory.as_deref(),
+        )?;
+        if rebuilt != prepared.path {
+            if !client.overwrite && postprocess::regular_file(&rebuilt)? {
+                return Ok(Outcome::Skipped(rebuilt));
+            }
+            if let Some(parent) = rebuilt.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+            prepared.path = rebuilt;
         }
     }
     let pp = options.postprocessors.expect("generic processors");

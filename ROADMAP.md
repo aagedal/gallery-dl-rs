@@ -1662,11 +1662,15 @@ authentication, 32 for format errors, 64 for unsupported URLs and 128 for
 local file errors (extraction errors are classified by their messages).
 **Remaining divergences:** direct links keep `direct/<digest>_NAME` paths
 (request-identity separation) rather than `directlink/{domain}_{path}_NAME`;
-`metadata-http`, `metadata-extractor`, `parent-*`, `category-transfer`,
+`metadata-extractor`, `parent-*`, `category-transfer`,
 `file-unique`/`child-unique`, `path-extended`/`path-convert`, `tls12`,
 `ciphers` and `truststore` are not implemented; `cookies-select` picks one
 source per run (`rotate` starts with the first);
-`proxy-env: false` disables environment proxies. (Upstream itself rejects
+`proxy-env: false` disables environment proxies. `metadata-http` (root or
+`extractor` scope) exposes response headers, the Content-Disposition
+`filename`/`extension` and the Last-Modified `date` under the given keyword;
+the destination is rendered again after the response so filename templates
+can use them. (Upstream itself rejects
 replacement fields in string `archive` paths.) `config-map` (default: upstream's renamed categories, e.g.
 `kemonoparty` → `kemono`, `pixiv` → `pixiv-novel`) copies settings to new
 category names; `category-map` and `--compat` rename `category` (and

@@ -1491,6 +1491,11 @@ async fn run(args: Args) -> Result<()> {
                     .and_then(serde_json::Value::as_str)
                     .map(gallery_dl_rs::postprocess::expand_path),
             )
+            .with_metadata_http(
+                ["metadata-http", "http-metadata"]
+                    .iter()
+                    .find_map(|key| GLOBAL_OPTIONS.get()?.get(*key)?.as_str().map(str::to_owned)),
+            )
             .with_no_download(args.no_download)
             .with_http_mtime(!args.no_mtime)
             .with_metadata_mtime(args.mtime.clone())

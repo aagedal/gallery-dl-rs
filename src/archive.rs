@@ -207,6 +207,7 @@ impl Archive {
             .metadata
             .as_ref()
             .is_some_and(|metadata| metadata.booru_keywords.is_some());
+        let source_booru = source_booru || client.metadata_http.is_some();
         let empty_processors = (source_booru && options.postprocessors.is_none())
             .then(|| crate::postprocess::Postprocessors::new(Vec::new()));
         let options = DownloadOptions {

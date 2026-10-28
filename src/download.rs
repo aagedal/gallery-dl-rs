@@ -36,6 +36,12 @@ pub struct DownloadClient {
     mtime_http: bool,
     mtime_field: Option<String>,
     response_mtime: Option<std::sync::Arc<std::sync::Mutex<Option<SystemTime>>>>,
+    /// Response headers captured for `metadata-http`.
+    pub(crate) response_headers: Option<
+        std::sync::Arc<std::sync::Mutex<Option<serde_json::Map<String, serde_json::Value>>>>,
+    >,
+    /// Upstream `metadata-http`: keyword receiving the response headers.
+    pub(crate) metadata_http: Option<std::sync::Arc<str>>,
     sleep: Option<crate::sleep::SleepRange>,
     /// Maximum body bytes per second for each download.
     rate: Option<u64>,
@@ -138,7 +144,76 @@ fn set_mtime(file: &std::fs::File, time: Option<SystemTime>) -> std::io::Result<
 }
 
 impl DownloadClient {
+    /// Upstream `util.extract_headers`: every header (in title case), plus
+    /// `filename`/`extension` from Content-Disposition and `date` from
+    /// Last-Modified.
+    fn capture_headers(&self, headers: &HeaderMap) {
+        let Some(capture) = &self.response_headers else {
+            return;
+        };
+        let mut data = serde_json::Map::new();
+        for (name, value) in headers {
+            let Ok(value) = value.to_str() else { continue };
+            let title = name
+                .as_str()
+                .split('-')
+                .map(|part| {
+                    let mut chars = part.chars();
+                    chars
+                        .next()
+                        .map(|c| c.to_ascii_uppercase().to_string() + chars.as_str())
+                        .unwrap_or_default()
+                })
+                .collect::<Vec<_>>()
+                .join("-");
+            data.insert(title, value.into());
+        }
+        if let Some(name) = headers
+            .get(reqwest::header::CONTENT_DISPOSITION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(content_disposition_filename)
+        {
+            let (stem, extension) = match name.rsplit_once('.') {
+                Some((stem, ext)) if !stem.is_empty() => (stem.to_owned(), ext.to_lowercase()),
+                _ => (name.clone(), String::new()),
+            };
+            data.insert("filename".into(), stem.into());
+            data.insert("extension".into(), extension.into());
+        }
+        if let Some(date) = headers
+            .get(reqwest::header::LAST_MODIFIED)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| httpdate::parse_http_date(v).ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .and_then(|d| time::OffsetDateTime::from_unix_timestamp(d.as_secs() as i64).ok())
+        {
+            data.insert(
+                "date".into(),
+                format!(
+                    "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                    date.year(),
+                    date.month() as u8,
+                    date.day(),
+                    date.hour(),
+                    date.minute(),
+                    date.second()
+                )
+                .into(),
+            );
+        }
+        if let Ok(mut slot) = capture.lock() {
+            *slot = Some(data);
+        }
+    }
+
+    /// Set the `metadata-http` keyword name.
+    pub fn with_metadata_http(mut self, name: Option<String>) -> Self {
+        self.metadata_http = name.filter(|n| !n.is_empty()).map(Into::into);
+        self
+    }
+
     fn capture_http_mtime(&self, headers: &HeaderMap) {
+        self.capture_headers(headers);
         if let Some(capture) = &self.response_mtime
             && let Ok(mut timestamp) = capture.lock()
         {
@@ -326,6 +401,8 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         mtime_http: true,
         mtime_field: None,
         response_mtime: None,
+        response_headers: None,
+        metadata_http: None,
         sleep: None,
         rate: None,
         ytdl: Some(Path::new("yt-dlp").into()),
@@ -338,6 +415,22 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         enumerate: false,
         no_download: false,
     })
+}
+
+/// Upstream `text.filename_from_contentdisposition`.
+fn content_disposition_filename(value: &str) -> Option<String> {
+    if let Some(start) = value.find("filename*=") {
+        let raw = value[start + 10..].split(';').next()?.trim();
+        let encoded = raw.split_once("''").map_or(raw, |(_, rest)| rest);
+        return Some(crate::sites::percent_decode(encoded.trim_matches('"')));
+    }
+    let start = value.find("filename=")?;
+    let raw = value[start + 9..]
+        .split(';')
+        .next()?
+        .trim()
+        .trim_matches('"');
+    (!raw.is_empty()).then(|| crate::sites::unescape(raw))
 }
 
 pub fn safe_component(value: &str) -> String {
@@ -526,13 +619,16 @@ pub async fn download_with_template(
         .as_ref()
         .is_some_and(|metadata| metadata.booru_keywords.is_some());
     // Source filename preparation also runs when no hooks are configured.
-    let empty_processors = (source_booru && options.postprocessors.is_none())
+    // `metadata-http` needs the processing path, which builds the
+    // destination after the response.
+    let processing = source_booru || client.metadata_http.is_some();
+    let empty_processors = (processing && options.postprocessors.is_none())
         .then(|| crate::postprocess::Postprocessors::new(Vec::new()));
     let options = DownloadOptions {
         postprocessors: options.postprocessors.or(empty_processors.as_ref()),
         ..options
     };
-    if source_booru || options.postprocessors.is_some_and(|pp| pp.has_generic()) {
+    if processing || options.postprocessors.is_some_and(|pp| pp.has_generic()) {
         let prepared = processing::prepare(client, root, media, options, template).await?;
         return processing::download(client, root, media, options, template, prepared).await;
     }
@@ -1971,5 +2067,24 @@ mod kemono_redirect_tests {
             media.url = url::Url::parse(url).unwrap();
             assert!(!kemono_public_redirects(&media, &HeaderMap::new()));
         }
+    }
+}
+
+#[cfg(test)]
+mod content_disposition_tests {
+    use super::content_disposition_filename as name;
+
+    #[test]
+    fn parses_plain_and_encoded_filenames() {
+        assert_eq!(
+            name(r#"attachment; filename="a b.png""#).as_deref(),
+            Some("a b.png")
+        );
+        assert_eq!(name("inline; filename=x.jpg").as_deref(), Some("x.jpg"));
+        assert_eq!(
+            name("attachment; filename*=UTF-8''%C3%A9t%C3%A9.gif").as_deref(),
+            Some("été.gif")
+        );
+        assert_eq!(name("attachment"), None);
     }
 }
