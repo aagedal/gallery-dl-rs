@@ -224,7 +224,7 @@ impl Specification {
             "metadata" => Processor::Metadata(metadata::MetadataOptions::parse(&options, base)?),
             "mtime" => Processor::Mtime(mtime::MtimeOptions::parse(&options)?),
             "hash" => Processor::Hash(hash::HashOptions::parse(&options)?),
-            "exec" => Processor::Exec(exec::ExecOptions::parse(&options)?),
+            "exec" => Processor::Exec(exec::ExecOptions::parse(&options, base)?),
             "classify" => Processor::Classify(classify::ClassifyOptions::parse(&options)?),
             "directory" => Processor::Directory,
             "zip" => Processor::Zip(zipfile::ZipOptions::parse(&options)?),
@@ -798,7 +798,7 @@ impl Postprocessors {
                         .as_ref()
                         .map(|name| name.to_string_lossy().into_owned());
                     options
-                        .run(
+                        .run_archived(
                             context,
                             exec::ExecPaths {
                                 path: paths.realpath.as_deref(),
@@ -806,6 +806,8 @@ impl Postprocessors {
                                 directory: Some(&paths.directory),
                                 filename: filename.as_deref(),
                             },
+                            media,
+                            root,
                         )
                         .await?
                 }
@@ -874,12 +876,14 @@ impl Postprocessors {
                 Processor::Hash(options) => rebuild |= options.run(context, path).await?,
                 Processor::Exec(options) => {
                     options
-                        .run(
+                        .run_archived(
                             context,
                             exec::ExecPaths {
                                 path: Some(path),
                                 ..Default::default()
                             },
+                            media,
+                            root,
                         )
                         .await?
                 }

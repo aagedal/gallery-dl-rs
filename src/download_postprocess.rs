@@ -893,14 +893,17 @@ async fn run_path_processor(
     };
     match processor {
         Processor::Exec(config) => {
+            let media = prepared.media.clone();
             config
-                .run(
+                .run_archived(
                     &mut prepared.keywords,
                     postprocess::exec::ExecPaths {
                         path: Some(&prepared.path),
                         temppath: Some(input),
                         ..Default::default()
                     },
+                    &media,
+                    root,
                 )
                 .await?
         }
