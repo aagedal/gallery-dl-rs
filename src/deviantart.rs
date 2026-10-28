@@ -103,6 +103,8 @@ pub enum Target {
     Following(String),
     /// `USER/journal/`, `USER/posts[/journals]`: the user's journals.
     Journals(String),
+    /// A Sta.sh item or folder; `true` for legacy `sta.sh` links.
+    Stash(String, bool),
 }
 
 /// Upstream `util.b36decode`.
@@ -141,6 +143,25 @@ pub fn target(url: &Url) -> Result<Target> {
         .map(|prefix| format!("{prefix}deviantart.com"))
         .unwrap_or_else(|| host.to_owned());
     let host = host.as_str();
+    if host == "sta.sh"
+        || matches!(host, "www.deviantart.com" | "deviantart.com")
+            && segments.first() == Some(&"stash")
+    {
+        let id = if host == "sta.sh" {
+            segments.first()
+        } else {
+            segments.get(1)
+        };
+        return id
+            .filter(|id| {
+                (1..=32).contains(&id.len())
+                    && id
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+            })
+            .map(|id| Target::Stash((*id).to_owned(), host == "sta.sh"))
+            .ok_or_else(unsupported);
+    }
     if host == "fav.me" {
         return match segments.as_slice() {
             [code] => code
@@ -777,16 +798,9 @@ impl DeviantArt {
         Ok(self.media(cover).await.into_iter().collect())
     }
 
-    /// Upstream `DeviantartDeviationExtractor` for bare IDs: the page at
-    /// `/view/ID/` names the deviation's UUID.
-    async fn deviation_by_id(&self, id: &str) -> Result<Vec<Media>> {
-        // `/view/ID/` redirects to the deviation's canonical page; follow
-        // redirects that stay on DeviantArt.
-        let mut page = self
-            .root
-            .join(&format!("view/{id}/"))
-            .map_err(|_| error("invalid DeviantArt deviation"))?;
-        let mut body = None;
+    /// GET a DeviantArt page, following redirects that stay on DeviantArt
+    /// (or sta.sh); returns the final URL and body.
+    async fn fetch_page(&self, mut page: Url) -> Result<(Url, Vec<u8>)> {
         for _ in 0..5 {
             let response = tokio::time::timeout(
                 self.timeout,
@@ -800,7 +814,7 @@ impl DeviantArt {
             .map_err(|_| error("DeviantArt request failed; check network access"))?;
             let status = response.status();
             if status.is_redirection() {
-                let next = response
+                page = response
                     .headers()
                     .get(reqwest::header::LOCATION)
                     .and_then(|v| v.to_str().ok())
@@ -808,25 +822,97 @@ impl DeviantArt {
                     .filter(|next| {
                         next.scheme() == "https"
                             && next.host_str().is_some_and(|h| {
-                                h == "deviantart.com" || h.ends_with(".deviantart.com")
+                                h == "deviantart.com"
+                                    || h.ends_with(".deviantart.com")
+                                    || h == "sta.sh"
                             })
                     })
                     .ok_or_else(|| error("DeviantArt responded with an unexpected redirect"))?;
-                page = next;
                 continue;
             }
             if !status.is_success() {
                 return Err(status_error(status));
             }
-            body = Some(
-                response
-                    .bytes()
-                    .await
-                    .map_err(|_| error("could not read DeviantArt response"))?,
-            );
-            break;
+            let body = response
+                .bytes()
+                .await
+                .map_err(|_| error("could not read DeviantArt response"))?;
+            return Ok((page, body.to_vec()));
         }
-        let body = body.ok_or_else(|| error("DeviantArt redirected too often"))?;
+        Err(error("DeviantArt redirected too often"))
+    }
+
+    /// Upstream `DeviantartStashExtractor`: `0…` IDs are deviations; other
+    /// IDs are folders whose linked items are extracted recursively.
+    fn stash(&self, id: String, legacy: bool, depth: u8) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::once(async move {
+            let url = if legacy && id.starts_with('2') {
+                format!("https://sta.sh/{id}")
+            } else {
+                format!("https://www.deviantart.com/stash/{id}")
+            };
+            let (final_url, body) = self
+                .fetch_page(Url::parse(&url).map_err(|_| error("invalid stash ID"))?)
+                .await?;
+            let id = final_url
+                .path_segments()
+                .and_then(|mut s| s.next_back().map(str::to_owned))
+                .unwrap_or(id);
+            let page = String::from_utf8_lossy(&body).into_owned();
+            if id.starts_with('0')
+                && let Some(uuid) = page
+                    .split("//deviation/")
+                    .nth(1)
+                    .and_then(|rest| rest.get(..36))
+                    .filter(|uuid| valid_uuid(uuid))
+            {
+                let deviation = self.get(&self.api(&format!("deviation/{uuid}"))).await?;
+                let media = self.media(&deviation).await.into_iter().collect::<Vec<_>>();
+                return Ok::<_, crate::Error>(Err(media));
+            }
+            let mut seen = std::collections::HashSet::new();
+            let children: Vec<String> = page
+                .split("href=\"https://www.deviantart.com/stash/")
+                .skip(1)
+                .filter_map(|rest| rest.split('"').next())
+                .filter(|sid| {
+                    *sid != id
+                        && !sid.ends_with("#comments")
+                        && !sid.is_empty()
+                        && sid.bytes().all(|b| b.is_ascii_alphanumeric())
+                })
+                .filter(|sid| seen.insert(sid.to_string()))
+                .map(str::to_owned)
+                .collect();
+            Ok(Ok(children))
+        })
+        .map(move |result| match result {
+            Ok(Err(media)) => stream::iter(
+                media
+                    .into_iter()
+                    .flat_map(|media| group(vec![media], "deviantart"))
+                    .map(Ok),
+            )
+            .boxed(),
+            Ok(Ok(children)) if depth < 8 => stream::iter(children)
+                .flat_map(move |sid| self.stash(sid, false, depth + 1))
+                .boxed(),
+            Ok(Ok(_)) => stream::empty().boxed(),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
+    /// Upstream `DeviantartDeviationExtractor` for bare IDs: the page at
+    /// `/view/ID/` names the deviation's UUID.
+    async fn deviation_by_id(&self, id: &str) -> Result<Vec<Media>> {
+        // `/view/ID/` redirects to the deviation's canonical page.
+        let page = self
+            .root
+            .join(&format!("view/{id}/"))
+            .map_err(|_| error("invalid DeviantArt deviation"))?;
+        let (_, body) = self.fetch_page(page).await?;
         let uuid = page_uuid(&String::from_utf8_lossy(&body))
             .ok_or_else(|| error("DeviantArt deviation page contains no deviation UUID"))?;
         let deviation = self.get(&self.api(&format!("deviation/{uuid}"))).await?;
@@ -903,6 +989,7 @@ impl DeviantArt {
                 return self.once_events(async move { self.banner(&user).await });
             }
             Target::Following(user) => return self.following(user),
+            Target::Stash(id, legacy) => return self.stash(id, legacy, 0),
             Target::Journals(user) => ("user/profile/posts", user, None),
             Target::Tag(tag) => ("browse/tags", tag, None),
             Target::Favorites { user, folder } => ("collections", user, folder),
@@ -1181,6 +1268,14 @@ mod tests {
         assert_eq!(
             t("https://www.deviantart.com/shimoda7/about#watching"),
             Target::Following("shimoda7".into())
+        );
+        assert_eq!(
+            t("https://sta.sh/215twi387vfj"),
+            Target::Stash("215twi387vfj".into(), true)
+        );
+        assert_eq!(
+            t("https://www.deviantart.com/stash/022c83odnaxc"),
+            Target::Stash("022c83odnaxc".into(), false)
         );
         assert_eq!(
             t("https://www.deviantart.com/shimoda7/journal/ARTility-583755752"),
