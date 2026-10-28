@@ -143,6 +143,18 @@ pub struct Site {
     pub cookies: Option<&'static str>,
 }
 
+/// Apply options that upstream reads when building URL patterns, such as
+/// `extractor.bunkr.tlds`. `option(category, key)` looks up site options.
+pub fn configure_patterns(option: impl Fn(&str, &str) -> Option<Value>) {
+    let truthy = |value: Option<Value>| {
+        value.is_some_and(|value| !matches!(value, Value::Null | Value::Bool(false)))
+    };
+    filehosts::bunkr::ANY_TLD.store(
+        truthy(option("bunkr", "tlds")),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
 /// Every registry site, in matching order.
 pub fn sites() -> &'static [&'static Site] {
     static ALL: std::sync::OnceLock<Vec<&'static Site>> = std::sync::OnceLock::new();

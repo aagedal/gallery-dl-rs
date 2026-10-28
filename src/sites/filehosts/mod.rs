@@ -12,7 +12,7 @@ use std::time::Duration;
 use url::Url;
 
 mod bellazon;
-mod bunkr;
+pub(super) mod bunkr;
 mod chevereto;
 mod cyberdrop;
 mod cyberfile;

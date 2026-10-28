@@ -70,13 +70,19 @@ enum Target {
     Media { domain: String, path: String },
 }
 
+/// Upstream `extractor.bunkr.tlds`: accept every top-level domain.
+pub static ANY_TLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// `bunkr+\.(TLD)`, optionally behind `app.`; returns the domain group.
 fn domain(url: &Url) -> Option<String> {
     let host = url.host_str()?;
     let host = host.strip_prefix("app.").unwrap_or(host);
     let (name, tld) = host.split_once('.')?;
     let rs = name.strip_prefix("bunk")?;
-    (!rs.is_empty() && rs.bytes().all(|b| b == b'r') && TLDS.contains(&tld))
+    let any = ANY_TLD.load(std::sync::atomic::Ordering::Relaxed)
+        && !tld.is_empty()
+        && tld.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+    (!rs.is_empty() && rs.bytes().all(|b| b == b'r') && (any || TLDS.contains(&tld)))
         .then(|| host.to_owned())
 }
 

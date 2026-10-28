@@ -790,6 +790,15 @@ async fn run(args: Args) -> Result<()> {
         ));
     }
     let settings = resolved_settings(&args, &[]).await?;
+    gallery_dl_rs::sites::configure_patterns(|category, key| {
+        settings
+            .get(category)?
+            .options
+            .site_options
+            .as_ref()?
+            .get(key)
+            .cloned()
+    });
     if args
         .urls
         .iter()
