@@ -175,7 +175,7 @@ fn proxy_basic_auth_is_private_from_inspection_and_metadata() {
         .args([
             "--proxy",
             &proxy_url,
-            "-j",
+            "--dump-media-json",
             "http://origin.invalid/image.jpg",
         ])
         .output()

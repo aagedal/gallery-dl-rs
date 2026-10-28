@@ -88,7 +88,7 @@ async fn inspections_filter_metadata_before_ranges_and_repeat_expressions_with_a
     };
     let backend = fixture(root.path(), &rows("a"), &rows("b"));
     let result = output(binary(root.path(), &backend).args([
-        "-j",
+        "--dump-media-json",
         "--filter",
         "width >= 1000 and extension in ['jpg', 'png']",
         FIRST,

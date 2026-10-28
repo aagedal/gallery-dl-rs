@@ -158,9 +158,13 @@ async fn post_predicates_and_dates_precede_post_ranges_and_file_selection_follow
         "width >= 1000",
         "metadata['file']['width'] >= 1000",
     ] {
-        let result =
-            output(binary(root.path(), &backend).args(["-j", "--post-filter", predicate, FIRST]))
-                .await;
+        let result = output(binary(root.path(), &backend).args([
+            "--dump-media-json",
+            "--post-filter",
+            predicate,
+            FIRST,
+        ]))
+        .await;
         success(&result);
         assert_eq!(
             serde_json::from_slice::<Value>(&result.stdout).unwrap(),
@@ -253,8 +257,13 @@ async fn invalid_post_arguments_fail_privately_before_side_effects_and_zero_neve
         assert!(!archive.exists());
         assert!(!root.path().join("backend.log").exists());
     }
-    let result =
-        output(binary(root.path(), &backend).args(["-j", "--post-range", "0", FIRST])).await;
+    let result = output(binary(root.path(), &backend).args([
+        "--dump-media-json",
+        "--post-range",
+        "0",
+        FIRST,
+    ]))
+    .await;
     success(&result);
     assert_eq!(
         serde_json::from_slice::<Value>(&result.stdout).unwrap(),

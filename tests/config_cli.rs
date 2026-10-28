@@ -183,7 +183,7 @@ async fn inspection_never_opens_configured_archives_or_creates_destinations() {
             "twitter":{"archive":"other-missing-parent/history.sqlite"}
         }}),
     );
-    for mode in ["-g", "-j"] {
+    for mode in ["-g", "--dump-media-json"] {
         let mut command = binary(root.path(), &cfg);
         command.args([
             "--extractor",
@@ -764,7 +764,7 @@ async fn mastodon_instance_scopes_preserve_credentials_metadata_and_distinct_arc
         .arg(mastodon_backend(root.path()))
         .env("CONFIG_TEST_LOG", &log)
         .args([
-            "-j",
+            "--dump-media-json",
             "https://mastodon.social/bookmarks",
             "https://pawoo.net/bookmarks",
             "https://baraag.net/bookmarks",
@@ -807,7 +807,7 @@ async fn mastodon_bookmark_date_filter_keeps_later_newer_posts() {
         .arg(mastodon_backend(root.path()))
         .env("CONFIG_TEST_LOG", root.path().join("backend.log"))
         .args([
-            "-j",
+            "--dump-media-json",
             "--date-after",
             "2024-01-01",
             "https://mastodon.social/bookmarks",
@@ -897,7 +897,7 @@ async fn date_selection_preserves_later_newer_bluesky_posts_and_unordered_pixiv_
                 .arg("--extractor-command")
                 .arg(&executable)
                 .args(extra)
-                .args(["-j", "--date-after", "2024-01-01", url]);
+                .args(["--dump-media-json", "--date-after", "2024-01-01", url]);
             let result = output(&mut command).await;
             success(&result);
             let items: Vec<serde_json::Value> = serde_json::from_slice(&result.stdout).unwrap();
@@ -1098,7 +1098,7 @@ printf '%s\n' '[[2,"",{"id":"1","user":"42","service":"patreon","date":"2020-01-
             command
                 .arg("--extractor-command")
                 .arg(&executable)
-                .args(["-j", "--date-after", "2024-01-01"])
+                .args(["--dump-media-json", "--date-after", "2024-01-01"])
                 .args(selection)
                 .arg(url);
             let result = output(&mut command).await;
@@ -1176,7 +1176,7 @@ printf '%s\n' '[[3,"https://kemono.cr/data/aa/bb/aabb.jpg",{"id":"7","user":"42"
     command
         .arg("--extractor-command")
         .arg(&executable)
-        .args(["-j", "https://kemono.cr/posts"]);
+        .args(["--dump-media-json", "https://kemono.cr/posts"]);
     let result = output(&mut command).await;
     success(&result);
     let items: Vec<serde_json::Value> = serde_json::from_slice(&result.stdout).unwrap();
@@ -1243,7 +1243,7 @@ printf '%s\n' '[[3,"https://kemono.cr/data/aa/bb/aabb.jpg",{"id":"7","user":"42"
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
     let mut command = binary(root.path(), &cfg);
     command.arg("--extractor-command").arg(&executable).args([
-        "-j",
+        "--dump-media-json",
         "--filter",
         "revision_count == 2",
         "https://kemono.cr/posts",

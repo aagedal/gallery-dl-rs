@@ -132,8 +132,17 @@ struct Args {
         conflicts_with = "dump_json"
     )]
     get_urls: bool,
-    /// Print extracted media as a JSON array without downloading
-    #[arg(short = 'j', long, visible_alias = "resolve-json", short_alias = 'J')]
+    /// Print JSON information (upstream message lists) without downloading
+    #[arg(
+        short = 'j',
+        long = "dump-json",
+        visible_alias = "resolve-json",
+        short_alias = 'J',
+        conflicts_with_all = ["get_urls", "dump_json"]
+    )]
+    dump_messages: bool,
+    /// Print the extracted native media jobs as a JSON array
+    #[arg(long = "dump-media-json", hide = true)]
     dump_json: bool,
     /// Save post metadata in a JSON sidecar beside each completed media file
     #[arg(long, conflicts_with_all = ["get_urls", "dump_json"])]
@@ -1055,29 +1064,30 @@ async fn run(args: Args) -> Result<()> {
     let mut seen = HashSet::new();
     // Pull one input at a time, retaining one parsed message and active downloads.
     // buffer_unordered below supplies backpressure when all download slots are full.
-    let job_configurations = std::sync::Arc::new(if args.dump_json || args.get_urls {
-        BTreeMap::new()
-    } else {
-        settings
-            .iter()
-            .filter_map(|(category, settings)| {
-                settings.postprocessors.as_ref().map(|processors| {
-                    (
-                        (*category).to_owned(),
-                        gallery_dl_rs::postprocess::jobs::JobConfiguration {
-                            processors: processors.clone(),
-                            root: settings.options.base_directory.clone().unwrap(),
-                            filename: settings.filename.clone(),
-                            directory: settings.directory.clone(),
-                            init: settings.options.init.unwrap_or(false),
-                        },
-                    )
+    let job_configurations =
+        std::sync::Arc::new(if args.dump_json || args.dump_messages || args.get_urls {
+            BTreeMap::new()
+        } else {
+            settings
+                .iter()
+                .filter_map(|(category, settings)| {
+                    settings.postprocessors.as_ref().map(|processors| {
+                        (
+                            (*category).to_owned(),
+                            gallery_dl_rs::postprocess::jobs::JobConfiguration {
+                                processors: processors.clone(),
+                                root: settings.options.base_directory.clone().unwrap(),
+                                filename: settings.filename.clone(),
+                                directory: settings.directory.clone(),
+                                init: settings.options.init.unwrap_or(false),
+                            },
+                        )
+                    })
                 })
-            })
-            .collect()
-    });
+                .collect()
+        });
     let job_configurations_for = |settings: &SettingsMap| {
-        std::sync::Arc::new(if args.dump_json || args.get_urls {
+        std::sync::Arc::new(if args.dump_json || args.dump_messages || args.get_urls {
             BTreeMap::new()
         } else {
             settings
@@ -1396,6 +1406,8 @@ async fn run(args: Args) -> Result<()> {
     } else if args.dump_json {
         let media: Vec<_> = media.map(|(_, job)| job.media).collect().await;
         println!("{}", serde_json::to_string_pretty(&media)?);
+    } else if args.dump_messages {
+        dump_messages(media).await?;
     } else if args.get_urls {
         while let Some((_, item)) = media.next().await {
             println!("{}", item.media.url);
@@ -1415,6 +1427,12 @@ async fn run(args: Args) -> Result<()> {
                     .iter()
                     .filter_map(|code| code.as_u64()?.try_into().ok())
                     .collect(),
+            )
+            .with_part_directory(
+                downloader_option("part-directory")
+                    .as_ref()
+                    .and_then(serde_json::Value::as_str)
+                    .map(gallery_dl_rs::postprocess::expand_path),
             )
             .with_no_download(args.no_download)
             .with_http_mtime(!args.no_mtime)
@@ -2993,6 +3011,118 @@ fn print_extractor_info(
             custom("Filename format", filename, serde_json::Value::Null);
             custom("Directory format", directory, serde_json::Value::Null);
         }
+    }
+    Ok(())
+}
+
+/// Upstream `DataJob` output: `[2, POST]` before each post's files and
+/// `[3, URL, FILE]` for every file. `output.private` keeps `_` keys,
+/// `output.num-to-str` turns numbers into strings, `output.jsonl` prints one
+/// message per line and `output.ascii` (default true) escapes non-ASCII.
+async fn dump_messages(
+    media: impl futures_util::Stream<Item = (usize, gallery_dl_rs::postprocess::jobs::JobMedia)>,
+) -> Result<()> {
+    use serde_json::{Value, json};
+    let output = GLOBAL_OPTIONS
+        .get()
+        .and_then(|g| g.get("output"))
+        .and_then(Value::as_object);
+    let flag = |key: &str, default: bool| {
+        output
+            .and_then(|o| o.get(key))
+            .map_or(default, |v| !matches!(v, Value::Null | Value::Bool(false)))
+    };
+    let (private, num_to_str, jsonl, ascii) = (
+        flag("private", false),
+        flag("num-to-str", false),
+        flag("jsonl", false),
+        flag("ascii", true),
+    );
+    fn numbers_to_strings(value: &mut Value) {
+        match value {
+            Value::Number(n) => *value = Value::String(n.to_string()),
+            Value::Array(values) => values.iter_mut().for_each(numbers_to_strings),
+            Value::Object(map) => map.values_mut().for_each(numbers_to_strings),
+            _ => {}
+        }
+    }
+    let encode = |value: &Value, pretty: bool| -> String {
+        let text = if pretty {
+            serde_json::to_string_pretty(value)
+        } else {
+            serde_json::to_string(value)
+        }
+        .unwrap_or_default();
+        if !ascii {
+            return text;
+        }
+        let mut out = String::with_capacity(text.len());
+        for c in text.chars() {
+            if c.is_ascii() {
+                out.push(c);
+            } else {
+                let mut buffer = [0u16; 2];
+                for unit in c.encode_utf16(&mut buffer) {
+                    out.push_str(&format!("\\u{unit:04x}"));
+                }
+            }
+        }
+        out
+    };
+    let mut messages = Vec::new();
+    let emit = |message: Value, messages: &mut Vec<Value>| {
+        if jsonl {
+            println!("{}", encode(&message, false));
+        } else {
+            messages.push(message);
+        }
+    };
+    let mut previous: Option<(usize, String, String)> = None;
+    tokio::pin!(media);
+    while let Some((index, job)) = media.next().await {
+        let item = &job.media;
+        let mut keywords =
+            gallery_dl_rs::postprocess::public_keywords(&gallery_dl_rs::postprocess::context(item));
+        // `exts_*` are filter helpers, not keywords.
+        keywords.retain(|key, _| !key.starts_with("exts_") && (private || !key.starts_with('_')));
+        let mut file = Value::Object(keywords.clone());
+        let post_id = item
+            .metadata
+            .as_ref()
+            .map(|m| m.post_id.clone())
+            .unwrap_or_default();
+        let post = (index, item.category.clone(), post_id);
+        if previous.as_ref() != Some(&post) || post.2.is_empty() && item.metadata.is_none() {
+            let mut directory = keywords;
+            for key in ["filename", "extension", "name"] {
+                directory.remove(key);
+            }
+            let mut directory = Value::Object(directory);
+            if num_to_str {
+                numbers_to_strings(&mut directory);
+            }
+            emit(json!([2, directory]), &mut messages);
+            previous = Some(post);
+        }
+        if num_to_str {
+            numbers_to_strings(&mut file);
+        }
+        emit(json!([3, item.url.as_str(), file]), &mut messages);
+    }
+    if !jsonl {
+        // Like upstream's `sort_keys=True`.
+        fn sorted(value: Value) -> Value {
+            match value {
+                Value::Array(values) => Value::Array(values.into_iter().map(sorted).collect()),
+                Value::Object(map) => {
+                    let mut entries: Vec<_> = map.into_iter().collect();
+                    entries.sort_by(|a, b| a.0.cmp(&b.0));
+                    Value::Object(entries.into_iter().map(|(k, v)| (k, sorted(v))).collect())
+                }
+                value => value,
+            }
+        }
+        println!("{}", encode(&sorted(Value::Array(messages)), true));
     }
     Ok(())
 }

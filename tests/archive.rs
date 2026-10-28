@@ -384,7 +384,7 @@ fn cli_archive_is_opt_in_persistent_and_conflicts_with_inspection() {
     let second = run();
     assert!(second.status.success());
     assert!(String::from_utf8_lossy(&second.stderr).contains("skipped archived media"));
-    for mode in ["-j", "-g"] {
+    for mode in ["--dump-media-json", "-g"] {
         let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
             .arg("--download-archive")
             .arg(root.path().join("must-not-exist.sqlite3"))
@@ -590,7 +590,7 @@ fn cli_native_names_skip_without_overwriting_and_repair_metadata() {
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
     assert!(!invalid_archive.exists());
-    for mode in ["-j", "-g"] {
+    for mode in ["--dump-media-json", "-g"] {
         let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
             .args([mode, "-f", "{filename}", "https://example.com/a.jpg"])
             .output()

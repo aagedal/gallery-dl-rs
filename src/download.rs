@@ -51,6 +51,8 @@ pub struct DownloadClient {
     pub(crate) validate_html: bool,
     /// Upstream `retry-codes`: further HTTP status codes to retry.
     pub(crate) retry_codes: std::sync::Arc<[u16]>,
+    /// Upstream `part-directory`: where incomplete downloads are written.
+    pub(crate) part_directory: Option<std::sync::Arc<Path>>,
     /// Upstream `skip: "enumerate"`: save under `NAME.N.EXT` next to
     /// existing files instead of skipping them.
     pub(crate) enumerate: bool,
@@ -259,6 +261,12 @@ impl DownloadClient {
         self
     }
 
+    /// Write incomplete downloads to this directory (`part-directory`).
+    pub fn with_part_directory(mut self, directory: Option<PathBuf>) -> Self {
+        self.part_directory = directory.map(Into::into);
+        self
+    }
+
     /// Save next to existing files as `NAME.1.EXT`, `NAME.2.EXT`, ...
     /// (upstream `skip: "enumerate"`).
     pub fn with_enumerate(mut self, enabled: bool) -> Self {
@@ -326,6 +334,7 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         adjust_extensions: true,
         validate_html: true,
         retry_codes: std::sync::Arc::new([]),
+        part_directory: None,
         enumerate: false,
         no_download: false,
     })
@@ -1283,7 +1292,14 @@ async fn attempt_download(
     }
     // A unique temporary file prevents concurrent workers from sharing a partial
     // file. Dropping TempPath removes incomplete downloads, including on failure.
-    let temporary = tempfile::NamedTempFile::new_in(parent)?.into_temp_path();
+    // Upstream `part-directory` keeps them in a separate directory.
+    let temporary = match &client.part_directory {
+        Some(directory) => {
+            tokio::fs::create_dir_all(directory).await?;
+            tempfile::NamedTempFile::new_in(directory)?.into_temp_path()
+        }
+        None => tempfile::NamedTempFile::new_in(parent)?.into_temp_path(),
+    };
     let mut file = tokio::fs::OpenOptions::new()
         .write(true)
         .truncate(true)
@@ -1332,6 +1348,24 @@ async fn attempt_download(
     set_mtime(&file, modified)?;
     file.sync_all()?;
     drop(file);
+    // A part directory on another filesystem needs a copy next to the
+    // destination first.
+    let temporary = match &client.part_directory {
+        Some(_) => {
+            let local = tempfile::NamedTempFile::new_in(parent)?.into_temp_path();
+            if std::fs::rename(&temporary, &local).is_err() {
+                std::fs::copy(&temporary, &local)?;
+                if let Some(modified) = modified {
+                    std::fs::File::options()
+                        .write(true)
+                        .open(&local)?
+                        .set_modified(modified)?;
+                }
+            }
+            local
+        }
+        None => temporary,
+    };
     match temporary.persist_noclobber(path) {
         Ok(_) => Ok(Outcome::Downloaded(path.into())),
         Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => {
