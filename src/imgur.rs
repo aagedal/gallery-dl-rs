@@ -43,6 +43,10 @@ pub enum Target {
 /// extractors.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Listing {
+    /// `/user/me[/posts]` or `/user/me/hidden` (needs the `accesstoken` cookie).
+    Me {
+        hidden: bool,
+    },
     User(String),
     Favorite(String),
     FavoriteFolder(String, String),
@@ -54,6 +58,7 @@ pub enum Listing {
 impl Listing {
     fn subcategory(&self) -> &'static str {
         match self {
+            Self::Me { .. } => "me",
             Self::User(_) => "user",
             Self::Favorite(_) => "favorite",
             Self::FavoriteFolder(..) => "favorite-folder",
@@ -148,9 +153,9 @@ pub fn target(url: &Url) -> Result<Target> {
         ["gallery", segment] | ["t", _, segment] => slug_id(segment)
             .map(Target::Gallery)
             .ok_or_else(unsupported),
-        ["user", "me", ..] => Err(error(
-            "Imgur 'me' listings need the 'accesstoken' cookie, which is not supported natively",
-        )),
+        ["user", "me", rest @ ..] => Ok(Target::Listing(Listing::Me {
+            hidden: rest.contains(&"hidden"),
+        })),
         ["user", name] | ["user", name, "posts" | "submitted"] if valid_name(name) => {
             Ok(Target::Listing(Listing::User((*name).into())))
         }
@@ -299,6 +304,8 @@ fn parse_post_with_mp4(bytes: &[u8], requested_id: &str, mp4: bool) -> Result<Ve
 
 pub struct Imgur {
     client: Client,
+    /// Session cookies (`accesstoken` for `/user/me`), sent to Imgur only.
+    cookies: Option<crate::cookies::CookieJar>,
     network: NetworkOptions,
     api_root: Url,
     timeout: Duration,
@@ -311,6 +318,7 @@ pub struct Imgur {
 impl Imgur {
     pub fn new(timeout: Duration) -> Result<Self> {
         Ok(Self {
+            cookies: None,
             client: NetworkOptions::default().client(USER_AGENT, timeout)?,
             network: NetworkOptions::default(),
             api_root: Url::parse(API_ROOT).unwrap(),
@@ -327,6 +335,12 @@ impl Imgur {
         self.client = network.client(USER_AGENT, self.timeout)?;
         self.network = network.clone();
         Ok(self)
+    }
+
+    /// Session cookies for Imgur requests.
+    pub fn with_cookies(mut self, cookies: crate::cookies::CookieJar) -> Self {
+        self.cookies = (!cookies.is_empty()).then_some(cookies);
+        self
     }
 
     /// Additional attempts for HTTP 429/5xx and transport failures.
@@ -428,6 +442,8 @@ impl Imgur {
             Listing::FavoriteFolder(name, folder) => {
                 format!("3/account/{name}/folders/{folder}/favorites")
             }
+            Listing::Me { hidden: false } => "post/v1/accounts/me/all_posts".to_owned(),
+            Listing::Me { hidden: true } => "post/v1/accounts/me/hidden_albums".to_owned(),
             Listing::Subreddit(name) => format!("3/gallery/r/{name}/{page}"),
             Listing::Tag(name) => format!("3/gallery/t/{name}/{page}"),
             Listing::Search(_) => format!("3/gallery/search/{page}"),
@@ -436,6 +452,13 @@ impl Imgur {
         match listing {
             Listing::Search(query) => {
                 url.query_pairs_mut().append_pair("q", query);
+            }
+            Listing::Me { .. } => {
+                url.query_pairs_mut()
+                    .append_pair("include", "media,tags,account")
+                    .append_pair("client_id", CLIENT_ID)
+                    .append_pair("page", &page.to_string())
+                    .append_pair("sort", "newest");
             }
             Listing::FavoriteFolder(..) => {
                 url.query_pairs_mut()
@@ -540,7 +563,7 @@ impl Imgur {
         let mut redirects = Redirects::new(endpoint);
         let mut response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
-            let response = self
+            let mut request = self
                 .client
                 .get(target.clone())
                 .timeout(self.request_timeout)
@@ -550,7 +573,12 @@ impl Imgur {
                 .header(
                     header::AUTHORIZATION,
                     concat!("Client-ID ", "546c25a59c58ad7"),
-                )
+                );
+            // Session cookies (upstream `accesstoken`) for `/user/me`.
+            if let Some(cookie) = self.cookies.as_ref().and_then(|jar| jar.header(&target)) {
+                request = request.header(header::COOKIE, cookie);
+            }
+            let response = request
                 .send()
                 .await
                 .map_err(|_| Failure::transient("Imgur request failed; check network access"))?;
@@ -841,8 +869,15 @@ mod tests {
         ] {
             assert_eq!(t(raw).unwrap(), Target::Listing(expected), "{raw}");
         }
+        assert_eq!(
+            t("https://imgur.com/user/me/hidden").unwrap(),
+            Target::Listing(Listing::Me { hidden: true })
+        );
+        assert_eq!(
+            t("https://imgur.com/user/me").unwrap(),
+            Target::Listing(Listing::Me { hidden: false })
+        );
         for raw in [
-            "https://imgur.com/user/me",
             "https://imgur.com/search?q=",
             "https://imgur.com/a/toolongid",
             "https://i.imgur.com/a/TcBmP",

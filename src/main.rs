@@ -2183,8 +2183,13 @@ fn extract_input<'a>(
                     let native = extractors
                         .imgur
                         .get_or_init(|| async {
+                            let cookies = extractors
+                                .cookie_jar(configured, "imgur.com")
+                                .await
+                                .unwrap_or_default();
                             gallery_dl_rs::imgur::Imgur::new(backend.timeout).and_then(|native| {
                                 native
+                                    .with_cookies(cookies)
                                     .with_mp4(options.mp4.unwrap_or(true))
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())

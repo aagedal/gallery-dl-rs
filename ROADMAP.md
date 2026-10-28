@@ -620,8 +620,9 @@ options and Retry-After cooldowns. The upstream boolean `mp4` option defaults
 to true; false preserves animated GIFs while leaving native video unchanged.
 User profiles (`/user/NAME`), favorites and favorite folders, subreddits
 (`/r/NAME`), tags (`/t/NAME`) and searches queue their posts as album and
-image children through the v3 API (2026-10-28). Not yet: `/user/me`
-(needs the `accesstoken` cookie).
+image children through the v3 API (2026-10-28). `/user/me` and
+`/user/me/hidden` use the `accesstoken` cookie from `--cookies` (not verified
+without an account).
 
 **Implemented experimental native boorus:** Danbooru, e621/e926, Gelbooru and
 Safebooru posts, tag searches and pools, plus Danbooru favorite
@@ -1732,7 +1733,7 @@ ArtStation albums, likes, collections, challenges and the artwork page were port
 (CSRF-token POST API), DeviantArt scraps/search/statuses/
 watch (Eclipse API needing a CSRF session, or login); journals and literature are saved as `.htm`
 from `deviation/content` (simpler than upstream's journal template; not yet
-verified live because DeviantArt rate-limited this host), Imgur `/user/me`, MangaDex feed/follows and 500px liked
+verified live because DeviantArt rate-limited this host), MangaDex feed/follows and 500px liked
 (login), Facebook `/info`.
 
 ### Companion yt-dlp-rs integration
