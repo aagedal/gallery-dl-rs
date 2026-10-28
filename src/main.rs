@@ -3845,6 +3845,12 @@ async fn resolved_settings(
         });
         let network = NetworkOptions::new(proxy, options.user_agent.clone())?
             .with_insecure(args.no_check_certificate || !downloader_verify)
+            .with_tls(
+                config.globals().get("tls12") != Some(&serde_json::Value::Bool(false)),
+                config.globals().get("truststore").is_some_and(|v| {
+                    !matches!(v, serde_json::Value::Null | serde_json::Value::Bool(false))
+                }),
+            )
             .with_geo_bypass(geo_bypass.as_deref())?
             .with_source_address(source_address.or_else(|| {
                 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};

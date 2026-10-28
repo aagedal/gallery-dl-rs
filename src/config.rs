@@ -657,6 +657,8 @@ pub const GLOBAL_KEYS: &[&str] = &[
     "sleep-skip",
     "source-address",
     "proxy-env",
+    "tls12",
+    "truststore",
     "metadata-http",
     "http-metadata",
     "tags-blacklist",

@@ -1667,8 +1667,10 @@ local file errors (extraction errors are classified by their messages).
 **Remaining divergences:** direct links keep `direct/<digest>_NAME` paths
 (request-identity separation) rather than `directlink/{domain}_{path}_NAME`;
 `metadata-extractor`, `parent-*`, `category-transfer`,
-`file-unique`/`child-unique`, `path-extended`/`path-convert`, `tls12`,
-`ciphers` and `truststore` are not implemented; `cookies-select` picks one
+`file-unique`/`child-unique`, `path-extended`/`path-convert`,
+`tls12: false` (TLS 1.3 only) and `truststore` (system certificates) apply
+to every native client; `ciphers` (browser cipher mimicry) is not
+implemented; `cookies-select` picks one
 source per run (`rotate` starts with the first);
 `proxy-env: false` disables environment proxies. `metadata-http` (root or
 `extractor` scope) exposes response headers, the Content-Disposition

@@ -15,7 +15,7 @@ httpdate = "1"
 psl = "2"
 regex = "1"
 encoding_rs = "0.8"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "rustls-tls-native-roots", "stream"] }
 roxmltree = "0.21.1"
 rusqlite = { version = "0.38", features = ["bundled", "hooks"] }
 serde = { version = "1", features = ["derive", "rc"] }

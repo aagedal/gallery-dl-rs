@@ -14,6 +14,10 @@ pub struct NetworkOptions {
     source_address: Option<std::net::IpAddr>,
     /// Upstream `geo-bypass`: the configured value and the generated address.
     xff: Option<(String, std::net::Ipv4Addr)>,
+    /// Upstream `tls12: false`: allow only TLS 1.3.
+    tls13_only: bool,
+    /// Upstream `truststore`: verify with the system certificate store.
+    system_roots: bool,
 }
 impl fmt::Debug for NetworkOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -56,6 +60,13 @@ impl NetworkOptions {
             user_agent,
             ..Self::default()
         })
+    }
+    /// Upstream `tls12` (false: TLS 1.3 only) and `truststore` (system
+    /// certificates instead of the bundled roots).
+    pub fn with_tls(mut self, tls12: bool, truststore: bool) -> Self {
+        self.tls13_only = !tls12;
+        self.system_roots = truststore;
+        self
     }
     /// Disable TLS certificate verification (`--no-check-certificate`).
     pub fn with_insecure(mut self, insecure: bool) -> Self {
@@ -112,6 +123,16 @@ impl NetworkOptions {
             .redirect(reqwest::redirect::Policy::none());
         if self.insecure {
             builder = builder.danger_accept_invalid_certs(true);
+        }
+        if self.tls13_only {
+            builder = builder.min_tls_version(reqwest::tls::Version::TLS_1_3);
+        }
+        if self.system_roots {
+            builder = builder
+                .tls_built_in_webpki_certs(false)
+                .tls_built_in_native_certs(true);
+        } else {
+            builder = builder.tls_built_in_native_certs(false);
         }
         if let Some(address) = self.source_address {
             builder = builder.local_address(address);
