@@ -13,7 +13,9 @@ pub static SITE: Site = Site {
     name: "MangaDex",
     matches: |url| target(url).is_some(),
     extract,
-    routes: &[&CHAPTER, &MANGA, &COVERS, &LIST, &LIST_FEED, &AUTHOR],
+    routes: &[
+        &CHAPTER, &MANGA, &COVERS, &LIST, &LIST_FEED, &AUTHOR, &FEED, &FOLLOWING,
+    ],
     api_key: false,
     cookies: None,
 };
@@ -38,14 +40,23 @@ static COVERS: Route = Route::new(
 static LIST: Route = Route::new("list", FILENAME, DIRECTORY, ARCHIVE);
 static LIST_FEED: Route = Route::new("list-feed", FILENAME, DIRECTORY, ARCHIVE);
 static AUTHOR: Route = Route::new("author", FILENAME, DIRECTORY, ARCHIVE);
+static FEED: Route = Route::new("feed", FILENAME, DIRECTORY, ARCHIVE);
+static FOLLOWING: Route = Route::new("following", FILENAME, DIRECTORY, ARCHIVE);
 
 #[derive(Debug, PartialEq)]
 enum Target {
     Chapter(String),
     Manga(String),
     Covers(String),
-    List { uuid: String, feed: bool },
+    List {
+        uuid: String,
+        feed: bool,
+    },
     Author(String),
+    /// `/title/feed`: chapters of followed manga (needs a login).
+    Feed,
+    /// `/title/follows`: followed manga (needs a login).
+    Following,
 }
 
 fn uuid(text: &str) -> bool {
@@ -62,6 +73,15 @@ fn target(url: &Url) -> Option<Target> {
     }
     let parts = crate::sites::segments(url);
     let query = url.query().unwrap_or_default();
+    match parts.as_slice() {
+        [kind, tab] if matches!(kind.as_str(), "title" | "titles") && tab == "feed" => {
+            return Some(Target::Feed);
+        }
+        [kind, tab] if matches!(kind.as_str(), "title" | "titles") && tab == "follows" => {
+            return Some(Target::Following);
+        }
+        _ => {}
+    }
     let (kind, id, rest) = match parts.as_slice() {
         [kind, id, rest @ ..] if uuid(id) => (kind.as_str(), id.clone(), rest),
         _ => return None,
@@ -156,6 +176,32 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                 .collect();
             Ok(super::queue_urls(http, &SITE, &LIST, children))
         }),
+        Target::Feed => crate::sites::once(async move {
+            let auth = bearer(http, &root).await?;
+            let params = chapter_params(http, vec![("order[publishAt]".into(), "desc".into())]);
+            let endpoint = format!("{root}/user/follows/manga/feed");
+            Ok(pages_with(
+                http,
+                root,
+                endpoint,
+                params,
+                Kind::Chapters(&FEED),
+                Some(auth),
+            ))
+        }),
+        Target::Following => crate::sites::once(async move {
+            let auth = bearer(http, &root).await?;
+            let params = finish_params(http, Vec::new(), true);
+            let endpoint = format!("{root}/user/follows/manga");
+            Ok(pages_with(
+                http,
+                root,
+                endpoint,
+                params,
+                Kind::Author,
+                Some(auth),
+            ))
+        }),
         Target::Author(uuid) => {
             let params = finish_params(http, vec![("authorOrArtist".into(), uuid)], false);
             pages(
@@ -192,12 +238,86 @@ fn api_root(http: &Http) -> Result<String> {
 }
 
 async fn call(http: &Http, endpoint: &str, params: &[(String, String)]) -> Result<Value> {
+    call_with(http, endpoint, params, None).await
+}
+
+async fn call_with(
+    http: &Http,
+    endpoint: &str,
+    params: &[(String, String)],
+    auth: Option<&str>,
+) -> Result<Value> {
     let mut url = http.api(endpoint)?;
     if !params.is_empty() {
         url.query_pairs_mut().extend_pairs(params);
     }
-    http.json_with(&url, &[("Referer", "https://mangadex.org/")])
+    let mut headers = vec![("Referer", "https://mangadex.org/")];
+    if let Some(auth) = auth {
+        headers.push(("Authorization", auth));
+    }
+    http.json_with(&url, &headers).await
+}
+
+/// Upstream `MangadexAPI.authenticate`: a personal API client
+/// (`client-id`/`client-secret`) with the password grant, or the legacy
+/// `auth/login` endpoint. Tokens are not cached between runs.
+async fn bearer(http: &Http, root: &str) -> Result<String> {
+    static TOKEN: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+    TOKEN
+        .get_or_try_init(|| async {
+            let (username, password) = crate::sites::gdl::auth_info(http)
+                .ok_or_else(|| error("MangaDex feeds and follows need a username and password"))?;
+            match http.option_str("client-id") {
+                Some(client_id) => {
+                    let secret = http.option_str("client-secret").unwrap_or_default();
+                    let url = Url::parse(
+                        "https://auth.mangadex.org/realms/mangadex/protocol/openid-connect/token",
+                    )
+                    .expect("static URL");
+                    let body = http
+                        .post(
+                            &url,
+                            crate::sites::http::Body::Form(&[
+                                ("grant_type", "password"),
+                                ("username", &username),
+                                ("password", &password),
+                                ("client_id", client_id),
+                                ("client_secret", secret),
+                            ]),
+                            &[],
+                        )
+                        .await?;
+                    let value: Value = serde_json::from_slice(&body)
+                        .map_err(|_| error("MangaDex login failed"))?;
+                    value
+                        .get("access_token")
+                        .and_then(Value::as_str)
+                        .map(|token| format!("Bearer {token}"))
+                        .ok_or_else(|| error("MangaDex login failed"))
+                }
+                None => {
+                    let url = Url::parse(&format!("{root}/auth/login"))
+                        .map_err(|_| error("invalid MangaDex API root"))?;
+                    let credentials =
+                        serde_json::json!({"username": username, "password": password});
+                    let body = http
+                        .post(&url, crate::sites::http::Body::Json(&credentials), &[])
+                        .await?;
+                    let value: Value = serde_json::from_slice(&body)
+                        .map_err(|_| error("MangaDex login failed"))?;
+                    if value.get("result").and_then(Value::as_str) != Some("ok") {
+                        return Err(error("MangaDex login failed"));
+                    }
+                    value
+                        .pointer("/token/session")
+                        .and_then(Value::as_str)
+                        .map(|token| format!("Bearer {token}"))
+                        .ok_or_else(|| error("MangaDex login failed"))
+                }
+            }
+        })
         .await
+        .cloned()
 }
 
 /// `_pagination_chapters`: language filter and scanlation group includes.
@@ -259,15 +379,27 @@ fn pages<'a>(
     params: Vec<(String, String)>,
     kind: Kind,
 ) -> Events<'a> {
+    pages_with(http, root, endpoint, params, kind, None)
+}
+
+fn pages_with<'a>(
+    http: &'a Http,
+    root: String,
+    endpoint: String,
+    params: Vec<(String, String)>,
+    kind: Kind,
+    auth: Option<String>,
+) -> Events<'a> {
     crate::sites::paginate(Some((0u64, Cache::new())), move |state| {
         let (root, endpoint, kind) = (root.clone(), endpoint.clone(), kind.clone());
+        let auth = auth.clone();
         let mut params = params.clone();
         async move {
             let Some((offset, mut cache)) = state else {
                 return Ok(None);
             };
             params.push(("offset".into(), offset.to_string()));
-            let data = call(http, &endpoint, &params).await?;
+            let data = call_with(http, &endpoint, &params, auth.as_deref()).await?;
             let items = data
                 .get("data")
                 .and_then(Value::as_array)
@@ -658,10 +790,13 @@ mod tests {
             t(&format!("https://mangadex.org/author/{M}/name")),
             Some(Target::Author(M.into()))
         );
+        assert_eq!(t("https://mangadex.org/title/feed"), Some(Target::Feed));
+        assert_eq!(t("https://mangadex.org/titles/feed"), Some(Target::Feed));
+        assert_eq!(
+            t("https://mangadex.org/title/follows"),
+            Some(Target::Following)
+        );
         for raw in [
-            "https://mangadex.org/title/feed",
-            "https://mangadex.org/title/follows",
-            "https://mangadex.org/titles/feed",
             "https://mangadex.org/chapter/XYZ",
             "https://mangadex.org.evil.test/chapter/abc",
             "https://evilmangadex.org/chapter/abc",
