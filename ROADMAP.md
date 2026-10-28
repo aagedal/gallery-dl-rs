@@ -1723,9 +1723,9 @@ listings, favorites, following and search were ported from upstream but
 only tested against local fixtures (the site serves an "NG Guard" browser
 check to this host). VSCO video (HLS via yt-dlp), avatar and collection
 views were ported the same way (VSCO returns HTTP 403 here).
-ArtStation albums, likes, collections and the artwork page were ported too
+ArtStation albums, likes, collections, challenges and the artwork page were ported too
 (Cloudflare blocks ArtStation here).
-**Remaining:** VSCO spaces (gRPC API), ArtStation search and challenges
+**Remaining:** VSCO spaces (gRPC API), ArtStation search
 (CSRF-token POST API), DeviantArt scraps/search/statuses/
 watch (Eclipse API needing a CSRF session, or login); journals and literature are saved as `.htm`
 from `deviation/content` (simpler than upstream's journal template; not yet

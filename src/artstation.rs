@@ -101,6 +101,11 @@ pub enum Target {
     Collections {
         user: String,
     },
+    /// `challenges/NAME/categories/ID` (or `contests/NAME/challenges/ID`).
+    Challenge {
+        id: String,
+        sorting: String,
+    },
 }
 
 fn plain(url: &Url) -> bool {
@@ -133,6 +138,21 @@ pub fn target(url: &Url) -> Result<Target> {
             ["artwork" | "projects", hash] if valid_hash(hash) => {
                 Ok(Target::Project { hash: hash.into() })
             }
+            [
+                "challenges" | "contests",
+                _,
+                "categories" | "challenges",
+                id,
+                ..,
+            ] if digits(id) => Ok(Target::Challenge {
+                id: (*id).into(),
+                sorting: url
+                    .query_pairs()
+                    .find(|(k, _)| k == "sorting")
+                    .map(|(_, v)| v.into_owned())
+                    .filter(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_lowercase()))
+                    .unwrap_or_else(|| "popular".into()),
+            }),
             ["artwork"] if url.query().is_some() => Ok(Target::Listing {
                 path: format!("projects.json?{}", url.query().unwrap_or_default()),
             }),
@@ -410,6 +430,121 @@ impl ArtStation {
         crate::event::media_only(self.events(url))
     }
 
+    /// One page of upstream `_pagination` (`data` and `total_count`).
+    async fn data_page(&self, path: &str) -> Result<(Vec<Value>, u64)> {
+        let value: Value = serde_json::from_slice(&self.call(path).await?)
+            .map_err(|_| error("ArtStation returned invalid JSON"))?;
+        Ok((
+            value
+                .get("data")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+            value
+                .get("total_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+        ))
+    }
+
+    /// All `data` entries of a paginated listing.
+    async fn all_pages(&self, path: &str) -> Result<Vec<Value>> {
+        let mut all = Vec::new();
+        for page in 1..=MAX_PAGES {
+            let (data, total) = self.data_page(&format!("{path}&page={page}")).await?;
+            let empty = data.is_empty();
+            all.extend(data);
+            if empty || all.len() as u64 >= total {
+                break;
+            }
+        }
+        Ok(all)
+    }
+
+    /// Upstream `ArtstationChallengeExtractor`: images linked from each
+    /// submission's updates.
+    fn challenge(&self, id: String, sorting: String) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let base = "api/v2/competition";
+        let challenge_id: std::sync::Arc<str> = id.as_str().into();
+        stream::once(async move {
+            let submissions = self
+                .all_pages(&format!(
+                    "{base}/submissions.json?per_page=50&challenge_id={id}&sort_by={sorting}"
+                ))
+                .await?;
+            Ok::<_, crate::Error>(submissions)
+        })
+        .map(move |result| match result {
+            Ok(submissions) => {
+                let challenge_id = challenge_id.clone();
+                stream::iter(submissions)
+                    .then(move |submission| {
+                        let id = challenge_id.clone();
+                        async move {
+                            let Some(sid) = submission.get("id").and_then(Value::as_u64) else {
+                                return Ok(VecDeque::new());
+                            };
+                            let updates = self
+                                .all_pages(&format!(
+                                    "{base}/submissions/{sid}/submission_updates.json?per_page=50"
+                                ))
+                                .await?;
+                            let mut media = Vec::new();
+                            for update in &updates {
+                                let body = update
+                                    .get("body")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or_default();
+                                let mut seen = std::collections::HashSet::new();
+                                for href in crate::imagehosts::between_all(body, " href=\"", "\"") {
+                                    let Some(url) = media_url(href).filter(|_| seen.insert(href))
+                                    else {
+                                        continue;
+                                    };
+                                    // Upstream `_id_from_url`: path parts 7..10 joined.
+                                    let parts: Vec<&str> = href.split('/').collect();
+                                    let asset =
+                                        parts.get(7..10).map(|p| p.concat()).unwrap_or_default();
+                                    let name = url
+                                        .path_segments()
+                                        .and_then(|mut s| s.next_back())
+                                        .unwrap_or("file")
+                                        .to_owned();
+                                    media.push(Media {
+                                        filename: format!("{sid}_{asset}_{name}"),
+                                        job: MediaJob::DirectHttp,
+                                        category: "artstation".into(),
+                                        metadata: Some(PostMetadata {
+                                            post_id: sid.to_string(),
+                                            media_id: format!("c{id}_{asset}"),
+                                            index: media.len() + 1,
+                                            ..PostMetadata::default()
+                                        }),
+                                        url,
+                                        headers: BTreeMap::new(),
+                                        handoff: BTreeMap::new(),
+                                    });
+                                }
+                            }
+                            for item in &mut media {
+                                self.network.apply_media(item);
+                            }
+                            Ok::<_, crate::Error>(crate::event::group(media, "artstation"))
+                        }
+                    })
+                    .map(|result| match result {
+                        Ok(events) => stream::iter(events.into_iter().map(Ok)).boxed(),
+                        Err(e) => stream::once(async move { Err(e) }).boxed(),
+                    })
+                    .flatten()
+                    .boxed()
+            }
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
     /// Upstream `ArtstationCollectionsExtractor`: queue every collection.
     fn collections(&self, user: String) -> BoxStream<'_, Result<ExtractionEvent>> {
         stream::once(async move {
@@ -456,6 +591,7 @@ impl ArtStation {
             Ok(Target::User { user }) => format!("users/{user}/projects.json"),
             Ok(Target::Listing { path }) => path,
             Ok(Target::Collections { user }) => return self.collections(user),
+            Ok(Target::Challenge { id, sorting }) => return self.challenge(id, sorting),
             Ok(Target::Project { hash }) => {
                 return stream::once(async move { self.project(&hash).await })
                     .map(|result| match result {
@@ -678,6 +814,22 @@ mod tests {
         assert_eq!(
             t("https://www.artstation.com/mikf/collections/2647023").unwrap(),
             listing("collections/2647023/projects.json?collection_id=2647023")
+        );
+        assert_eq!(
+            t("https://www.artstation.com/contests/beyond-human/challenges/23?sorting=winners")
+                .unwrap(),
+            Target::Challenge {
+                id: "23".into(),
+                sorting: "winners".into()
+            }
+        );
+        assert_eq!(
+            t("https://www.artstation.com/challenges/beyond-human/categories/23/submissions")
+                .unwrap(),
+            Target::Challenge {
+                id: "23".into(),
+                sorting: "popular".into()
+            }
         );
         assert_eq!(
             t("https://www.artstation.com/mikf/collections").unwrap(),
