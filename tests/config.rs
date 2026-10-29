@@ -78,12 +78,14 @@ fn browser_cookie_sources_replace_files_across_scopes_and_anchor_profiles() {
     for (category, profile) in [("instagram", "instagram"), ("twitter", "x")] {
         let selected = config.resolve(category).unwrap();
         assert!(selected.cookies.is_none());
+        // Compare as paths: Windows accepts either separator.
         assert_eq!(
-            selected.browser_cookies,
-            Some(format!(
-                "firefox:{}",
-                PathBuf::from("profiles").join(profile).display()
-            ))
+            selected
+                .browser_cookies
+                .as_deref()
+                .and_then(|spec| spec.strip_prefix("firefox:"))
+                .map(PathBuf::from),
+            Some(PathBuf::from("profiles").join(profile))
         );
         let cli = selected.overlay(&Options {
             cookies: Some("cli.txt".into()),
