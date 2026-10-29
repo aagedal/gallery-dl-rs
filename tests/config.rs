@@ -3997,10 +3997,12 @@ fn chromium_cookie_arrays_select_browser_profiles() {
         (r#"["chrome", "Profile 1"]"#, "chrome:Profile 1"),
         (r#"["brave", "/browser/Default"]"#, "brave:/browser/Default"),
     ] {
-        let selected = parse(&format!(r#"{{"extractor":{{"reddit":{{"cookies":{source}}}}}}}"#))
-            .unwrap()
-            .resolve("reddit")
-            .unwrap();
+        let selected = parse(&format!(
+            r#"{{"extractor":{{"reddit":{{"cookies":{source}}}}}}}"#
+        ))
+        .unwrap()
+        .resolve("reddit")
+        .unwrap();
         assert_eq!(selected.browser_cookies.as_deref(), Some(spec), "{source}");
         assert!(selected.cookies.is_none());
     }

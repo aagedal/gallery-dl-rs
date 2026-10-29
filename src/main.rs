@@ -1973,19 +1973,16 @@ fn ytdl_command(args: &Args) -> &Path {
 /// The command-line session cookies, forwarded to yt-dlp as given.
 fn ytdl_cookies(args: &Args) -> Option<gallery_dl_rs::cookies::YtdlCookies> {
     use gallery_dl_rs::cookies::YtdlCookies;
-    args.cookies
-        .clone()
-        .map(YtdlCookies::File)
-        .or_else(|| {
-            // yt-dlp reads browsers itself, but knows no Helium variants.
-            args.cookies_from_browser
-                .clone()
-                .filter(|spec| {
-                    gallery_dl_rs::browser::BrowserProfile::parse(spec)
-                        .is_ok_and(|profile| profile.ytdl_supported())
-                })
-                .map(YtdlCookies::Browser)
-        })
+    args.cookies.clone().map(YtdlCookies::File).or_else(|| {
+        // yt-dlp reads browsers itself, but knows no Helium variants.
+        args.cookies_from_browser
+            .clone()
+            .filter(|spec| {
+                gallery_dl_rs::browser::BrowserProfile::parse(spec)
+                    .is_ok_and(|profile| profile.ytdl_supported())
+            })
+            .map(YtdlCookies::Browser)
+    })
 }
 
 impl Extractors {
@@ -3836,9 +3833,10 @@ async fn resolved_settings(
                 ..ConfigOptions::default()
             });
         }
-        let browser_spec = args.cookies_from_browser.clone().or_else(|| {
-            options.browser_cookies.clone()
-        });
+        let browser_spec = args
+            .cookies_from_browser
+            .clone()
+            .or_else(|| options.browser_cookies.clone());
         let browser = if matches!(args.extractor, Extractor::Native) {
             browser_spec
                 .as_deref()

@@ -1176,7 +1176,10 @@ impl Reddit {
                      Domain=.reddit.com; Path=/",
                 );
                 vec![
-                    ("grant_type", "https://oauth.reddit.com/grants/installed_client"),
+                    (
+                        "grant_type",
+                        "https://oauth.reddit.com/grants/installed_client",
+                    ),
                     ("device_id", "DO_NOT_TRACK_THIS_DEVICE"),
                 ]
             }
@@ -2726,7 +2729,9 @@ mod tests {
             response(
                 "200 OK",
                 "Content-Type: application/json\r\n",
-                json!({"access_token": value, "expires_in": 3600}).to_string().as_bytes(),
+                json!({"access_token": value, "expires_in": 3600})
+                    .to_string()
+                    .as_bytes(),
             )
         };
         let (root, server) = serve(vec![
@@ -2760,16 +2765,35 @@ mod tests {
         assert!(!message.contains("private-detail"), "{message}");
         let requests = server.join().unwrap();
         let lower: Vec<_> = requests.iter().map(|r| r.to_ascii_lowercase()).collect();
-        assert!(requests[0].starts_with("POST /api/v1/access_token "), "{}", requests[0]);
+        assert!(
+            requests[0].starts_with("POST /api/v1/access_token "),
+            "{}",
+            requests[0]
+        );
         // base64("my-client_1:")
-        assert!(lower[0].contains("authorization: basic bxkty2xpzw50xze6"), "{}", lower[0]);
+        assert!(
+            lower[0].contains("authorization: basic bxkty2xpzw50xze6"),
+            "{}",
+            lower[0]
+        );
         for request in &lower[1..3] {
-            assert!(request.starts_with("get /r/pics/.json?raw_json=1 "), "{request}");
+            assert!(
+                request.starts_with("get /r/pics/.json?raw_json=1 "),
+                "{request}"
+            );
             assert!(request.contains("authorization: bearer fresh"), "{request}");
             assert!(request.contains("user-agent: gallery-dl-rs/"), "{request}");
         }
-        assert!(lower[3].contains("authorization: basic nk45du4wa3jtreutawc6"), "{}", lower[3]);
-        assert!(lower[3].contains("user-agent: python:gallery-dl:0.8.4"), "{}", lower[3]);
+        assert!(
+            lower[3].contains("authorization: basic nk45du4wa3jtreutawc6"),
+            "{}",
+            lower[3]
+        );
+        assert!(
+            lower[3].contains("user-agent: python:gallery-dl:0.8.4"),
+            "{}",
+            lower[3]
+        );
     }
 
     #[tokio::test]

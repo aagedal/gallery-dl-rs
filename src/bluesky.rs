@@ -802,7 +802,10 @@ impl Bluesky {
         let refresh = session.take().map(|current| current.refresh);
         let mut created = None;
         if let Some(refresh) = refresh {
-            created = self.session_request("com.atproto.server.refreshSession", Some(&refresh), None).await.ok();
+            created = self
+                .session_request("com.atproto.server.refreshSession", Some(&refresh), None)
+                .await
+                .ok();
         }
         let body = match created {
             Some(body) => body,
@@ -1820,7 +1823,11 @@ mod tests {
             "{}",
             requests[1]
         );
-        assert!(requests[1].to_ascii_lowercase().contains("authorization: bearer access-1"));
+        assert!(
+            requests[1]
+                .to_ascii_lowercase()
+                .contains("authorization: bearer access-1")
+        );
 
         // Without a login, bookmarks fail before any request.
         let events: Vec<_> = bluesky(root)
@@ -1829,7 +1836,11 @@ mod tests {
             .await;
         let message = events[0].as_ref().err().unwrap().to_string();
         assert!(message.contains("require a login"), "{message}");
-        assert!(bluesky(Url::parse("http://x/").unwrap()).with_login(Some("a"), None).is_err());
+        assert!(
+            bluesky(Url::parse("http://x/").unwrap())
+                .with_login(Some("a"), None)
+                .is_err()
+        );
         let public = Bluesky::new(Duration::from_secs(5)).unwrap();
         let logged_in = public.with_login(Some("a"), Some("b")).unwrap();
         assert_eq!(logged_in.api_root.as_str(), AUTH_ROOT);

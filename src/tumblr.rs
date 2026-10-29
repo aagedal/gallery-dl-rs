@@ -1115,6 +1115,9 @@ impl Options {
     }
 }
 
+/// An OAuth 1.0a key and secret.
+type Credentials<'a> = (&'a str, &'a str);
+
 pub struct Tumblr {
     client: Client,
     network: NetworkOptions,
@@ -1285,7 +1288,7 @@ impl Tumblr {
     }
 
     /// Consumer and token credentials when OAuth signing applies.
-    fn oauth(&self) -> Option<((&str, &str), (&str, &str))> {
+    fn oauth(&self) -> Option<(Credentials<'_>, Credentials<'_>)> {
         if self.unsigned.load(std::sync::atomic::Ordering::Relaxed) {
             return None;
         }
@@ -1354,7 +1357,9 @@ impl Tumblr {
             // The shared default key is often exhausted; fall back to the
             // web client's token rather than fail (or wait) for a day.
             // Upstream retries a refused signed request with the API key.
-            Err(e) if self.oauth().is_some() && e.to_string().starts_with("Tumblr refused access") => {
+            Err(e)
+                if self.oauth().is_some() && e.to_string().starts_with("Tumblr refused access") =>
+            {
                 self.unsigned
                     .store(true, std::sync::atomic::Ordering::Relaxed);
                 call().await?
@@ -2958,9 +2963,12 @@ mod tests {
         }
         let requests = server.join().unwrap();
         for request in &requests[..2] {
-            assert!(request.starts_with(
-                "GET /v2/blog/alice.tumblr.com/posts?npf=false&reblog_info=true&id=123 "
-            ), "{request}");
+            assert!(
+                request.starts_with(
+                    "GET /v2/blog/alice.tumblr.com/posts?npf=false&reblog_info=true&id=123 "
+                ),
+                "{request}"
+            );
             let lower = request.to_ascii_lowercase();
             assert!(lower.contains("authorization: oauth "), "{request}");
             assert!(request.contains(&format!("oauth_consumer_key=\"{DEFAULT_API_KEY}\"")));

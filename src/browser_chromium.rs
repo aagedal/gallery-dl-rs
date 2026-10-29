@@ -288,7 +288,11 @@ impl ChromiumProfile {
                     "{name} cookie import exceeds the cookie size limit"
                 )));
             }
-            let subdomains = if host.starts_with('.') { "TRUE" } else { "FALSE" };
+            let subdomains = if host.starts_with('.') {
+                "TRUE"
+            } else {
+                "FALSE"
+            };
             let secure = if secure != 0 { "TRUE" } else { "FALSE" };
             let expiry = if expires <= 0 {
                 0
@@ -364,7 +368,10 @@ fn keychain_password(browser: &Browser) -> Result<Vec<u8>> {
         return Err(failure());
     }
     let mut password = output.stdout;
-    while password.last().is_some_and(|byte| *byte == b'\n' || *byte == b'\r') {
+    while password
+        .last()
+        .is_some_and(|byte| *byte == b'\n' || *byte == b'\r')
+    {
         password.pop();
     }
     if password.is_empty() {
@@ -464,7 +471,12 @@ mod tests {
 
     #[test]
     fn parses_browser_names_profiles_and_redacts_debug() {
-        for spec in ["helium", "helium-neo", "chrome:Profile 1", "Brave:/x/Default"] {
+        for spec in [
+            "helium",
+            "helium-neo",
+            "chrome:Profile 1",
+            "Brave:/x/Default",
+        ] {
             ChromiumProfile::parse(spec).unwrap();
         }
         for spec in [
@@ -538,9 +550,10 @@ mod tests {
                 header(&jar, "https://www.reddit.com/"),
                 Some("reddit_session=abc; host=yes; plain=value".into())
             );
-            assert_eq!(header(&jar, "https://old.reddit.com/"), Some(
-                "reddit_session=abc; plain=value".into()
-            ));
+            assert_eq!(
+                header(&jar, "https://old.reddit.com/"),
+                Some("reddit_session=abc; plain=value".into())
+            );
             assert_eq!(header(&jar, "https://notreddit.com/"), None);
         }
     }
@@ -549,13 +562,22 @@ mod tests {
     async fn wrong_password_fails_without_leaking_values() {
         let directory = tempfile::tempdir().unwrap();
         let connection = database(directory.path(), 24);
-        insert(&connection, ".reddit.com", "reddit_session", "private-value", 24);
+        insert(
+            &connection,
+            ".reddit.com",
+            "reddit_session",
+            "private-value",
+            24,
+        );
         let failure = profile(directory.path(), b"wrong")
             .load("reddit.com")
             .await
             .unwrap_err()
             .to_string();
-        assert!(failure.contains("could not decrypt helium cookies"), "{failure}");
+        assert!(
+            failure.contains("could not decrypt helium cookies"),
+            "{failure}"
+        );
         assert!(!failure.contains("private-value"));
     }
 
@@ -572,7 +594,10 @@ mod tests {
             .load("tumblr.com")
             .await
             .unwrap();
-        assert_eq!(header(&jar, "https://www.tumblr.com/"), Some("pfg=1".into()));
+        assert_eq!(
+            header(&jar, "https://www.tumblr.com/"),
+            Some("pfg=1".into())
+        );
         assert_eq!(std::fs::read(network.join("Cookies")).unwrap(), before);
         assert_eq!(std::fs::read_dir(&network).unwrap().count(), 1);
     }
