@@ -1907,11 +1907,11 @@ impl Config {
             } else {
                 None
             };
-            if !matches!(name, "mastodon.social" | "pawoo" | "baraag")
+            if !matches!(name, "mastodon.social" | "pawoo" | "baraag" | "tumblr")
                 && settings.access_token.0.is_some()
             {
                 return Err(error(
-                    "native configuration access-token requires a mastodon.social, pawoo or baraag instance scope",
+                    "native configuration access-token requires a tumblr, mastodon.social, pawoo or baraag scope",
                 ));
             }
             if !matches!(name, "pixiv" | "pixiv-novel" | "reddit")
@@ -2301,7 +2301,7 @@ impl RawOptions {
             }
             Some(_) => {
                 return Err(error(
-                    "native configuration Mastodon access-token must be a bearer token string or false; OAuth cache discovery is not implemented",
+                    "native configuration access-token must be a token string or false; OAuth cache discovery is not implemented",
                 ));
             }
         };

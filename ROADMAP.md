@@ -788,7 +788,8 @@ rewriting, GIFV download fallbacks, and `reblogs` (boolean/`same-blog`), `posts`
 settings. Single-post URLs bypass the `posts` filter, matching upstream.
 Failed token lookups fall back to the
 API rendition; upstream's delayed token refresh retries remain unimplemented.
-Remaining: OAuth and private/dashboard blogs, likes/search/day views, NPF posts,
+Since 2026-10-29 `access-token`/`access-token-secret` (and `api-secret`) sign
+requests with OAuth 1.0a. Remaining: likes/search/day views, NPF posts,
 external audio/video, `external`/`fallback-delay`/`fallback-retries` options,
 and custom-domain blogs.
 

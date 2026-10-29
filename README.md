@@ -735,6 +735,17 @@ comment fallback), and `original` (boolean, default true). Single-post URLs
 ignore `posts`, matching upstream. Disabling `original` avoids token lookups;
 legacy inline `_1280` rewriting remains enabled. Plain media links stay direct downloads.
 
+With `access-token` and `access-token-secret` (printed by
+`gallery-dl-rs oauth:tumblr`), API requests are signed with OAuth 1.0a like
+upstream, reaching dashboard-only and private blogs the account can see. The
+default key uses upstream's consumer secret; a custom `api-key` needs its
+`api-secret`. If a signed request is refused, the plain API key is used from
+then on, as upstream does.
+
+```json
+{"extractor": {"tumblr": {"access-token": "TOKEN", "access-token-secret": "SECRET"}}}
+```
+
 Experimental native Pixiv extraction (`--extractor native`, `pixiv` category)
 requires `extractor.pixiv.refresh-token` (accepted in the `pixiv` or `pixiv-novel`
 category, never echoed); without it selected Pixiv jobs fail before any network access,

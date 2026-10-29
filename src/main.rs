@@ -2363,6 +2363,7 @@ fn extract_input<'a>(
                                     .with_selection(options.tumblr_selection())
                                     .with_options(options.site_options.as_deref())?
                                     .with_api_key(options.api_key.as_deref())
+                                    .with_access_token(options.access_token.as_deref())
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
