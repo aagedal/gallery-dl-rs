@@ -80,7 +80,10 @@ fn browser_cookie_sources_replace_files_across_scopes_and_anchor_profiles() {
         assert!(selected.cookies.is_none());
         assert_eq!(
             selected.browser_cookies,
-            Some(PathBuf::from("profiles").join(profile))
+            Some(format!(
+                "firefox:{}",
+                PathBuf::from("profiles").join(profile).display()
+            ))
         );
         let cli = selected.overlay(&Options {
             cookies: Some("cli.txt".into()),
@@ -112,7 +115,7 @@ fn browser_cookie_sources_replace_files_across_scopes_and_anchor_profiles() {
     assert!(selected.cookies.is_none());
     assert_eq!(
         selected.browser_cookies,
-        Some(PathBuf::from("global-profile"))
+        Some("firefox:global-profile".into())
     );
 }
 
@@ -122,7 +125,8 @@ fn browser_cookie_arrays_validate_every_scope_without_private_diagnostics() {
     for source in [
         json!([]),
         json!(["firefox"]),
-        json!(["chrome", "private-profile"]),
+        json!(["chrome", "private-profile", "private-keyring"]),
+        json!(["safari", "private-profile"]),
         json!(["firefox", null]),
         json!(["firefox", ""]),
         json!(["firefox", "~private-profile"]),
@@ -155,7 +159,7 @@ fn browser_cookie_arrays_validate_every_scope_without_private_diagnostics() {
             .unwrap();
         assert_eq!(
             selected.browser_cookies,
-            Some(PathBuf::from("private-profile"))
+            Some("firefox:private-profile".into())
         );
         assert!(!format!("{selected:?}").contains("private-profile"));
     }
@@ -3983,4 +3987,21 @@ fn cookies_select_picks_one_cookie_source() {
     let resolved = cfg.resolve("instagram").unwrap();
     assert_eq!(resolved.cookies, Some("/a.txt".into()));
     assert!(resolved.browser_cookies.is_none());
+}
+
+#[test]
+fn chromium_cookie_arrays_select_browser_profiles() {
+    for (source, spec) in [
+        (r#"["helium"]"#, "helium"),
+        (r#"["helium-neo", null, null, null]"#, "helium-neo"),
+        (r#"["chrome", "Profile 1"]"#, "chrome:Profile 1"),
+        (r#"["brave", "/browser/Default"]"#, "brave:/browser/Default"),
+    ] {
+        let selected = parse(&format!(r#"{{"extractor":{{"reddit":{{"cookies":{source}}}}}}}"#))
+            .unwrap()
+            .resolve("reddit")
+            .unwrap();
+        assert_eq!(selected.browser_cookies.as_deref(), Some(spec), "{source}");
+        assert!(selected.cookies.is_none());
+    }
 }

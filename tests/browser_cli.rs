@@ -220,7 +220,8 @@ async fn unsupported_native_browser_selection_is_rejected_without_echoing_privat
     let root = tempfile::tempdir().unwrap();
     for spec in [
         "firefox",
-        "chrome:/private-browser-profile",
+        "safari:/private-browser-profile",
+        "helium+keyring:/private-browser-profile",
         "unknown:/private-browser-profile",
     ] {
         let output = output(binary(root.path()).args([
@@ -475,7 +476,8 @@ async fn malformed_configured_browser_arrays_fail_privately_before_input_process
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("native.json");
     for value in [
-        serde_json::json!(["chrome", "private-browser-profile"]),
+        serde_json::json!(["safari", "private-browser-profile"]),
+        serde_json::json!(["helium", "private-browser-profile", "private-keyring"]),
         serde_json::json!(["firefox", "private-browser-profile", "private-keyring"]),
         serde_json::json!([
             "firefox",

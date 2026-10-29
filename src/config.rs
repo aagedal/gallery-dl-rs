@@ -204,9 +204,10 @@ pub struct Options {
     /// Ordered `(filter, components)` pairs from an object-valued `directory`.
     pub directory_conditions: Option<Vec<(String, Vec<String>)>>,
     pub cookies: Option<PathBuf>,
-    /// Explicit Firefox profile selected by an upstream-style `cookies` array.
+    /// Browser cookie specification (`firefox:PATH`, `helium:Profile 1`, ...)
+    /// selected by an upstream-style `cookies` array.
     /// Mutually exclusive with the cookie file during scope resolution.
-    pub browser_cookies: Option<PathBuf>,
+    pub browser_cookies: Option<String>,
     pub proxy: Option<String>,
     pub user_agent: Option<String>,
     /// Uses gallery-dl-rs's archive identities, not upstream database IDs.
@@ -2904,18 +2905,19 @@ fn article_options(field: Field) -> Result<Option<crate::twitter::ArticleOptions
     Ok(Some(options))
 }
 
-fn cookie_source(field: Field, directory: &Path) -> Result<(Option<PathBuf>, Option<PathBuf>)> {
+fn cookie_source(field: Field, directory: &Path) -> Result<(Option<PathBuf>, Option<String>)> {
     let Some(value) = field.0 else {
         return Ok((None, None));
     };
     if let Value::Array(values) = value {
         let invalid = || {
             error(
-                "native configuration cookies browser source requires an explicit Firefox profile without keyring or container selection",
+                "native configuration cookies browser source requires an explicit Firefox profile or a Chromium browser, without keyring or container selection",
             )
         };
-        if !(2..=4).contains(&values.len())
-            || values[0].as_str() != Some("firefox")
+        let browser = values.first().and_then(Value::as_str).ok_or_else(invalid)?;
+        let chromium = crate::browser_chromium::is_browser(&browser.to_ascii_lowercase());
+        if !(if chromium { 1..=4 } else { 2..=4 }).contains(&values.len())
             || values.get(2).is_some_and(|value| !value.is_null())
             || values
                 .get(3)
@@ -2923,13 +2925,23 @@ fn cookie_source(field: Field, directory: &Path) -> Result<(Option<PathBuf>, Opt
         {
             return Err(invalid());
         }
-        let profile = path_with(Field(Some(values[1].clone())), directory, "cookies", false)?
-            .ok_or_else(invalid)?;
+        let spec = match values.get(1) {
+            // Chromium profile names (`Profile 1`) stay names; paths resolve.
+            None | Some(Value::Null) if chromium => browser.to_owned(),
+            Some(Value::String(name)) if chromium && !name.contains(std::path::MAIN_SEPARATOR) => {
+                format!("{browser}:{name}")
+            }
+            Some(profile) if browser == "firefox" || chromium => {
+                let profile = path_with(Field(Some(profile.clone())), directory, "cookies", false)?
+                    .ok_or_else(invalid)?;
+                let profile_text = profile.to_str().ok_or_else(invalid)?;
+                format!("{browser}:{profile_text}")
+            }
+            _ => return Err(invalid()),
+        };
         // Keep configuration and the CLI's explicit profile grammar aligned.
-        let profile_text = profile.to_str().ok_or_else(invalid)?;
-        crate::browser::FirefoxProfile::parse(&format!("firefox:{profile_text}"))
-            .map_err(|_| invalid())?;
-        Ok((None, Some(profile)))
+        crate::browser::BrowserProfile::parse(&spec).map_err(|_| invalid())?;
+        Ok((None, Some(spec)))
     } else {
         Ok((path(Field(Some(value)), directory, "cookies")?, None))
     }

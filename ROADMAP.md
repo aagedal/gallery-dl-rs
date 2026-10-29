@@ -290,6 +290,14 @@ rejected. Local HTTP and CLI regressions cover order, retries, headers, validati
 resume/publication, and configuration precedence. Authenticated live X fallback
 verification remains pending.
 
+**Implemented Chromium browser import, 2026-10-29:** `--cookies-from-browser`
+(and configuration `cookies` arrays) accept `helium`, `helium-neo`, `chrome`,
+`chromium`, `brave`, `edge` and `vivaldi` with an optional profile name or path.
+The `Cookies` database (and journal) is copied to a private temporary directory;
+`v10` values are decrypted with the macOS Keychain secret (database version 24
+SHA-256 host prefixes are verified). Imports are no longer limited to a fixed
+list of sites. Linux/Windows Chromium decryption remains unimplemented.
+
 **Implemented explicit browser import:** native `--cookies-from-browser
 firefox:PROFILE_PATH` reads a selected Firefox directory or cookie database through
 a read-only SQLite snapshot, including committed WAL rows. Only the requested

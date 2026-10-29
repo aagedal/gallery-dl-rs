@@ -6,7 +6,7 @@ use futures_util::{
 use gallery_dl_rs::{
     Result,
     archive::{Archive, ArchiveOutcome},
-    browser::FirefoxProfile,
+    browser::BrowserProfile,
     config::{Config, Options as ConfigOptions},
     cookies::CookieJar,
     date::source_date_bound,
@@ -1976,7 +1976,16 @@ fn ytdl_cookies(args: &Args) -> Option<gallery_dl_rs::cookies::YtdlCookies> {
     args.cookies
         .clone()
         .map(YtdlCookies::File)
-        .or_else(|| args.cookies_from_browser.clone().map(YtdlCookies::Browser))
+        .or_else(|| {
+            // yt-dlp reads browsers itself, but knows no Helium variants.
+            args.cookies_from_browser
+                .clone()
+                .filter(|spec| {
+                    gallery_dl_rs::browser::BrowserProfile::parse(spec)
+                        .is_ok_and(|profile| profile.ytdl_supported())
+                })
+                .map(YtdlCookies::Browser)
+        })
 }
 
 impl Extractors {
@@ -3021,7 +3030,7 @@ struct Settings {
     options: ConfigOptions,
     /// Raw `-o extractor.*` settings for the compatibility backend.
     cli_options: Vec<String>,
-    browser: Option<FirefoxProfile>,
+    browser: Option<BrowserProfile>,
     browser_spec: Option<String>,
     filename: Option<FilenameTemplate>,
     directory: Option<DirectoryTemplate>,
@@ -3817,15 +3826,12 @@ async fn resolved_settings(
             });
         }
         let browser_spec = args.cookies_from_browser.clone().or_else(|| {
-            options.browser_cookies.as_ref().map(|profile| {
-                // Config parsing has already checked that this path is UTF-8.
-                format!("firefox:{}", profile.display())
-            })
+            options.browser_cookies.clone()
         });
         let browser = if matches!(args.extractor, Extractor::Native) {
             browser_spec
                 .as_deref()
-                .map(FirefoxProfile::parse)
+                .map(BrowserProfile::parse)
                 .transpose()?
         } else {
             None

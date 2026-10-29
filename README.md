@@ -1570,22 +1570,38 @@ what is verified and the remaining real-response/manual authenticated gates.
 
 ## Browser sessions
 
-Native mode can import an explicitly selected Firefox profile:
+Native mode imports cookies from Chromium-based browsers on macOS and from an
+explicitly selected Firefox profile:
 
 ```sh
+./target/release/gallery-dl-rs --extractor native \
+  --cookies-from-browser helium -g 'https://www.pinterest.com/USER/BOARD/'
+./target/release/gallery-dl-rs --extractor native \
+  --cookies-from-browser 'helium-neo:Profile 1' -g 'https://www.reddit.com/user/me/saved/'
 ./target/release/gallery-dl-rs --extractor native \
   --cookies-from-browser 'firefox:/absolute/path/to/firefox-profile' \
   -j 'https://www.instagram.com/p/SHORTCODE/'
 ```
 
-Native imports support Instagram, Facebook, X, Pixiv web requests, Kemono/Coomer
-and FurAffinity. Log in to the site in that Firefox profile first (use `x.com`
-for X). Supply the
+Chromium browsers are `helium`, `helium-neo`, `chrome`, `chromium`, `brave`,
+`edge` and `vivaldi`, optionally followed by `:PROFILE`: a profile directory
+name below the browser's user-data directory (`Default` when omitted, e.g.
+`Profile 1`) or a path to a profile directory or its `Cookies` database. The
+database is copied to a private temporary directory, so a running browser is
+not disturbed. Encrypted values are decrypted with the browser's macOS
+Keychain secret (`Helium Storage Key`, `Chrome Safe Storage`, ...), read with
+`/usr/bin/security`; macOS asks once whether to allow that. Only the requested
+site's unpartitioned cookies are imported. Keyrings and containers are not
+supported, and decrypting Chromium cookies on Linux or Windows is not
+implemented.
+
+Every native extractor that reads cookies can use a browser import. Log in to
+the site in the browser first (use `x.com` for X). For Firefox, supply the
 profile directory containing `cookies.sqlite`, or that database file itself.
-Relative paths use the working directory; `~` expansion, automatic profile
-search, container selectors, and native imports from other browsers are not
-implemented. Native import selects only the requested site's default,
-unpartitioned cookies; it does not combine container or partitioned logins.
+Relative paths use the working directory; `~` expansion, automatic Firefox
+profile search and container selectors are not implemented. Native import
+selects only the requested site's default, unpartitioned cookies; it does not
+combine container or partitioned logins.
 
 The database is opened read-only, using a consistent transaction that includes
 committed WAL records. Credentials stay in memory and retain domain, path,
@@ -1605,22 +1621,26 @@ all configured cookie sources. Explicit `-C/--cookies` also replaces a configure
 browser source.
 
 Native configuration accepts the upstream [`cookies` browser-array format](https://gdl-org.github.io/docs/configuration.html#extractor-cookies)
-for explicit Firefox profiles, allowing separate sessions per site:
+for explicit Firefox profiles and Chromium browsers, allowing separate sessions per site:
 
 ```json
 {
   "extractor": {
     "instagram": { "cookies": ["firefox", "profiles/instagram"] },
-    "twitter": { "cookies": ["firefox", "profiles/x"] }
+    "reddit": { "cookies": ["helium"] },
+    "pinterest": { "cookies": ["helium-neo", "Profile 1"] }
   }
 }
 ```
 
-Profile paths in configuration are literal and relative to that file's directory.
-They select a directory or `cookies.sqlite` file, without profile-name discovery.
+Firefox profile paths in configuration are resolved like other paths and select
+a directory or `cookies.sqlite` file, without profile-name discovery. Chromium
+profiles are profile names unless they contain a path separator.
 An optional third entry must be null; an optional fourth entry may be null or
 `"none"`, selecting the default non-container context. Other browsers, keyrings,
 containers, and a fifth domain selector are not yet accepted in native configuration.
+yt-dlp receives the browser specification as-is, except for Helium browsers,
+which yt-dlp cannot read.
 A cookie file string and a browser array replace one another according to normal
 scope precedence. Sources are opened only when their site's native client is
 needed; direct links and empty selections do not read a profile. Compatibility

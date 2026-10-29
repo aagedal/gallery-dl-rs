@@ -1,4 +1,5 @@
-//! Explicit, read-only Firefox cookie imports. Browser discovery is intentionally absent.
+//! Read-only browser cookie imports: explicit Firefox profiles and
+//! Chromium-based browsers (see [`crate::browser_chromium`]).
 
 use std::{
     fmt,
@@ -67,6 +68,43 @@ impl Drop for CancelImport {
     }
 }
 
+pub use crate::browser_chromium::ChromiumProfile;
+
+/// A `--cookies-from-browser` source: `firefox:PROFILE_PATH`, or a Chromium
+/// browser such as `helium`, `helium-neo:Profile 1` or `chrome:/path`.
+#[derive(Clone, Debug)]
+pub enum BrowserProfile {
+    Firefox(FirefoxProfile),
+    Chromium(ChromiumProfile),
+}
+
+impl BrowserProfile {
+    pub fn parse(spec: &str) -> Result<Self> {
+        let name = spec.split([':', '+']).next().unwrap_or_default();
+        if crate::browser_chromium::is_browser(&name.to_ascii_lowercase()) {
+            ChromiumProfile::parse(spec).map(Self::Chromium)
+        } else {
+            FirefoxProfile::parse(spec).map(Self::Firefox)
+        }
+    }
+
+    /// Import only the requested site's cookies.
+    pub async fn load(&self, site: &str) -> Result<CookieJar> {
+        match self {
+            Self::Firefox(profile) => profile.load(site).await,
+            Self::Chromium(profile) => profile.load(site).await,
+        }
+    }
+
+    /// Whether yt-dlp can read this browser itself with `--cookies-from-browser`.
+    pub fn ytdl_supported(&self) -> bool {
+        match self {
+            Self::Firefox(_) => true,
+            Self::Chromium(profile) => profile.name() != "helium" && profile.name() != "helium-neo",
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct FirefoxProfile {
     path: PathBuf,
@@ -82,7 +120,10 @@ impl FirefoxProfile {
     /// Accept only `firefox:PROFILE_PATH`, without profile discovery or containers.
     pub fn parse(spec: &str) -> Result<Self> {
         let Some(path) = spec.strip_prefix("firefox:") else {
-            return Err(error("browser cookies require firefox:PROFILE_PATH"));
+            return Err(error(
+                "browser cookies require firefox:PROFILE_PATH or a Chromium browser \
+                 (helium, helium-neo, chrome, chromium, brave, edge, vivaldi)",
+            ));
         };
         if path.is_empty()
             || path.chars().any(char::is_control)
@@ -97,18 +138,6 @@ impl FirefoxProfile {
     /// Import only the requested site's default, unpartitioned cookie context.
     /// Credentials remain in memory; the source database is never modified.
     pub async fn load(&self, site: &str) -> Result<CookieJar> {
-        if !matches!(
-            site,
-            "instagram.com"
-                | "facebook.com"
-                | "x.com"
-                | "pixiv.net"
-                | "kemono.cr"
-                | "coomer.st"
-                | "furaffinity.net"
-        ) {
-            return Err(error("unsupported browser cookie site"));
-        }
         let path = self.path.clone();
         let site = site.to_owned();
         let cancellation = Arc::new(ImportCancellation::default());
