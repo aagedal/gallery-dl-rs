@@ -495,6 +495,8 @@ mod tests {
             format!("{profile:?}"),
             "ChromiumProfile { browser: helium-neo, profile: [redacted] }"
         );
+        // Named profiles resolve inside the macOS application support layout.
+        #[cfg(target_os = "macos")]
         assert_eq!(
             ChromiumProfile::parse("helium:Profile 1")
                 .unwrap()
