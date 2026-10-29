@@ -1914,16 +1914,31 @@ impl Config {
                     "native configuration access-token requires a mastodon.social, pawoo or baraag instance scope",
                 ));
             }
-            if !matches!(name, "pixiv" | "pixiv-novel") && settings.refresh_token.0.is_some() {
-                return Err(error(
-                    "native configuration refresh-token is only supported for pixiv or pixiv-novel",
-                ));
-            }
-            if name != "deviantart"
-                && (settings.client_id.0.is_some() || settings.client_secret.0.is_some())
+            if !matches!(name, "pixiv" | "pixiv-novel" | "reddit")
+                && settings.refresh_token.0.is_some()
             {
                 return Err(error(
-                    "native configuration client-id and client-secret are only supported for deviantart",
+                    "native configuration refresh-token is only supported for pixiv, pixiv-novel or reddit",
+                ));
+            }
+            if !matches!(name, "deviantart" | "reddit") && settings.client_id.0.is_some()
+                || name != "deviantart" && settings.client_secret.0.is_some()
+            {
+                return Err(error(
+                    "native configuration client-id is only supported for deviantart or reddit, \
+                     and client-secret for deviantart",
+                ));
+            }
+            if name == "deviantart"
+                && settings
+                    .client_id
+                    .0
+                    .as_ref()
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| !id.bytes().all(|b| b.is_ascii_digit()))
+            {
+                return Err(error(
+                    "native configuration client-id must be 1-128 ASCII digits",
                 ));
             }
             let opaque_key = if matches!(name, "pixeldrain" | "gelbooru" | "safebooru") {
@@ -2541,24 +2556,22 @@ impl RawOptions {
                 ));
             }
         };
-        let credential = |field: Field, name: &str, digits: bool| match field.0 {
+        // Client IDs are DeviantArt digits (checked per category) or
+        // Reddit identifiers with '-' and '_'.
+        let credential = |field: Field, name: &str, identifier: bool| match field.0 {
             None => Ok(None),
             Some(Value::String(value))
                 if (1..=128).contains(&value.len())
                     && value.bytes().all(|b| {
-                        if digits {
-                            b.is_ascii_digit()
-                        } else {
-                            b.is_ascii_alphanumeric()
-                        }
+                        b.is_ascii_alphanumeric() || identifier && matches!(b, b'-' | b'_')
                     }) =>
             {
                 Ok(Some(value))
             }
             Some(_) => Err(error(format!(
                 "native configuration {name} must be 1-128 ASCII {}",
-                if digits {
-                    "digits"
+                if identifier {
+                    "letters, digits, '-' or '_'"
                 } else {
                     "letters or digits"
                 }

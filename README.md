@@ -330,8 +330,19 @@ with `after` up to 100 pages. It downloads `i.redd.it` images, galleries in
 `gallery_data` order, `v.redd.it` fallback MP4s (video only: Reddit serves audio
 as separate DASH), and external links to direct media files; self posts,
 crossposts, deleted posts, and other external sites are skipped. Plain `i.redd.it`
-file links stay direct downloads in both modes. OAuth, comment/selftext link
-scanning, searches, multireddits, and upstream's reddit options are not implemented.
+file links stay direct downloads in both modes. (Comment and selftext scanning,
+searches and upstream's reddit options were added later; see the roadmap.)
+
+`api: "oauth"` switches to `oauth.reddit.com` like upstream. With a
+`refresh-token` (from `gallery-dl-rs oauth:reddit`) requests run as that
+account; without one an anonymous installed-client token is requested. A
+custom `client-id` uses the configured `user-agent`; otherwise upstream's
+default application and its User-Agent are used. Tokens are kept in memory
+only (upstream's `"cache"` refresh-token value selects no token).
+
+```json
+{"extractor": {"reddit": {"api": "oauth", "refresh-token": "TOKEN"}}}
+```
 
 Experimental native booru extraction (`--extractor native`) covers categories
 `danbooru` (danbooru.donmai.us), `e621` (e621.net, e926.net), `gelbooru` and

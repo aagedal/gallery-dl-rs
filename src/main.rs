@@ -2254,6 +2254,10 @@ fn extract_input<'a>(
                             gallery_dl_rs::reddit::Reddit::new(backend.timeout).and_then(|native| {
                                 native
                                     .with_cookies(jar)
+                                    .with_credentials(
+                                        options.client_id.as_deref(),
+                                        options.refresh_token.as_deref(),
+                                    )
                                     .with_options(options.site_options.as_deref())?
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())

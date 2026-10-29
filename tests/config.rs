@@ -4005,3 +4005,22 @@ fn chromium_cookie_arrays_select_browser_profiles() {
         assert!(selected.cookies.is_none());
     }
 }
+
+#[test]
+fn reddit_accepts_oauth_credentials() {
+    let selected = parse(
+        r#"{"extractor":{"reddit":{"api":"oauth","client-id":"6N9uN0krSDE-ig","refresh-token":"12-abc_DEF"}}}"#,
+    )
+    .unwrap()
+    .resolve("reddit")
+    .unwrap();
+    assert_eq!(selected.client_id.as_deref(), Some("6N9uN0krSDE-ig"));
+    assert_eq!(selected.refresh_token.as_deref(), Some("12-abc_DEF"));
+    for document in [
+        r#"{"extractor":{"tumblr":{"refresh-token":"x"}}}"#,
+        r#"{"extractor":{"reddit":{"client-secret":"x"}}}"#,
+        r#"{"extractor":{"deviantart":{"client-id":"abc-1"}}}"#,
+    ] {
+        assert!(parse(document).is_err(), "{document}");
+    }
+}
