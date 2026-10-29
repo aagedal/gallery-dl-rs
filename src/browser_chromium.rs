@@ -4,10 +4,11 @@
 //! running browser's locks and journals never affect the import. Encrypted
 //! values (`v10`) are decrypted with the browser's macOS Keychain secret.
 
+#[cfg(target_os = "macos")]
+use std::process::Command;
 use std::{
     fmt,
     path::{Path, PathBuf},
-    process::Command,
 };
 
 use rusqlite::{Connection, OpenFlags, params};
@@ -382,7 +383,6 @@ fn keychain_password(browser: &Browser) -> Result<Vec<u8>> {
 
 #[cfg(not(target_os = "macos"))]
 fn keychain_password(browser: &Browser) -> Result<Vec<u8>> {
-    let _ = Command::new;
     Err(error(format!(
         "decrypting {} cookies is only supported on macOS",
         browser.name
