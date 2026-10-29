@@ -924,7 +924,7 @@ pub(crate) fn sync_file(path: &Path) -> std::io::Result<()> {
     let file = std::fs::OpenOptions::new().write(true).open(path)?;
     #[cfg(not(windows))]
     let file = std::fs::File::open(path)?;
-    file.sync_all()
+    crate::durable::sync_all(&file)
 }
 
 #[cfg(test)]

@@ -164,7 +164,7 @@ impl Partial {
             // if execution stops halfway through reset.
             let file = open_regular(&part)?;
             file.set_len(0)?;
-            file.sync_all()?;
+            crate::durable::sync_all(&file)?;
             if let Some(checkpoint) = new_checkpoint {
                 write_checkpoint(&state, checkpoint)?;
             }
@@ -220,7 +220,7 @@ impl Partial {
                 return Err(error("resume partial is not a regular file"));
             }
             file.write_all(&bytes)?;
-            file.sync_data()?;
+            crate::durable::sync_data(&file)?;
             Ok(())
         })
         .await?
@@ -260,7 +260,7 @@ impl Partial {
             if let Some(modified) = modified {
                 file.set_modified(modified)?;
             }
-            file.sync_all()?;
+            crate::durable::sync_all(&file)?;
             let outcome = match fs::hard_link(&part, &destination) {
                 Ok(()) => {
                     sync_parent(&destination)?;
@@ -341,7 +341,7 @@ fn write_checkpoint(state: &Path, checkpoint: Checkpoint) -> Result<()> {
         .ok_or_else(|| error("missing resume directory"))?;
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
     temporary.write_all(&bytes)?;
-    temporary.as_file().sync_all()?;
+    crate::durable::sync_all(temporary.as_file())?;
     ensure_regular_if_exists(state)?;
     temporary.persist(state).map_err(|e| e.error)?;
     sync_parent(state)
@@ -370,7 +370,7 @@ fn read_checkpoint(path: &Path) -> Result<Option<Checkpoint>> {
 #[cfg(unix)]
 fn sync_parent(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
-        File::open(parent)?.sync_all()?;
+        crate::durable::sync_all(&File::open(parent)?)?;
     }
     Ok(())
 }

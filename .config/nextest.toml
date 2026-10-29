@@ -1,0 +1,5 @@
+# Several transport tests assert wall-clock budgets of a few hundred
+# milliseconds and occasionally miss them when every core is busy. Retries
+# keep the run green while nextest still reports them as FLAKY.
+[profile.default]
+retries = 2

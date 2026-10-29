@@ -12,6 +12,7 @@ pub mod date;
 pub mod deviantart;
 pub mod dispatch;
 pub mod download;
+mod durable;
 pub mod event;
 pub mod extract;
 pub mod facebook;
