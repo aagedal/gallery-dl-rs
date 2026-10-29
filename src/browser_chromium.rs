@@ -162,10 +162,15 @@ impl ChromiumProfile {
                 let home = std::env::var_os("HOME")
                     .filter(|home| !home.is_empty())
                     .ok_or_else(|| error("browser cookie import requires HOME"))?;
-                Ok(Path::new(&home)
+                let root = Path::new(&home)
                     .join("Library/Application Support")
-                    .join(self.browser.directory)
-                    .join(profile.unwrap_or("Default")))
+                    .join(self.browser.directory);
+                let name = profile.unwrap_or("Default");
+                Ok(match root.join(name).is_dir() {
+                    true => root.join(name),
+                    // A display name such as "Personal" selects its directory.
+                    false => display_name_directory(&root, name).unwrap_or(root.join(name)),
+                })
             }
         }
     }
@@ -313,6 +318,25 @@ impl ChromiumProfile {
         pbkdf2::pbkdf2_hmac::<sha1::Sha1>(&password, b"saltysalt", 1003, &mut key);
         Ok(key)
     }
+}
+
+/// The profile directory whose display name (`Local State`
+/// `profile.info_cache.*.name`) is `name`.
+fn display_name_directory(root: &Path, name: &str) -> Option<PathBuf> {
+    let file = std::fs::File::open(root.join("Local State")).ok()?;
+    if file.metadata().ok()?.len() > 16 * 1024 * 1024 {
+        return None;
+    }
+    let state: serde_json::Value = serde_json::from_reader(std::io::BufReader::new(file)).ok()?;
+    let directory = state
+        .pointer("/profile/info_cache")?
+        .as_object()?
+        .iter()
+        .find(|(_, info)| info.get("name").and_then(serde_json::Value::as_str) == Some(name))?
+        .0;
+    // Directory names are single components such as "Profile 1".
+    (!directory.contains(['/', '\\']) && directory != ".." && directory != ".")
+        .then(|| root.join(directory))
 }
 
 #[cfg(target_os = "macos")]
@@ -468,6 +492,26 @@ mod tests {
                 .unwrap(),
             "Profile 1"
         );
+    }
+
+    #[test]
+    fn display_names_select_profile_directories() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("Local State"),
+            r#"{"profile":{"info_cache":{"Default":{"name":"Privat"},"Profile 1":{"name":"Work"},"../x":{"name":"Evil"}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            display_name_directory(root.path(), "Work"),
+            Some(root.path().join("Profile 1"))
+        );
+        assert_eq!(
+            display_name_directory(root.path(), "Privat"),
+            Some(root.path().join("Default"))
+        );
+        assert_eq!(display_name_directory(root.path(), "Evil"), None);
+        assert_eq!(display_name_directory(root.path(), "Missing"), None);
     }
 
     #[tokio::test]

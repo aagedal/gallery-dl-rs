@@ -1607,8 +1607,9 @@ explicitly selected Firefox profile:
 
 Chromium browsers are `helium`, `helium-neo`, `chrome`, `chromium`, `brave`,
 `edge` and `vivaldi`, optionally followed by `:PROFILE`: a profile directory
-name below the browser's user-data directory (`Default` when omitted, e.g.
-`Profile 1`) or a path to a profile directory or its `Cookies` database. The
+directory name below the browser's user-data directory (`Default` when
+omitted, e.g. `Profile 1`), a profile's display name as shown in the browser
+(e.g. `helium:Personal`), or a path to a profile directory or its `Cookies` database. The
 database is copied to a private temporary directory, so a running browser is
 not disturbed. Encrypted values are decrypted with the browser's macOS
 Keychain secret (`Helium Storage Key`, `Chrome Safe Storage`, ...), read with
