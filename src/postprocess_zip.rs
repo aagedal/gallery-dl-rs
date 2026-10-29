@@ -760,7 +760,7 @@ pub(crate) fn archive(
                 source.seek(SeekFrom::Start(0))?;
                 copy_exact(&mut source, &mut output, checked.layout.length, flag)?;
             }
-            output.sync_all()?;
+            crate::durable::sync_all(&output)?;
         }
         FrameInput::Files(files) => {
             let frames = renamed_files(files, flag)?;
@@ -826,7 +826,7 @@ pub(crate) fn archive(
                     flag,
                 )?;
             }
-            writer.finish().map_err(|_| invalid())?.sync_all()?;
+            crate::durable::sync_all(&writer.finish().map_err(|_| invalid())?)?;
         }
     }
     cancelled(flag)

@@ -1050,7 +1050,9 @@ async fn write_metadata(path: &Path, media: &Media) -> Result<()> {
         .await?;
     file.write_all(&bytes).await?;
     file.flush().await?;
-    file.sync_all().await?;
+    if !cfg!(test) {
+        file.sync_all().await?;
+    }
     drop(file);
     match temporary.persist_noclobber(&sidecar) {
         Ok(_) => Ok(()),
@@ -1389,7 +1391,7 @@ async fn write_inline_text(
     file.flush().await?;
     let file = file.into_std().await;
     set_mtime(&file, mtime)?;
-    file.sync_all()?;
+    crate::durable::sync_all(&file)?;
     drop(file);
     match temporary.persist_noclobber(path) {
         Ok(_) => Ok(Outcome::Downloaded(path.into())),
@@ -1530,7 +1532,7 @@ async fn attempt_download(
     file.flush().await?;
     let file = file.into_std().await;
     set_mtime(&file, modified)?;
-    file.sync_all()?;
+    crate::durable::sync_all(&file)?;
     drop(file);
     // A part directory on another filesystem needs a copy next to the
     // destination first.
