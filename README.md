@@ -313,8 +313,21 @@ later hydration and pages while leaving sibling include views available.
 
 `extractor.bluesky.endpoint: "getActorLikes"` selects the alternative AppView
 feed endpoint; other bounded strings, `false` or `null` select repository records.
-The alternative stops on an empty feed even with a cursor. No native Bluesky
-login is implemented; restricted endpoints/content still report access errors.
+The alternative stops on an empty feed even with a cursor.
+
+`extractor.bluesky.username` (handle or email) and `password` log in like
+upstream: `com.atproto.server.createSession`, renewed with
+`refreshSession` after an hour, and AppView requests then go to
+`https://bsky.social` with the access token (unless `api-server` is set).
+Use an app password (Settings → Privacy and security → App passwords).
+Logging in enables bookmarks (`bsky.app/saved`), `getActorLikes` and
+logged-in-only content. Tokens stay in memory; `.netrc` entries for
+`bluesky` also apply.
+
+```json
+{"extractor": {"bluesky": {"username": "you.bsky.social", "password": "xxxx-xxxx-xxxx-xxxx"}}}
+```
+
 Category-scoped `api-server` overrides the AppView base URL (HTTP(S), optional
 path, no credentials/query/fragment), appending `/xrpc/`; it does not redirect
 DID discovery or repository reads. An empty string, `false` or `null` restores
@@ -330,8 +343,19 @@ with `after` up to 100 pages. It downloads `i.redd.it` images, galleries in
 `gallery_data` order, `v.redd.it` fallback MP4s (video only: Reddit serves audio
 as separate DASH), and external links to direct media files; self posts,
 crossposts, deleted posts, and other external sites are skipped. Plain `i.redd.it`
-file links stay direct downloads in both modes. OAuth, comment/selftext link
-scanning, searches, multireddits, and upstream's reddit options are not implemented.
+file links stay direct downloads in both modes. (Comment and selftext scanning,
+searches and upstream's reddit options were added later; see the roadmap.)
+
+`api: "oauth"` switches to `oauth.reddit.com` like upstream. With a
+`refresh-token` (from `gallery-dl-rs oauth:reddit`) requests run as that
+account; without one an anonymous installed-client token is requested. A
+custom `client-id` uses the configured `user-agent`; otherwise upstream's
+default application and its User-Agent are used. Tokens are kept in memory
+only (upstream's `"cache"` refresh-token value selects no token).
+
+```json
+{"extractor": {"reddit": {"api": "oauth", "refresh-token": "TOKEN"}}}
+```
 
 Experimental native booru extraction (`--extractor native`) covers categories
 `danbooru` (danbooru.donmai.us), `e621` (e621.net, e926.net), `gelbooru` and
@@ -723,6 +747,17 @@ selection to disable listings), `inline`
 comment fallback), and `original` (boolean, default true). Single-post URLs
 ignore `posts`, matching upstream. Disabling `original` avoids token lookups;
 legacy inline `_1280` rewriting remains enabled. Plain media links stay direct downloads.
+
+With `access-token` and `access-token-secret` (printed by
+`gallery-dl-rs oauth:tumblr`), API requests are signed with OAuth 1.0a like
+upstream, reaching dashboard-only and private blogs the account can see. The
+default key uses upstream's consumer secret; a custom `api-key` needs its
+`api-secret`. If a signed request is refused, the plain API key is used from
+then on, as upstream does.
+
+```json
+{"extractor": {"tumblr": {"access-token": "TOKEN", "access-token-secret": "SECRET"}}}
+```
 
 Experimental native Pixiv extraction (`--extractor native`, `pixiv` category)
 requires `extractor.pixiv.refresh-token` (accepted in the `pixiv` or `pixiv-novel`
@@ -1570,22 +1605,39 @@ what is verified and the remaining real-response/manual authenticated gates.
 
 ## Browser sessions
 
-Native mode can import an explicitly selected Firefox profile:
+Native mode imports cookies from Chromium-based browsers on macOS and from an
+explicitly selected Firefox profile:
 
 ```sh
+./target/release/gallery-dl-rs --extractor native \
+  --cookies-from-browser helium -g 'https://www.pinterest.com/USER/BOARD/'
+./target/release/gallery-dl-rs --extractor native \
+  --cookies-from-browser 'helium-neo:Profile 1' -g 'https://www.reddit.com/user/me/saved/'
 ./target/release/gallery-dl-rs --extractor native \
   --cookies-from-browser 'firefox:/absolute/path/to/firefox-profile' \
   -j 'https://www.instagram.com/p/SHORTCODE/'
 ```
 
-Native imports support Instagram, Facebook, X, Pixiv web requests, Kemono/Coomer
-and FurAffinity. Log in to the site in that Firefox profile first (use `x.com`
-for X). Supply the
+Chromium browsers are `helium`, `helium-neo`, `chrome`, `chromium`, `brave`,
+`edge` and `vivaldi`, optionally followed by `:PROFILE`: a profile directory
+directory name below the browser's user-data directory (`Default` when
+omitted, e.g. `Profile 1`), a profile's display name as shown in the browser
+(e.g. `helium:Personal`), or a path to a profile directory or its `Cookies` database. The
+database is copied to a private temporary directory, so a running browser is
+not disturbed. Encrypted values are decrypted with the browser's macOS
+Keychain secret (`Helium Storage Key`, `Chrome Safe Storage`, ...), read with
+`/usr/bin/security`; macOS asks once whether to allow that. Only the requested
+site's unpartitioned cookies are imported. Keyrings and containers are not
+supported, and decrypting Chromium cookies on Linux or Windows is not
+implemented.
+
+Every native extractor that reads cookies can use a browser import. Log in to
+the site in the browser first (use `x.com` for X). For Firefox, supply the
 profile directory containing `cookies.sqlite`, or that database file itself.
-Relative paths use the working directory; `~` expansion, automatic profile
-search, container selectors, and native imports from other browsers are not
-implemented. Native import selects only the requested site's default,
-unpartitioned cookies; it does not combine container or partitioned logins.
+Relative paths use the working directory; `~` expansion, automatic Firefox
+profile search and container selectors are not implemented. Native import
+selects only the requested site's default, unpartitioned cookies; it does not
+combine container or partitioned logins.
 
 The database is opened read-only, using a consistent transaction that includes
 committed WAL records. Credentials stay in memory and retain domain, path,
@@ -1605,22 +1657,26 @@ all configured cookie sources. Explicit `-C/--cookies` also replaces a configure
 browser source.
 
 Native configuration accepts the upstream [`cookies` browser-array format](https://gdl-org.github.io/docs/configuration.html#extractor-cookies)
-for explicit Firefox profiles, allowing separate sessions per site:
+for explicit Firefox profiles and Chromium browsers, allowing separate sessions per site:
 
 ```json
 {
   "extractor": {
     "instagram": { "cookies": ["firefox", "profiles/instagram"] },
-    "twitter": { "cookies": ["firefox", "profiles/x"] }
+    "reddit": { "cookies": ["helium"] },
+    "pinterest": { "cookies": ["helium-neo", "Profile 1"] }
   }
 }
 ```
 
-Profile paths in configuration are literal and relative to that file's directory.
-They select a directory or `cookies.sqlite` file, without profile-name discovery.
+Firefox profile paths in configuration are resolved like other paths and select
+a directory or `cookies.sqlite` file, without profile-name discovery. Chromium
+profiles are profile names unless they contain a path separator.
 An optional third entry must be null; an optional fourth entry may be null or
 `"none"`, selecting the default non-container context. Other browsers, keyrings,
 containers, and a fifth domain selector are not yet accepted in native configuration.
+yt-dlp receives the browser specification as-is, except for Helium browsers,
+which yt-dlp cannot read.
 A cookie file string and a browser array replace one another according to normal
 scope precedence. Sources are opened only when their site's native client is
 needed; direct links and empty selections do not read a profile. Compatibility

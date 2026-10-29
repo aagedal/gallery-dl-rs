@@ -44,6 +44,8 @@ const USER_AGENT: &str = concat!(
 );
 /// Upstream gallery-dl's default public API key.
 pub const DEFAULT_API_KEY: &str = "O3hU2tMi5e4Qs5t3vezEi6L0qRORJ5y9oUpSGsrWu8iA3UCc3B";
+/// Upstream's consumer secret for the default key, used for OAuth 1.0a.
+const DEFAULT_API_SECRET: &str = "sFdsK3PDdP2QpYMRAoq0oDnw0sFS24XigXmdfnaeNZpJpqAn03";
 const MAX_RESPONSE: usize = 32 * 1024 * 1024;
 const PAGE_SIZE: usize = 50;
 /// Upstream `_pagination_blogs` page size.
@@ -1022,6 +1024,9 @@ struct Options {
     fallback_delay: Duration,
     fallback_retries: u64,
     ratelimit_wait: bool,
+    /// OAuth 1.0a consumer secret (`api-secret`) and `access-token-secret`.
+    api_secret: Option<String>,
+    token_secret: Option<String>,
 }
 
 impl Default for Options {
@@ -1034,6 +1039,8 @@ impl Default for Options {
             fallback_delay: Duration::from_secs(120),
             fallback_retries: 2,
             ratelimit_wait: false,
+            api_secret: None,
+            token_secret: None,
         }
     }
 }
@@ -1048,6 +1055,20 @@ impl Options {
             }
             match key.as_str() {
                 "external" => out.external = value.as_bool().ok_or_else(invalid)?,
+                "api-secret" | "access-token-secret" => {
+                    let secret = value
+                        .as_str()
+                        .filter(|s| {
+                            (1..=256).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_graphic())
+                        })
+                        .ok_or_else(invalid)?
+                        .to_owned();
+                    if key == "api-secret" {
+                        out.api_secret = Some(secret);
+                    } else {
+                        out.token_secret = Some(secret);
+                    }
+                }
                 "avatar" => out.avatar = value.as_bool().ok_or_else(invalid)?,
                 "offset" => {
                     out.offset = Some(match value {
@@ -1094,6 +1115,9 @@ impl Options {
     }
 }
 
+/// An OAuth 1.0a key and secret.
+type Credentials<'a> = (&'a str, &'a str);
+
 pub struct Tumblr {
     client: Client,
     network: NetworkOptions,
@@ -1108,6 +1132,11 @@ pub struct Tumblr {
     /// Tumblr's own web-client token, used once the shared default key has
     /// hit its daily limit. Its responses are NPF and are converted.
     web_token: std::sync::Mutex<Option<String>>,
+    /// OAuth 1.0a `access-token` (with `access-token-secret`).
+    access_token: Option<String>,
+    /// Set after a signed request was refused; upstream then retries with
+    /// the plain API key.
+    unsigned: std::sync::atomic::AtomicBool,
     /// The page that embeds the token; unit tests leave it unset so they
     /// never reach Tumblr.
     web_root: Option<Url>,
@@ -1192,6 +1221,8 @@ impl Tumblr {
             selection: Selection::default(),
             options: Options::default(),
             web_token: std::sync::Mutex::new(None),
+            access_token: None,
+            unsigned: std::sync::atomic::AtomicBool::new(false),
             web_root: if cfg!(test) {
                 None
             } else {
@@ -1249,6 +1280,32 @@ impl Tumblr {
         self
     }
 
+    /// OAuth 1.0a `access-token` from `oauth:tumblr`; requests are signed
+    /// when `access-token-secret` (and a secret for a custom key) is set.
+    pub fn with_access_token(mut self, token: Option<&str>) -> Self {
+        self.access_token = token.filter(|token| !token.is_empty()).map(str::to_owned);
+        self
+    }
+
+    /// Consumer and token credentials when OAuth signing applies.
+    fn oauth(&self) -> Option<(Credentials<'_>, Credentials<'_>)> {
+        if self.unsigned.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        let secret = match &self.options.api_secret {
+            Some(secret) => secret.as_str(),
+            None if self.api_key == DEFAULT_API_KEY => DEFAULT_API_SECRET,
+            None => return None,
+        };
+        Some((
+            (&self.api_key, secret),
+            (
+                self.access_token.as_deref()?,
+                self.options.token_secret.as_deref()?,
+            ),
+        ))
+    }
+
     /// Select post types, reblogs, inline scope and original image resolution.
     pub fn with_selection(mut self, selection: Selection) -> Self {
         self.selection = selection;
@@ -1299,8 +1356,17 @@ impl Tumblr {
         let reply = match call().await {
             // The shared default key is often exhausted; fall back to the
             // web client's token rather than fail (or wait) for a day.
+            // Upstream retries a refused signed request with the API key.
+            Err(e)
+                if self.oauth().is_some() && e.to_string().starts_with("Tumblr refused access") =>
+            {
+                self.unsigned
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                call().await?
+            }
             Err(e)
                 if self.api_key == DEFAULT_API_KEY
+                    && self.oauth().is_none()
                     && self.web_token().is_none()
                     && e.to_string().starts_with("Tumblr daily API rate limit") =>
             {
@@ -1979,7 +2045,11 @@ impl Tumblr {
             let token = self
                 .web_token()
                 .filter(|_| target.host_str() == self.api_root.host_str());
-            if token.is_some() {
+            // Signed requests carry no api_key, like upstream's OAuth1Session.
+            let signed = self
+                .oauth()
+                .filter(|_| token.is_none() && target.host_str() == self.api_root.host_str());
+            if token.is_some() || signed.is_some() {
                 let pairs: Vec<(String, String)> = target
                     .query_pairs()
                     .filter(|(key, _)| key != "api_key")
@@ -1998,6 +2068,23 @@ impl Tumblr {
                 request = request
                     .header(reqwest::header::AUTHORIZATION, format!("Bearer {token}"))
                     .header(reqwest::header::ORIGIN, "https://www.tumblr.com");
+            }
+            if let Some((consumer, credentials)) = signed {
+                let timestamp = SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64;
+                request = request.header(
+                    reqwest::header::AUTHORIZATION,
+                    crate::sites::gdl::oauth1_header(
+                        "GET",
+                        &target,
+                        consumer,
+                        credentials,
+                        &crate::sites::gdl::generate_token(8),
+                        timestamp,
+                    ),
+                );
             }
             if let Some(accept) = accept {
                 request = request.header(reqwest::header::ACCEPT, accept);
@@ -2849,6 +2936,49 @@ mod tests {
         assert!(requests[1].starts_with(
             "GET /v2/blog/alice.tumblr.com/posts?api_key=secret&npf=false&reblog_info=true&id=123 "
         ));
+    }
+
+    #[tokio::test]
+    async fn oauth_credentials_sign_requests_and_fall_back_to_the_key() {
+        let body = json!({"response": {"posts": [post(123)]}}).to_string();
+        let (root, server) = serve(vec![
+            response("200 OK", body.as_bytes()),
+            response("403 Forbidden", b"{}"),
+            response("200 OK", body.as_bytes()),
+        ]);
+        let native = tumblr(root)
+            .with_options(Some(
+                json!({"access-token-secret": "token-secret"})
+                    .as_object()
+                    .unwrap(),
+            ))
+            .unwrap()
+            .with_access_token(Some("user-token"));
+        for _ in 0..2 {
+            let events: Vec<_> = native
+                .events(&Url::parse("https://www.tumblr.com/alice/123").unwrap())
+                .collect()
+                .await;
+            assert_eq!(events.len(), 6, "{events:?}");
+        }
+        let requests = server.join().unwrap();
+        for request in &requests[..2] {
+            assert!(
+                request.starts_with(
+                    "GET /v2/blog/alice.tumblr.com/posts?npf=false&reblog_info=true&id=123 "
+                ),
+                "{request}"
+            );
+            let lower = request.to_ascii_lowercase();
+            assert!(lower.contains("authorization: oauth "), "{request}");
+            assert!(request.contains(&format!("oauth_consumer_key=\"{DEFAULT_API_KEY}\"")));
+            assert!(request.contains("oauth_token=\"user-token\""));
+            assert!(request.contains("oauth_signature=\""));
+            assert!(!request.contains("token-secret"));
+        }
+        // After a refused signed request, upstream retries with the key.
+        assert!(requests[2].contains(&format!("api_key={DEFAULT_API_KEY}")));
+        assert!(!requests[2].to_ascii_lowercase().contains("authorization:"));
     }
 
     #[tokio::test]

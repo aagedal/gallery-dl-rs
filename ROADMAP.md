@@ -290,6 +290,14 @@ rejected. Local HTTP and CLI regressions cover order, retries, headers, validati
 resume/publication, and configuration precedence. Authenticated live X fallback
 verification remains pending.
 
+**Implemented Chromium browser import, 2026-10-29:** `--cookies-from-browser`
+(and configuration `cookies` arrays) accept `helium`, `helium-neo`, `chrome`,
+`chromium`, `brave`, `edge` and `vivaldi` with an optional profile name or path.
+The `Cookies` database (and journal) is copied to a private temporary directory;
+`v10` values are decrypted with the macOS Keychain secret (database version 24
+SHA-256 host prefixes are verified). Imports are no longer limited to a fixed
+list of sites. Linux/Windows Chromium decryption remains unimplemented.
+
 **Implemented explicit browser import:** native `--cookies-from-browser
 firefox:PROFILE_PATH` reads a selected Firefox directory or cookie database through
 a read-only SQLite snapshot, including committed WAL rows. Only the requested
@@ -780,7 +788,8 @@ rewriting, GIFV download fallbacks, and `reblogs` (boolean/`same-blog`), `posts`
 settings. Single-post URLs bypass the `posts` filter, matching upstream.
 Failed token lookups fall back to the
 API rendition; upstream's delayed token refresh retries remain unimplemented.
-Remaining: OAuth and private/dashboard blogs, likes/search/day views, NPF posts,
+Since 2026-10-29 `access-token`/`access-token-secret` (and `api-secret`) sign
+requests with OAuth 1.0a. Remaining: likes/search/day views, NPF posts,
 external audio/video, `external`/`fallback-delay`/`fallback-retries` options,
 and custom-domain blogs.
 
@@ -1007,8 +1016,10 @@ album lists, `contexts`/`exif`/`metadata` options, upstream's `size-max`/
 `videos` options, and album metadata on listed items.
 
 **Implemented experimental native Reddit:** submissions, galleries, subreddit
-and user listings over public JSON; video-only v.redd.it MP4s. Remaining: OAuth,
-DASH audio, comment scanning, external-site recursion, and reddit options.
+and user listings over public JSON; video-only v.redd.it MP4s. Since
+2026-10-29 `api: "oauth"` uses oauth.reddit.com with a `refresh-token`/
+`client-id` or an anonymous installed-client token. Remaining: `date-min`/
+`date-max`, preview fallbacks for failed child jobs, the 100-page listing cap.
 
 **Implemented experimental native Bluesky:** single posts, author media/posts
 feeds, public custom feeds and list feeds via the public AppView, with full-size
@@ -1019,8 +1030,9 @@ quoted records retain their own media identity, validate reference/view
 identities, use hydrated data and fetch missing records lazily with cycle and
 depth bounds. Bare profiles switch to the posts feed when quotes/reposts are
 requested; own pinned posts are retained. Ordered include, replies/video and
-profile-image and public likes views are described above. Not yet: searches,
-authentication, thread `depth`,
+profile-image and public likes views are described above. Since 2026-10-29
+`username`/`password` log in (createSession/refreshSession via bsky.social)
+and `/saved` bookmarks are supported. Not yet: thread `depth`,
 metadata facets/user expansion, and newer multi-item media embeds.
 
 **Implemented descriptive file metadata:** native Instagram, X, and Facebook

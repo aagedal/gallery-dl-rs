@@ -966,6 +966,9 @@ pub struct Pinterest {
     stories: bool,
     videos: bool,
     csrf_token: String,
+    /// Session cookies (`--cookies`/`--cookies-from-browser`); upstream
+    /// sends them with every request and replaces only `csrftoken`.
+    cookies: crate::cookies::CookieJar,
     timeout: Duration,
     request_timeout: Duration,
     retries: u8,
@@ -989,11 +992,18 @@ impl Pinterest {
             stories: true,
             videos: true,
             csrf_token: generate_token(),
+            cookies: crate::cookies::CookieJar::default(),
             timeout,
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
         })
+    }
+
+    /// Session cookies for logged-in, private and secret boards.
+    pub fn with_cookies(mut self, cookies: crate::cookies::CookieJar) -> Self {
+        self.cookies = cookies;
+        self
     }
 
     /// Apply proxy and user-agent settings to API requests and emitted media.
@@ -1398,13 +1408,26 @@ impl Pinterest {
                 .client
                 .get(target.clone())
                 .timeout(self.request_timeout);
+            let session = self.cookies.header(&target).map(|header| {
+                header
+                    .split("; ")
+                    .filter(|pair| !pair.starts_with("csrftoken="))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            });
             if let Mode::Api { root, .. } = mode {
                 for (name, value) in API_HEADERS {
                     request = request.header(name, value);
                 }
+                let mut cookie = format!("csrftoken={}", self.csrf_token);
+                if let Some(session) = session.filter(|session| !session.is_empty()) {
+                    cookie = format!("{cookie}; {session}");
+                }
                 request = request
                     .header("Referer", root.as_str())
-                    .header("Cookie", format!("csrftoken={}", self.csrf_token));
+                    .header("Cookie", cookie);
+            } else if let Some(session) = session.filter(|session| !session.is_empty()) {
+                request = request.header("Cookie", session);
             }
             let response = request.send().await.map_err(|_| {
                 Failure::transient("Pinterest request failed; check network access")
@@ -2174,6 +2197,27 @@ mod tests {
             ExtractionEvent::Media(media) => media,
             _ => panic!("event {index} is not media"),
         }
+    }
+
+    #[tokio::test]
+    async fn session_cookies_join_the_random_csrf_token() {
+        let (root, server) = serve(vec![ok(pin("123"), None)]);
+        let jar = crate::cookies::CookieJar::parse(
+            "127.0.0.1\tFALSE\t/\tFALSE\t0\t_pinterest_sess\tsession\n\
+             127.0.0.1\tFALSE\t/\tFALSE\t0\tcsrftoken\tbrowser\n",
+        )
+        .unwrap();
+        let native = pinterest(root).with_cookies(jar);
+        let events = run(&native, "https://www.pinterest.com/pin/123/").await;
+        assert_eq!(labels(&events), ["P", "123.jpg", "."]);
+        let requests = server.join().unwrap();
+        let cookie = requests[0]
+            .lines()
+            .find_map(|line| line.strip_prefix("cookie: "))
+            .unwrap();
+        assert!(cookie.starts_with("csrftoken="), "{cookie}");
+        assert!(cookie.ends_with("; _pinterest_sess=session"), "{cookie}");
+        assert!(!cookie.contains("browser"), "{cookie}");
     }
 
     #[tokio::test]

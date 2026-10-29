@@ -204,9 +204,10 @@ pub struct Options {
     /// Ordered `(filter, components)` pairs from an object-valued `directory`.
     pub directory_conditions: Option<Vec<(String, Vec<String>)>>,
     pub cookies: Option<PathBuf>,
-    /// Explicit Firefox profile selected by an upstream-style `cookies` array.
+    /// Browser cookie specification (`firefox:PATH`, `helium:Profile 1`, ...)
+    /// selected by an upstream-style `cookies` array.
     /// Mutually exclusive with the cookie file during scope resolution.
-    pub browser_cookies: Option<PathBuf>,
+    pub browser_cookies: Option<String>,
     pub proxy: Option<String>,
     pub user_agent: Option<String>,
     /// Uses gallery-dl-rs's archive identities, not upstream database IDs.
@@ -1850,11 +1851,11 @@ impl Config {
                     "native configuration threshold is only supported for danbooru and e621",
                 ));
             }
-            if !matches!(name, "danbooru" | "e621")
+            if !matches!(name, "danbooru" | "e621" | "bluesky")
                 && (settings.username.0.is_some() || settings.password.0.is_some())
             {
                 return Err(error(
-                    "native configuration username/password are only supported for danbooru and e621",
+                    "native configuration username/password are only supported for danbooru, e621 and bluesky",
                 ));
             }
             if !matches!(name, "gelbooru" | "safebooru") && settings.user_id.0.is_some() {
@@ -1906,23 +1907,38 @@ impl Config {
             } else {
                 None
             };
-            if !matches!(name, "mastodon.social" | "pawoo" | "baraag")
+            if !matches!(name, "mastodon.social" | "pawoo" | "baraag" | "tumblr")
                 && settings.access_token.0.is_some()
             {
                 return Err(error(
-                    "native configuration access-token requires a mastodon.social, pawoo or baraag instance scope",
+                    "native configuration access-token requires a tumblr, mastodon.social, pawoo or baraag scope",
                 ));
             }
-            if !matches!(name, "pixiv" | "pixiv-novel") && settings.refresh_token.0.is_some() {
-                return Err(error(
-                    "native configuration refresh-token is only supported for pixiv or pixiv-novel",
-                ));
-            }
-            if name != "deviantart"
-                && (settings.client_id.0.is_some() || settings.client_secret.0.is_some())
+            if !matches!(name, "pixiv" | "pixiv-novel" | "reddit")
+                && settings.refresh_token.0.is_some()
             {
                 return Err(error(
-                    "native configuration client-id and client-secret are only supported for deviantart",
+                    "native configuration refresh-token is only supported for pixiv, pixiv-novel or reddit",
+                ));
+            }
+            if !matches!(name, "deviantart" | "reddit") && settings.client_id.0.is_some()
+                || name != "deviantart" && settings.client_secret.0.is_some()
+            {
+                return Err(error(
+                    "native configuration client-id is only supported for deviantart or reddit, \
+                     and client-secret for deviantart",
+                ));
+            }
+            if name == "deviantart"
+                && settings
+                    .client_id
+                    .0
+                    .as_ref()
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| !id.bytes().all(|b| b.is_ascii_digit()))
+            {
+                return Err(error(
+                    "native configuration client-id must be 1-128 ASCII digits",
                 ));
             }
             let opaque_key = if matches!(name, "pixeldrain" | "gelbooru" | "safebooru") {
@@ -2285,7 +2301,7 @@ impl RawOptions {
             }
             Some(_) => {
                 return Err(error(
-                    "native configuration Mastodon access-token must be a bearer token string or false; OAuth cache discovery is not implemented",
+                    "native configuration access-token must be a token string or false; OAuth cache discovery is not implemented",
                 ));
             }
         };
@@ -2540,24 +2556,22 @@ impl RawOptions {
                 ));
             }
         };
-        let credential = |field: Field, name: &str, digits: bool| match field.0 {
+        // Client IDs are DeviantArt digits (checked per category) or
+        // Reddit identifiers with '-' and '_'.
+        let credential = |field: Field, name: &str, identifier: bool| match field.0 {
             None => Ok(None),
             Some(Value::String(value))
                 if (1..=128).contains(&value.len())
                     && value.bytes().all(|b| {
-                        if digits {
-                            b.is_ascii_digit()
-                        } else {
-                            b.is_ascii_alphanumeric()
-                        }
+                        b.is_ascii_alphanumeric() || identifier && matches!(b, b'-' | b'_')
                     }) =>
             {
                 Ok(Some(value))
             }
             Some(_) => Err(error(format!(
                 "native configuration {name} must be 1-128 ASCII {}",
-                if digits {
-                    "digits"
+                if identifier {
+                    "letters, digits, '-' or '_'"
                 } else {
                     "letters or digits"
                 }
@@ -2904,18 +2918,19 @@ fn article_options(field: Field) -> Result<Option<crate::twitter::ArticleOptions
     Ok(Some(options))
 }
 
-fn cookie_source(field: Field, directory: &Path) -> Result<(Option<PathBuf>, Option<PathBuf>)> {
+fn cookie_source(field: Field, directory: &Path) -> Result<(Option<PathBuf>, Option<String>)> {
     let Some(value) = field.0 else {
         return Ok((None, None));
     };
     if let Value::Array(values) = value {
         let invalid = || {
             error(
-                "native configuration cookies browser source requires an explicit Firefox profile without keyring or container selection",
+                "native configuration cookies browser source requires an explicit Firefox profile or a Chromium browser, without keyring or container selection",
             )
         };
-        if !(2..=4).contains(&values.len())
-            || values[0].as_str() != Some("firefox")
+        let browser = values.first().and_then(Value::as_str).ok_or_else(invalid)?;
+        let chromium = crate::browser_chromium::is_browser(&browser.to_ascii_lowercase());
+        if !(if chromium { 1..=4 } else { 2..=4 }).contains(&values.len())
             || values.get(2).is_some_and(|value| !value.is_null())
             || values
                 .get(3)
@@ -2923,13 +2938,23 @@ fn cookie_source(field: Field, directory: &Path) -> Result<(Option<PathBuf>, Opt
         {
             return Err(invalid());
         }
-        let profile = path_with(Field(Some(values[1].clone())), directory, "cookies", false)?
-            .ok_or_else(invalid)?;
+        let spec = match values.get(1) {
+            // Chromium profile names (`Profile 1`) stay names; paths resolve.
+            None | Some(Value::Null) if chromium => browser.to_owned(),
+            Some(Value::String(name)) if chromium && !name.contains(std::path::MAIN_SEPARATOR) => {
+                format!("{browser}:{name}")
+            }
+            Some(profile) if browser == "firefox" || chromium => {
+                let profile = path_with(Field(Some(profile.clone())), directory, "cookies", false)?
+                    .ok_or_else(invalid)?;
+                let profile_text = profile.to_str().ok_or_else(invalid)?;
+                format!("{browser}:{profile_text}")
+            }
+            _ => return Err(invalid()),
+        };
         // Keep configuration and the CLI's explicit profile grammar aligned.
-        let profile_text = profile.to_str().ok_or_else(invalid)?;
-        crate::browser::FirefoxProfile::parse(&format!("firefox:{profile_text}"))
-            .map_err(|_| invalid())?;
-        Ok((None, Some(profile)))
+        crate::browser::BrowserProfile::parse(&spec).map_err(|_| invalid())?;
+        Ok((None, Some(spec)))
     } else {
         Ok((path(Field(Some(value)), directory, "cookies")?, None))
     }

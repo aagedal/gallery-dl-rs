@@ -38,6 +38,9 @@ blake2 = "0.10"
 libc = "0.2"
 toml = "1"
 serde_yaml_ng = "0.10"
+aes = "0.8"
+cbc = "0.1"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }

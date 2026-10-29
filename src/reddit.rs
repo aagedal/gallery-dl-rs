@@ -45,6 +45,12 @@ const USER_AGENT: &str = concat!(
     " (native Reddit extractor)"
 );
 const API_ROOT: &str = "https://www.reddit.com/";
+/// Upstream's `api: "oauth"` endpoints and default application.
+const OAUTH_ROOT: &str = "https://oauth.reddit.com/";
+const TOKEN_URL: &str = "https://www.reddit.com/api/v1/access_token";
+const DEFAULT_CLIENT_ID: &str = "6N9uN0krSDE-ig";
+/// Reddit ties the default client ID to upstream's User-Agent.
+const DEFAULT_CLIENT_USER_AGENT: &str = "Python:gallery-dl:0.8.4 (by /u/mikf1)";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 const LOGIN_REQUIRED: &str = "Reddit requires a logged-in session for its JSON API from this \
                               network; pass reddit.com cookies with --cookies";
@@ -298,6 +304,8 @@ pub struct Options {
     pub limit: Option<u64>,
     /// Accepted for compatibility; every file already carries its submission keywords.
     pub parent_directory: bool,
+    /// `api: "oauth"`: use oauth.reddit.com with an access token.
+    pub oauth: bool,
 }
 
 impl Default for Options {
@@ -315,6 +323,7 @@ impl Default for Options {
             id_max: None,
             limit: None,
             parent_directory: false,
+            oauth: false,
         }
     }
 }
@@ -408,6 +417,11 @@ impl Options {
         if options.id_max == Some(2_147_483_647) {
             options.id_max = None;
         }
+        options.oauth = match map.get("api") {
+            None | Some(Value::Null) => false,
+            Some(Value::String(api)) => api == "oauth",
+            Some(_) => return Err(error("Reddit api must be \"oauth\" or \"rest\"")),
+        };
         if let Some(limit) = integer("limit")? {
             options.limit = (limit > 0).then_some(limit as u64);
         }
@@ -1004,6 +1018,15 @@ pub struct Reddit {
     last_request: tokio::sync::Mutex<Option<Instant>>,
     /// Session cookies, sent with API requests like upstream's REST mode.
     cookies: std::sync::Mutex<crate::cookies::CookieJar>,
+    oauth_root: Url,
+    token_url: Url,
+    /// Custom OAuth application (`client-id`); upstream's default otherwise.
+    client_id: Option<String>,
+    /// `refresh-token` from `oauth:reddit`; without it an anonymous
+    /// installed-client token is requested.
+    refresh_token: Option<String>,
+    /// The current bearer token and when to renew it.
+    token: tokio::sync::Mutex<Option<(String, Instant)>>,
 }
 
 /// Pending work of one extraction.
@@ -1061,7 +1084,26 @@ impl Reddit {
             interval: REQUEST_INTERVAL,
             last_request: tokio::sync::Mutex::new(None),
             cookies: std::sync::Mutex::new(crate::cookies::CookieJar::default()),
+            oauth_root: Url::parse(OAUTH_ROOT).unwrap(),
+            token_url: Url::parse(TOKEN_URL).unwrap(),
+            client_id: None,
+            refresh_token: None,
+            token: tokio::sync::Mutex::new(None),
         })
+    }
+
+    /// OAuth credentials for `api: "oauth"`: a custom `client-id` and a
+    /// `refresh-token` (upstream's `"cache"` value selects no token).
+    pub fn with_credentials(
+        mut self,
+        client_id: Option<&str>,
+        refresh_token: Option<&str>,
+    ) -> Self {
+        self.client_id = client_id.map(str::to_owned);
+        self.refresh_token = refresh_token
+            .filter(|token| *token != "cache")
+            .map(str::to_owned);
+        self
     }
 
     /// Session cookies for API requests; Reddit serves its JSON listings only
@@ -1106,8 +1148,98 @@ impl Reddit {
 
     /// Override the API origin; intended for local tests.
     pub fn with_api_root(mut self, root: Url) -> Self {
+        self.oauth_root = root.clone();
+        self.token_url = root.join("api/v1/access_token").unwrap();
         self.api_root = root;
         self
+    }
+
+    /// The `Authorization` header for OAuth mode, renewing the token when
+    /// it is about to expire (upstream: `RedditAPI.authenticate`).
+    async fn authorization(&self) -> std::result::Result<Option<String>, Failure> {
+        if !self.options.oauth {
+            return Ok(None);
+        }
+        let mut token = self.token.lock().await;
+        if let Some((value, renew)) = token.as_ref()
+            && Instant::now() < *renew
+        {
+            return Ok(Some(value.clone()));
+        }
+        let form: Vec<(&str, &str)> = match &self.refresh_token {
+            Some(refresh) => vec![("grant_type", "refresh_token"), ("refresh_token", refresh)],
+            None => {
+                // Upstream allows quarantined subreddits for anonymous tokens.
+                self.cookies.lock().unwrap().store(
+                    &Url::parse("https://www.reddit.com/").unwrap(),
+                    "_options=%7B%22pref_quarantine_optin%22%3A%20true%7D; \
+                     Domain=.reddit.com; Path=/",
+                );
+                vec![
+                    (
+                        "grant_type",
+                        "https://oauth.reddit.com/grants/installed_client",
+                    ),
+                    ("device_id", "DO_NOT_TRACK_THIS_DEVICE"),
+                ]
+            }
+        };
+        let client_id = self.client_id.as_deref().unwrap_or(DEFAULT_CLIENT_ID);
+        let mut request = self
+            .client
+            .post(self.token_url.clone())
+            .timeout(self.request_timeout)
+            .basic_auth(client_id, Some(""))
+            .form(&form);
+        if self.client_id.is_none() {
+            request = request.header(header::USER_AGENT, DEFAULT_CLIENT_USER_AGENT);
+        }
+        let response = request.send().await.map_err(|_| {
+            Failure::transient("Reddit OAuth token request failed; check network access")
+        })?;
+        let status = response.status();
+        let body: Value = response
+            .bytes()
+            .await
+            .ok()
+            .filter(|body| body.len() <= 64 * 1024)
+            .and_then(|body| serde_json::from_slice(&body).ok())
+            .unwrap_or_else(|| Value::Object(Map::new()));
+        let access = body
+            .get("access_token")
+            .and_then(Value::as_str)
+            .filter(|token| !token.is_empty() && token.len() <= 4096);
+        let Some(access) = access.filter(|_| status.is_success()) else {
+            // Reddit's error codes are short identifiers, never credentials.
+            let field = |key: &str| {
+                body.get(key)
+                    .and_then(Value::as_str)
+                    .filter(|text| text.len() <= 64 && text.bytes().all(|b| b.is_ascii_graphic()))
+                    .unwrap_or("unknown")
+                    .to_owned()
+            };
+            return Err(Failure {
+                error: error(format!(
+                    "Reddit OAuth authentication failed (HTTP {}: {}); check client-id and \
+                     refresh-token",
+                    status.as_u16(),
+                    field("error")
+                )),
+                retry: false,
+                status: Some(status.as_u16()),
+            });
+        };
+        let lifetime = body
+            .get("expires_in")
+            .and_then(Value::as_u64)
+            .unwrap_or(3600)
+            .clamp(120, 86_400);
+        let value = format!("Bearer {access}");
+        *token = Some((
+            value.clone(),
+            Instant::now() + Duration::from_secs(lifetime - 60),
+        ));
+        Ok(Some(value))
     }
 
     /// Each API call is bounded by the overall timeout.
@@ -1116,8 +1248,12 @@ impl Reddit {
         path: &str,
         query: &[(&str, &str)],
     ) -> std::result::Result<Value, Failure> {
-        let mut endpoint = self
-            .api_root
+        let root = if self.options.oauth {
+            &self.oauth_root
+        } else {
+            &self.api_root
+        };
+        let mut endpoint = root
             .join(path)
             .map_err(|_| Failure::from(error("invalid Reddit path")))?;
         endpoint
@@ -1675,6 +1811,14 @@ impl Reddit {
                 .header(header::ACCEPT, "application/json");
             if let Some(cookies) = self.cookies.lock().unwrap().header(&target) {
                 request = request.header(header::COOKIE, cookies);
+            }
+            if target.origin() == self.oauth_root.origin()
+                && let Some(authorization) = self.authorization().await?
+            {
+                request = request.header(header::AUTHORIZATION, authorization);
+                if self.client_id.is_none() {
+                    request = request.header(header::USER_AGENT, DEFAULT_CLIENT_USER_AGENT);
+                }
             }
             let response = request
                 .send()
@@ -2365,6 +2509,7 @@ mod tests {
             json!({"embeds": 1}),
             json!({"id-min": "not base36!"}),
             json!({"id-max": 5}),
+            json!({"api": true}),
         ] {
             assert!(parse(bad.clone()).is_err(), "{bad}");
         }
@@ -2576,6 +2721,79 @@ mod tests {
         }
         let requests = server.join().unwrap();
         assert!(requests[0].contains("token_v2=secret"), "{}", requests[0]);
+    }
+
+    #[tokio::test]
+    async fn oauth_mode_refreshes_and_reuses_a_bearer_token() {
+        let token = |value: &str| {
+            response(
+                "200 OK",
+                "Content-Type: application/json\r\n",
+                json!({"access_token": value, "expires_in": 3600})
+                    .to_string()
+                    .as_bytes(),
+            )
+        };
+        let (root, server) = serve(vec![
+            token("fresh"),
+            ok(&listing(vec![image_post("h1")], None)),
+            ok(&listing(vec![image_post("h2")], None)),
+            response(
+                "401 Unauthorized",
+                "Content-Type: application/json\r\n",
+                br#"{"error": "invalid_grant", "message": "private-detail"}"#,
+            ),
+        ]);
+        let native = with(reddit(root.clone()), json!({"api": "oauth"}))
+            .with_credentials(Some("my-client_1"), Some("refresh-1"));
+        for _ in 0..2 {
+            let events: Vec<_> = native
+                .events(&Url::parse("https://www.reddit.com/r/pics/").unwrap())
+                .collect()
+                .await;
+            assert_eq!(files(&events).len(), 1, "{events:?}");
+        }
+        // Anonymous tokens use upstream's default application and agent.
+        let anonymous = with(reddit(root), json!({"api": "oauth"}));
+        let events: Vec<_> = anonymous
+            .events(&Url::parse("https://www.reddit.com/r/pics/").unwrap())
+            .collect()
+            .await;
+        let message = events[0].as_ref().err().unwrap().to_string();
+        assert!(message.contains("authentication failed"), "{message}");
+        assert!(message.contains("invalid_grant"), "{message}");
+        assert!(!message.contains("private-detail"), "{message}");
+        let requests = server.join().unwrap();
+        let lower: Vec<_> = requests.iter().map(|r| r.to_ascii_lowercase()).collect();
+        assert!(
+            requests[0].starts_with("POST /api/v1/access_token "),
+            "{}",
+            requests[0]
+        );
+        // base64("my-client_1:")
+        assert!(
+            lower[0].contains("authorization: basic bxkty2xpzw50xze6"),
+            "{}",
+            lower[0]
+        );
+        for request in &lower[1..3] {
+            assert!(
+                request.starts_with("get /r/pics/.json?raw_json=1 "),
+                "{request}"
+            );
+            assert!(request.contains("authorization: bearer fresh"), "{request}");
+            assert!(request.contains("user-agent: gallery-dl-rs/"), "{request}");
+        }
+        assert!(
+            lower[3].contains("authorization: basic nk45du4wa3jtreutawc6"),
+            "{}",
+            lower[3]
+        );
+        assert!(
+            lower[3].contains("user-agent: python:gallery-dl:0.8.4"),
+            "{}",
+            lower[3]
+        );
     }
 
     #[tokio::test]
