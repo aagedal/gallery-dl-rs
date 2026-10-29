@@ -313,8 +313,21 @@ later hydration and pages while leaving sibling include views available.
 
 `extractor.bluesky.endpoint: "getActorLikes"` selects the alternative AppView
 feed endpoint; other bounded strings, `false` or `null` select repository records.
-The alternative stops on an empty feed even with a cursor. No native Bluesky
-login is implemented; restricted endpoints/content still report access errors.
+The alternative stops on an empty feed even with a cursor.
+
+`extractor.bluesky.username` (handle or email) and `password` log in like
+upstream: `com.atproto.server.createSession`, renewed with
+`refreshSession` after an hour, and AppView requests then go to
+`https://bsky.social` with the access token (unless `api-server` is set).
+Use an app password (Settings → Privacy and security → App passwords).
+Logging in enables bookmarks (`bsky.app/saved`), `getActorLikes` and
+logged-in-only content. Tokens stay in memory; `.netrc` entries for
+`bluesky` also apply.
+
+```json
+{"extractor": {"bluesky": {"username": "you.bsky.social", "password": "xxxx-xxxx-xxxx-xxxx"}}}
+```
+
 Category-scoped `api-server` overrides the AppView base URL (HTTP(S), optional
 path, no credentials/query/fragment), appending `/xrpc/`; it does not redirect
 DID discovery or repository reads. An empty string, `false` or `null` restores

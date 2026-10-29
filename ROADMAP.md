@@ -1030,8 +1030,9 @@ quoted records retain their own media identity, validate reference/view
 identities, use hydrated data and fetch missing records lazily with cycle and
 depth bounds. Bare profiles switch to the posts feed when quotes/reposts are
 requested; own pinned posts are retained. Ordered include, replies/video and
-profile-image and public likes views are described above. Not yet: searches,
-authentication, thread `depth`,
+profile-image and public likes views are described above. Since 2026-10-29
+`username`/`password` log in (createSession/refreshSession via bsky.social)
+and `/saved` bookmarks are supported. Not yet: thread `depth`,
 metadata facets/user expansion, and newer multi-item media embeds.
 
 **Implemented descriptive file metadata:** native Instagram, X, and Facebook

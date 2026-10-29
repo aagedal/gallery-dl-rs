@@ -1851,11 +1851,11 @@ impl Config {
                     "native configuration threshold is only supported for danbooru and e621",
                 ));
             }
-            if !matches!(name, "danbooru" | "e621")
+            if !matches!(name, "danbooru" | "e621" | "bluesky")
                 && (settings.username.0.is_some() || settings.password.0.is_some())
             {
                 return Err(error(
-                    "native configuration username/password are only supported for danbooru and e621",
+                    "native configuration username/password are only supported for danbooru, e621 and bluesky",
                 ));
             }
             if !matches!(name, "gelbooru" | "safebooru") && settings.user_id.0.is_some() {

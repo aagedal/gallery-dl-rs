@@ -4024,3 +4024,13 @@ fn reddit_accepts_oauth_credentials() {
         assert!(parse(document).is_err(), "{document}");
     }
 }
+
+#[test]
+fn bluesky_accepts_login_credentials() {
+    let selected = parse(r#"{"extractor":{"bluesky":{"username":"alice.bsky.social","password":"abcd-efgh-ijkl-mnop"}}}"#)
+        .unwrap()
+        .resolve("bluesky")
+        .unwrap();
+    assert_eq!(selected.username.as_deref(), Some("alice.bsky.social"));
+    assert!(selected.password.is_some());
+}

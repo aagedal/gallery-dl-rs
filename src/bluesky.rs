@@ -32,6 +32,8 @@ pub use likes::LikesEndpoint;
 
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const API_ROOT: &str = "https://public.api.bsky.app/xrpc/";
+/// Logged-in requests go through the account's entryway, like upstream.
+const AUTH_ROOT: &str = "https://bsky.social/xrpc/";
 const BLOB_ROOT: &str = "https://bsky.social/xrpc/com.atproto.sync.getBlob";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;
 const PAGE_LIMIT: &str = "100";
@@ -72,6 +74,8 @@ pub enum Feed {
         query: String,
         sort: Option<String>,
     },
+    /// `app.bsky.bookmark.getBookmarks` (`/saved`); requires a login.
+    Bookmarks,
 }
 
 impl Feed {
@@ -81,7 +85,11 @@ impl Feed {
             Self::Posts => Some("posts_and_author_threads"),
             Self::Replies => Some("posts_with_replies"),
             Self::Video => Some("posts_with_video"),
-            Self::Custom(_) | Self::List(_) | Self::ActorLikes | Self::Search { .. } => None,
+            Self::Custom(_)
+            | Self::List(_)
+            | Self::ActorLikes
+            | Self::Search { .. }
+            | Self::Bookmarks => None,
         }
     }
 }
@@ -110,6 +118,8 @@ pub enum Target {
         query: String,
         sort: Option<String>,
     },
+    /// The logged-in account's bookmarks (`/saved`).
+    Bookmarks,
 }
 
 const MAX_QUERY: usize = 4096;
@@ -280,9 +290,7 @@ pub fn target(url: &Url) -> Result<Target> {
             }
             search_target(format!("#{tag}"), sort)
         }
-        ["saved"] => Err(error(
-            "native Bluesky bookmarks require an authenticated session; use --extractor compatibility",
-        )),
+        ["saved"] => Ok(Target::Bookmarks),
         _ => Err(unsupported()),
     }
 }
@@ -690,8 +698,19 @@ pub struct Bluesky {
     discovery_root: Option<Url>,
     pds_fallback: Url,
     discovery_cache: std::sync::Mutex<likes::DiscoveryCache>,
+    /// `username`/`password` (an app password) for `createSession`.
+    login: Option<(String, String)>,
+    session: tokio::sync::Mutex<Option<Session>>,
     #[cfg(test)]
     blob_root_override: Option<Url>,
+}
+
+/// Upstream caches the access token for an hour and the refresh token for
+/// 84 days; here both live only for the run.
+struct Session {
+    access: String,
+    refresh: String,
+    renew: std::time::Instant,
 }
 
 struct FeedState {
@@ -746,9 +765,117 @@ impl Bluesky {
             discovery_root: None,
             pds_fallback: Url::parse("https://bsky.social/").unwrap(),
             discovery_cache: std::sync::Mutex::new(likes::DiscoveryCache::default()),
+            login: None,
+            session: tokio::sync::Mutex::new(None),
             #[cfg(test)]
             blob_root_override: None,
         })
+    }
+
+    /// Log in with `username` (handle or email) and an app password. Unless
+    /// `api-server` was set, requests then go to bsky.social like upstream.
+    pub fn with_login(mut self, username: Option<&str>, password: Option<&str>) -> Result<Self> {
+        let Some(username) = username.filter(|name| !name.is_empty()) else {
+            return Ok(self);
+        };
+        let password = password
+            .filter(|password| !password.is_empty())
+            .ok_or_else(|| error("Bluesky login requires a password (use an app password)"))?;
+        if self.api_root.as_str() == API_ROOT {
+            self.api_root = Url::parse(AUTH_ROOT).unwrap();
+        }
+        self.login = Some((username.to_owned(), password.to_owned()));
+        Ok(self)
+    }
+
+    /// The bearer token, creating or refreshing the session as needed.
+    async fn authorization(&self) -> std::result::Result<Option<String>, Failure> {
+        let Some((username, password)) = &self.login else {
+            return Ok(None);
+        };
+        let mut session = self.session.lock().await;
+        if let Some(current) = session.as_ref()
+            && std::time::Instant::now() < current.renew
+        {
+            return Ok(Some(current.access.clone()));
+        }
+        let refresh = session.take().map(|current| current.refresh);
+        let mut created = None;
+        if let Some(refresh) = refresh {
+            created = self.session_request("com.atproto.server.refreshSession", Some(&refresh), None).await.ok();
+        }
+        let body = match created {
+            Some(body) => body,
+            None => {
+                let credentials = serde_json::json!({"identifier": username, "password": password});
+                self.session_request("com.atproto.server.createSession", None, Some(&credentials))
+                    .await?
+            }
+        };
+        let token = |key: &str| {
+            body.get(key)
+                .and_then(Value::as_str)
+                .filter(|token| !token.is_empty() && token.len() <= 8192)
+                .map(str::to_owned)
+        };
+        let (Some(access), Some(refresh)) = (token("accessJwt"), token("refreshJwt")) else {
+            return Err(error("Bluesky authentication failed: invalid session response").into());
+        };
+        // Access tokens last about two hours; renew after one, like upstream.
+        *session = Some(Session {
+            access: access.clone(),
+            refresh,
+            renew: std::time::Instant::now() + Duration::from_secs(3600),
+        });
+        Ok(Some(access))
+    }
+
+    async fn session_request(
+        &self,
+        method: &str,
+        bearer: Option<&str>,
+        body: Option<&Value>,
+    ) -> std::result::Result<Value, Failure> {
+        let mut request = self
+            .client
+            .post(self.api_root.join(method).expect("static XRPC method"))
+            .timeout(self.request_timeout)
+            .header(header::ACCEPT, "application/json");
+        if let Some(bearer) = bearer {
+            request = request.header(header::AUTHORIZATION, format!("Bearer {bearer}"));
+        }
+        if let Some(body) = body {
+            request = request
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(body.to_string());
+        }
+        let response = request.send().await.map_err(|_| {
+            Failure::transient("Bluesky login request failed; check network access")
+        })?;
+        let status = response.status();
+        let body: Value = response
+            .bytes()
+            .await
+            .ok()
+            .filter(|body| body.len() <= 256 * 1024)
+            .and_then(|body| serde_json::from_slice(&body).ok())
+            .unwrap_or(Value::Null);
+        if !status.is_success() {
+            // XRPC error names are short identifiers, never credentials.
+            let code = body
+                .get("error")
+                .and_then(Value::as_str)
+                .filter(|code| code.len() <= 64 && code.bytes().all(|b| b.is_ascii_alphanumeric()))
+                .unwrap_or("unknown");
+            return Err(Failure {
+                error: error(format!(
+                    "Bluesky authentication failed (HTTP {}: {code}); check username and app password",
+                    status.as_u16()
+                )),
+                retry: false,
+            });
+        }
+        Ok(body)
     }
 
     pub fn with_selection(mut self, selection: Selection) -> Self {
@@ -896,7 +1023,7 @@ impl Bluesky {
         let did = match &state.did {
             Some(did) => did.clone(),
             // Searches are not owned by an actor; nothing to resolve.
-            None if matches!(state.feed, Feed::Search { .. }) => String::new(),
+            None if matches!(state.feed, Feed::Search { .. } | Feed::Bookmarks) => String::new(),
             None => {
                 let did = self.resolve(&state.actor).await?;
                 state.did = Some(did.clone());
@@ -919,8 +1046,18 @@ impl Bluesky {
                 format!("at://{did}/app.bsky.graph.list/{rkey}"),
             ),
             Feed::Search { query, .. } => ("app.bsky.feed.searchPosts", "q", query.clone()),
+            Feed::Bookmarks => {
+                if self.login.is_none() {
+                    return Err(error(
+                        "Bluesky bookmarks require a login; set extractor.bluesky.username and \
+                         password (an app password)",
+                    ));
+                }
+                ("app.bsky.bookmark.getBookmarks", "", String::new())
+            }
         };
         let mut query = vec![(parameter, resource.as_str())];
+        query.retain(|(parameter, _)| !parameter.is_empty());
         if let Some(filter) = state.feed.filter() {
             query.push(("filter", filter));
         }
@@ -938,8 +1075,15 @@ impl Bluesky {
         let body: Value =
             serde_json::from_slice(&body).map_err(|_| error("Bluesky returned invalid JSON"))?;
         let search = matches!(state.feed, Feed::Search { .. });
+        let bookmarks = state.feed == Feed::Bookmarks;
         let items = body
-            .get(if search { "posts" } else { "feed" })
+            .get(if search {
+                "posts"
+            } else if bookmarks {
+                "bookmarks"
+            } else {
+                "feed"
+            })
             .and_then(Value::as_array)
             .ok_or_else(|| error("Bluesky response is missing its feed"))?;
         let cursor = page_cursor(&body)?;
@@ -948,12 +1092,21 @@ impl Bluesky {
             .as_ref()
             .is_none_or(|cursor| !state.seen_cursors.insert(cursor.clone()))
             || state.pages >= MAX_PAGES
-            || state.feed == Feed::ActorLikes && items.is_empty();
+            || matches!(state.feed, Feed::ActorLikes | Feed::Bookmarks) && items.is_empty();
         state.cursor = cursor;
         // Collection owners identify the feed/list record, not the returned post
         // authors. Upstream's reposts author restriction applies only to author feeds.
         let author = state.feed.filter().map(|_| did.as_str());
-        if search {
+        if bookmarks {
+            // Bookmarks wrap post views in `item`; deleted ones are not posts.
+            state.posts.extend(
+                items
+                    .iter()
+                    .filter_map(|bookmark| bookmark.get("item"))
+                    .filter(|post| post.get("uri").is_some() && post.get("record").is_some())
+                    .cloned(),
+            );
+        } else if search {
             // Search results are bare post views rather than feed items.
             state
                 .posts
@@ -1040,6 +1193,7 @@ impl Bluesky {
             Target::Search { query, sort } => {
                 self.feed_events(String::new(), Feed::Search { query, sort })
             }
+            Target::Bookmarks => self.feed_events(String::new(), Feed::Bookmarks),
         }
     }
 
@@ -1257,11 +1411,17 @@ impl Bluesky {
         let mut redirects = Redirects::new(endpoint);
         let mut response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
-            let response = self
+            let mut request = self
                 .client
                 .get(target.clone())
                 .timeout(self.request_timeout)
-                .header(header::ACCEPT, "application/json")
+                .header(header::ACCEPT, "application/json");
+            if target.origin() == self.api_root.origin()
+                && let Some(token) = self.authorization().await?
+            {
+                request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
+            }
+            let response = request
                 .send()
                 .await
                 .map_err(|_| Failure::transient("Bluesky request failed; check network access"))?;
@@ -1615,6 +1775,64 @@ mod tests {
             .unwrap()
             .with_api_root(root)
             .with_blob_test_root(Some(Url::parse("https://bsky.social/").unwrap()))
+    }
+
+    #[tokio::test]
+    async fn login_creates_a_session_and_lists_bookmarks() {
+        let embed = json!({"$type": "app.bsky.embed.images", "images": [image(CID1, "")]});
+        let session = json!({"accessJwt": "access-1", "refreshJwt": "refresh-1", "did": DID});
+        let bookmarks = json!({"bookmarks": [
+            {"subject": {}, "item": post("3kabc", embed)},
+            {"subject": {}, "item": {"$type": "app.bsky.feed.defs#notFoundPost", "uri": "at://x"}},
+        ]});
+        let (root, server) = serve(vec![
+            response("200 OK", "", session.to_string().as_bytes()),
+            response("200 OK", "", bookmarks.to_string().as_bytes()),
+            response(
+                "401 Unauthorized",
+                "",
+                br#"{"error": "AuthenticationRequired", "message": "private-detail"}"#,
+            ),
+        ]);
+        let native = bluesky(root.clone())
+            .with_login(Some("alice.bsky.social"), Some("app-pass-word"))
+            .unwrap();
+        let events: Vec<_> = native
+            .events(&Url::parse("https://bsky.app/saved").unwrap())
+            .collect()
+            .await;
+        assert_eq!(events.len(), 3, "{events:?}");
+        let failing = bluesky(root.clone())
+            .with_login(Some("alice.bsky.social"), Some("wrong"))
+            .unwrap();
+        let events: Vec<_> = failing
+            .events(&Url::parse("https://bsky.app/saved").unwrap())
+            .collect()
+            .await;
+        let message = events[0].as_ref().err().unwrap().to_string();
+        assert!(message.contains("authentication failed"), "{message}");
+        assert!(message.contains("AuthenticationRequired"), "{message}");
+        assert!(!message.contains("private-detail") && !message.contains("wrong"));
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("POST /xrpc/com.atproto.server.createSession "));
+        assert!(
+            requests[1].starts_with("GET /xrpc/app.bsky.bookmark.getBookmarks?limit=100 "),
+            "{}",
+            requests[1]
+        );
+        assert!(requests[1].to_ascii_lowercase().contains("authorization: bearer access-1"));
+
+        // Without a login, bookmarks fail before any request.
+        let events: Vec<_> = bluesky(root)
+            .events(&Url::parse("https://bsky.app/saved").unwrap())
+            .collect()
+            .await;
+        let message = events[0].as_ref().err().unwrap().to_string();
+        assert!(message.contains("require a login"), "{message}");
+        assert!(bluesky(Url::parse("http://x/").unwrap()).with_login(Some("a"), None).is_err());
+        let public = Bluesky::new(Duration::from_secs(5)).unwrap();
+        let logged_in = public.with_login(Some("a"), Some("b")).unwrap();
+        assert_eq!(logged_in.api_root.as_str(), AUTH_ROOT);
     }
 
     #[tokio::test]
@@ -3429,8 +3647,7 @@ mod tests {
         }
         let long = format!("https://bsky.app/search?q={}", "a".repeat(MAX_QUERY + 1));
         assert!(t(&long).is_err());
-        let saved = t("https://bsky.app/saved").unwrap_err().to_string();
-        assert!(saved.contains("authenticated"), "{saved}");
+        assert_eq!(t("https://bsky.app/saved").unwrap(), Target::Bookmarks);
         for host in [
             "bsky.app",
             "www.bsky.app",
