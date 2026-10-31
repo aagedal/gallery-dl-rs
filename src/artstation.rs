@@ -545,6 +545,20 @@ impl ArtStation {
         })
     }
 
+    /// Upstream `max-posts` (a typed option, outside the site options).
+    pub fn with_max_posts(mut self, max: Option<usize>) -> Self {
+        if let Some(max) = max.filter(|max| *max > 0) {
+            self.max_posts = Some(max as u64);
+        }
+        self
+    }
+
+    /// Upstream `videos` (a typed option, outside the site options).
+    pub fn with_videos(mut self, videos: bool) -> Self {
+        self.assets.videos = videos;
+        self
+    }
+
     /// Site options: `pro-first` (default `true`), `videos`, `mviews`,
     /// `external` and `previews`.
     pub fn with_options(mut self, options: Option<&serde_json::Map<String, Value>>) -> Self {

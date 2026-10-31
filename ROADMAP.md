@@ -1762,7 +1762,10 @@ searches scrape result pages like upstream `_search_html`; Civitai reaction
 feeds (`user/USER/{images,videos}?section=reactions`, `api-key` or a
 `__Secure-civitai-token` cookie). A sweep of all 6064 upstream `#url`s now
 leaves only 500px liked and two live `ytdl:` URLs rejected. These were tested
-against local fixtures only (no live CSRF-token probes).
+against local fixtures only (no live CSRF-token probes). Instagram now
+honors `order-files` (`desc`/`reverse`; `num` keeps the displayed order,
+story reels reverse their items) and `static-videos: false` (photo-generated
+story videos are saved as their photo).
 **Remaining:** DeviantArt `watch/deviations`,
 `notifications/watch` and `watch/posts` use the `refresh-token` from
 `oauth:deviantart` (unverified without an account); journals and literature are saved as `.htm`

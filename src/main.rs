@@ -2089,6 +2089,7 @@ fn extract_input<'a>(
                             .and_then(|native| {
                                 native
                                     .with_include(options.include.clone())
+                                    .with_options(options.site_options.as_deref())
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -2409,6 +2410,11 @@ fn extract_input<'a>(
                                 |native| {
                                     native
                                         .with_options(options.site_options.as_deref())
+                                        .with_max_posts(options.max_posts)
+                                        .with_videos(!matches!(
+                                            options.videos,
+                                            Some(gallery_dl_rs::twitter::VideoMode::Skip)
+                                        ))
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
