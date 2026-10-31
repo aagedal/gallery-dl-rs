@@ -110,6 +110,10 @@ pub enum Target {
     Following {
         user: String,
     },
+    /// `search?QUERY`: the decoded query parameters, in order.
+    Search {
+        params: Vec<(String, String)>,
+    },
 }
 
 fn plain(url: &Url) -> bool {
@@ -164,6 +168,12 @@ pub fn target(url: &Url) -> Result<Target> {
                     .map(|(_, v)| v.into_owned())
                     .filter(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_lowercase()))
                     .unwrap_or_else(|| "popular".into()),
+            }),
+            ["search"] if url.query().is_some_and(|q| !q.is_empty()) => Ok(Target::Search {
+                params: crate::sites::gdl::parse_query(url.query().unwrap_or_default())
+                    .into_iter()
+                    .map(|(k, v)| (k, v.as_str().unwrap_or_default().to_owned()))
+                    .collect(),
             }),
             ["artwork"] if url.query().is_some() => Ok(Target::Listing {
                 path: format!("projects.json?{}", url.query().unwrap_or_default()),
@@ -337,11 +347,58 @@ pub struct ArtStation {
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
+    /// Upstream `pro-first` (search ordering).
+    pro_first: bool,
+}
+
+/// A JSON POST body and its extra headers.
+struct Post {
+    body: Vec<u8>,
+    headers: Vec<(&'static str, String)>,
+}
+
+/// Upstream `ArtstationSearchExtractor.projects`: the search request body;
+/// `*_ids` and `tags` parameters become include filters.
+fn search_body(params: &[(String, String)], pro_first: bool) -> Value {
+    let param = |key: &str| {
+        params
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    };
+    let query = param("query")
+        .filter(|q| !q.is_empty())
+        .or_else(|| param("q"))
+        .unwrap_or_default();
+    let filters: Vec<Value> = params
+        .iter()
+        .filter(|(key, _)| key.ends_with("_ids") || key == "tags")
+        .map(|(key, value)| {
+            serde_json::json!({
+                "field": key,
+                "method": "include",
+                "value": value.split(',').collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "query": crate::sites::percent_decode(query),
+        "page": null,
+        "per_page": 50,
+        "sorting": param("sort_by").unwrap_or("relevance").to_lowercase(),
+        "pro_first": if pro_first { "1" } else { "0" },
+        "filters": filters,
+        "additional_fields": [],
+    })
 }
 
 struct ListingState {
     /// API path, possibly with a query.
     path: String,
+    /// JSON body of a POST listing (search), with its `page` updated.
+    post: Option<Value>,
+    /// `PUBLIC-CSRF-TOKEN` for POST listings, fetched before the first page.
+    csrf: Option<String>,
     page: u64,
     seen: u64,
     done: bool,
@@ -358,7 +415,16 @@ impl ArtStation {
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
+            pro_first: true,
         })
+    }
+
+    /// Site options: `pro-first` (default `true`).
+    pub fn with_options(mut self, options: Option<&serde_json::Map<String, Value>>) -> Self {
+        if let Some(value) = options.and_then(|o| o.get("pro-first")) {
+            self.pro_first = crate::sites::gdl::truthy(Some(value));
+        }
+        self
     }
 
     /// Apply proxy and user-agent settings to API requests and emitted media.
@@ -387,10 +453,35 @@ impl ArtStation {
     }
 
     async fn call(&self, path: &str) -> Result<Vec<u8>> {
+        self.call_with(path, None).await
+    }
+
+    /// A GET, or a JSON POST with extra headers.
+    async fn call_with(&self, path: &str, post: Option<&Post>) -> Result<Vec<u8>> {
         let endpoint = self.api_root.join(path).expect("validated ArtStation path");
-        tokio::time::timeout(self.timeout, self.request(&endpoint))
+        tokio::time::timeout(self.timeout, self.request(&endpoint, post))
             .await
             .map_err(|_| error("native ArtStation extraction timed out"))?
+    }
+
+    /// Upstream `_init_csrf_token`.
+    async fn csrf_token(&self) -> Result<String> {
+        let origin = self.origin();
+        let post = Post {
+            body: b"{}".to_vec(),
+            headers: vec![("Accept", "*/*".into()), ("Origin", origin)],
+        };
+        let body = self
+            .call_with("api/v2/csrf_protection/token.json", Some(&post))
+            .await?;
+        serde_json::from_slice::<Value>(&body)
+            .ok()
+            .and_then(|v| v.get("public_csrf_token")?.as_str().map(str::to_owned))
+            .ok_or_else(|| error("ArtStation returned no CSRF token"))
+    }
+
+    fn origin(&self) -> String {
+        self.api_root.as_str().trim_end_matches('/').to_owned()
     }
 
     async fn project(&self, hash: &str) -> Result<VecDeque<ExtractionEvent>> {
@@ -424,10 +515,24 @@ impl ArtStation {
 
     async fn next_page(&self, state: &mut ListingState) -> Result<()> {
         state.page += 1;
-        let separator = if state.path.contains('?') { '&' } else { '?' };
-        let body = self
-            .call(&format!("{}{separator}page={}", state.path, state.page))
-            .await?;
+        let body = if let Some(json) = state.post.as_mut() {
+            if state.csrf.is_none() {
+                state.csrf = Some(self.csrf_token().await?);
+            }
+            json["page"] = state.page.into();
+            let post = Post {
+                body: json.to_string().into_bytes(),
+                headers: vec![
+                    ("Origin", self.origin()),
+                    ("PUBLIC-CSRF-TOKEN", state.csrf.clone().unwrap_or_default()),
+                ],
+            };
+            self.call_with(&state.path, Some(&post)).await?
+        } else {
+            let separator = if state.path.contains('?') { '&' } else { '?' };
+            self.call(&format!("{}{separator}page={}", state.path, state.page))
+                .await?
+        };
         let (hashes, total) = parse_listing(&body)?;
         state.seen += hashes.len() as u64;
         state.done = hashes.is_empty() || state.seen >= total || state.page >= MAX_PAGES;
@@ -633,9 +738,14 @@ impl ArtStation {
 
     /// Emit one post boundary per project; portfolios paginate lazily.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let mut post = None;
         let path = match target(url) {
             Ok(Target::User { user }) => format!("users/{user}/projects.json"),
             Ok(Target::Listing { path }) => path,
+            Ok(Target::Search { params }) => {
+                post = Some(search_body(&params, self.pro_first));
+                "api/v2/search/projects.json".into()
+            }
             Ok(Target::Collections { user }) => return self.collections(user),
             Ok(Target::Challenge { id, sorting }) => return self.challenge(id, sorting),
             Ok(Target::Following { user }) => return self.following(user),
@@ -652,6 +762,8 @@ impl ArtStation {
         };
         let state = ListingState {
             path,
+            post,
+            csrf: None,
             page: 0,
             seen: 0,
             done: false,
@@ -674,9 +786,9 @@ impl ArtStation {
         .boxed()
     }
 
-    async fn request(&self, endpoint: &Url) -> Result<Vec<u8>> {
+    async fn request(&self, endpoint: &Url, post: Option<&Post>) -> Result<Vec<u8>> {
         for attempt in 0..=self.retries {
-            match self.attempt(endpoint, attempt).await {
+            match self.attempt(endpoint, post, attempt).await {
                 Ok(body) => return Ok(body),
                 Err(failure) if failure.retry && attempt < self.retries => {
                     tokio::time::sleep(backoff(attempt)).await;
@@ -687,17 +799,34 @@ impl ArtStation {
         unreachable!()
     }
 
-    async fn attempt(&self, endpoint: &Url, attempt: u8) -> std::result::Result<Vec<u8>, Failure> {
+    async fn attempt(
+        &self,
+        endpoint: &Url,
+        post: Option<&Post>,
+        attempt: u8,
+    ) -> std::result::Result<Vec<u8>, Failure> {
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint);
         let mut response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
-            let mut request = self
-                .client
-                .get(target.clone())
-                .timeout(self.request_timeout);
+            let mut request = match post {
+                Some(_) => self.client.post(target.clone()),
+                None => self.client.get(target.clone()),
+            }
+            .timeout(self.request_timeout);
             for (name, value) in BROWSER_HEADERS {
+                if post.is_some_and(|p| p.headers.iter().any(|(n, _)| *n == name)) {
+                    continue;
+                }
                 request = request.header(name, value);
+            }
+            if let Some(post) = post {
+                for (name, value) in &post.headers {
+                    request = request.header(*name, value);
+                }
+                request = request
+                    .header("Content-Type", "application/json")
+                    .body(post.body.clone());
             }
             let response = request.send().await.map_err(|_| {
                 Failure::transient("ArtStation request failed; check network access")
@@ -1046,5 +1175,43 @@ mod tests {
             "{error}"
         );
         server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn search_posts_queries_with_a_csrf_token() {
+        let (root, server) = serve(vec![
+            ok(json!({"public_csrf_token": "tok"})),
+            ok(json!({"data": [{"hash_id": "a"}], "total_count": 1})),
+            ok(project("a")),
+        ]);
+        let media: Vec<_> = artstation(root)
+            .stream(
+                &Url::parse(
+                    "https://www.artstation.com/search?query=ancient&sort_by=rank&tags=a,b&medium_ids=7",
+                )
+                .unwrap(),
+            )
+            .collect()
+            .await;
+        assert_eq!(media.len(), 2, "{media:?}");
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("POST /api/v2/csrf_protection/token.json "));
+        assert!(requests[1].starts_with("POST /api/v2/search/projects.json "));
+        assert!(
+            requests[1]
+                .to_ascii_lowercase()
+                .contains("public-csrf-token: tok")
+        );
+        let body: Value =
+            serde_json::from_str(requests[1].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body["query"], "ancient");
+        assert_eq!(body["sorting"], "rank");
+        assert_eq!(body["page"], 1);
+        assert_eq!(body["pro_first"], "1");
+        assert_eq!(
+            body["filters"],
+            json!([{"field": "tags", "method": "include", "value": ["a", "b"]},
+                {"field": "medium_ids", "method": "include", "value": ["7"]}])
+        );
     }
 }

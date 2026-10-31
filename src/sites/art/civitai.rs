@@ -4,8 +4,9 @@
 //!
 //! Supported options: `quality`, `quality-videos`, `nsfw`, `period`, `sort`,
 //! `include` (user dispatch), `api-key` (tRPC) and `token` (search). Not
-//! supported: `api` (REST), `metadata` and `files`. Reactions, the generator feed
-//! and anything else needing an account are not matched.
+//! supported: `metadata` and `files`. Reaction feeds (`?section=reactions`) and
+//! the generator feed need an `api-key` (reactions also accept a
+//! `__Secure-civitai-token` session cookie).
 use crate::sites::art;
 use crate::sites::{Events, Http, Item, Route, Site};
 use crate::{Result, error};
@@ -43,6 +44,8 @@ pub static SITE: Site = Site {
         &USER_VIDEOS,
         &USER_COLLECTIONS,
         &GENERATED,
+        &REACTIONS_IMAGES,
+        &REACTIONS_VIDEOS,
     ],
     api_key: true,
     cookies: None,
@@ -105,6 +108,13 @@ static USER_VIDEOS: Route = Route::new(
     &["{category}", "{username|user[username]}", "videos"],
     ARCHIVE,
 );
+static REACTIONS_IMAGES: Route = Route::new("reactions-images", FILENAME, DIRECTORY, ARCHIVE);
+static REACTIONS_VIDEOS: Route = Route::new(
+    "reactions-videos",
+    FILENAME,
+    &["{category}", "{username|user[username]}", "videos"],
+    ARCHIVE,
+);
 static USER_COLLECTIONS: Route = Route::new("user-collections", FILENAME, DIRECTORY, ARCHIVE);
 
 #[derive(Debug, PartialEq)]
@@ -130,6 +140,9 @@ enum Target {
     UserImages(String, Option<String>),
     UserVideos(String, Option<String>),
     UserCollections(String, Option<String>),
+    /// `/user/USER/images?section=reactions`: the logged-in user's reactions.
+    ReactionImages(Option<String>),
+    ReactionVideos(Option<String>),
     /// `/generate`: the logged-in user's generated images (needs `api-key`).
     Generated,
 }
@@ -213,9 +226,11 @@ fn target(url: &Url) -> Option<Target> {
         None => Target::User(user),
         Some("models") => Target::UserModels(user, query),
         Some("posts") => Target::UserPosts(user, query),
-        // Reaction feeds need an authenticated account.
-        Some("images") if !reactions() => Target::UserImages(user, query),
-        Some("videos") if !reactions() => Target::UserVideos(user, query),
+        // Reaction feeds list the authenticated account's reactions.
+        Some("images") if reactions() => Target::ReactionImages(query),
+        Some("videos") if reactions() => Target::ReactionVideos(query),
+        Some("images") => Target::UserImages(user, query),
+        Some("videos") => Target::UserVideos(user, query),
         Some("collections") => Target::UserCollections(user, query),
         _ => return None,
     })
@@ -621,10 +636,12 @@ fn now_ms() -> String {
 /// Whether to use the public REST API (upstream `api: "rest"`). Civitai
 /// now refuses anonymous tRPC calls, so that is also the default without
 /// an API key.
-fn rest_mode(http: &Http) -> bool {
+/// Keyless requests default to REST, except authenticated (`authed`)
+/// tRPC queries, which may use session cookies instead.
+fn rest_mode(http: &Http, params: &Map<String, Value>) -> bool {
     match http.option_str("api") {
         Some(api) => api == "rest",
-        None => http.api_key().is_none(),
+        None => http.api_key().is_none() && params.get("authed") != Some(&Value::Bool(true)),
     }
 }
 
@@ -728,7 +745,7 @@ async fn trpc(
     params: &Map<String, Value>,
     meta: Option<&Value>,
 ) -> Result<Value> {
-    if rest_mode(http) {
+    if rest_mode(http, params) {
         return rest(http, endpoint, params).await;
     }
     let mut input = json!({"json": params});
@@ -1368,6 +1385,8 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
             Target::UserImages(user, q) => user_images(http, &USER_IMAGES, cfg, "image", &user, q)?,
             Target::UserVideos(user, q) => user_images(http, &USER_VIDEOS, cfg, "video", &user, q)?,
             Target::UserCollections(user, q) => user_collections_flow(http, cfg, user, q),
+            Target::ReactionImages(q) => reactions(http, &REACTIONS_IMAGES, cfg, "image", q)?,
+            Target::ReactionVideos(q) => reactions(http, &REACTIONS_VIDEOS, cfg, "video", q)?,
         })
     })();
     result.unwrap_or_else(crate::sites::fail)
@@ -1383,6 +1402,35 @@ fn user_images<'a>(
 ) -> Result<Events<'a>> {
     let params = with(parse_query(query.as_deref()), "types", json!([kind]));
     let params = with(params, "username", unquote(user).into());
+    let params = cfg.images(params)?;
+    Ok(images_flow(http, route, cfg, params, Map::new()))
+}
+
+/// Upstream `_image_reactions`: the account's reacted images or videos.
+fn reactions<'a>(
+    http: &'a Http,
+    route: &'static Route,
+    cfg: Cfg,
+    kind: &str,
+    query: Option<String>,
+) -> Result<Events<'a>> {
+    let session = Url::parse(ROOT)
+        .ok()
+        .and_then(|root| http.cookie(&root, "__Secure-civitai-token"));
+    if http.api_key().is_none() && session.is_none() {
+        return Err(error(
+            "civitai reactions need authentication (api-key or authenticated cookies)",
+        ));
+    }
+    let mut params = with(parse_query(query.as_deref()), "types", json!([kind]));
+    params.insert("authed".into(), true.into());
+    params.insert("useIndex".into(), false.into());
+    if !params.contains_key("reactions") {
+        params.insert(
+            "reactions".into(),
+            json!(["Like", "Dislike", "Heart", "Laugh", "Cry"]),
+        );
+    }
     let params = cfg.images(params)?;
     Ok(images_flow(http, route, cfg, params, Map::new()))
 }
@@ -1500,8 +1548,6 @@ mod tests {
             "https://civitai.com/",
             "https://civitai.com/models/",
             "https://civitai.com/search/models",
-            "https://civitai.com/user/w/images?section=reactions",
-            "https://civitai.com/user/w/videos?section=reactions",
             "https://civitai.com/user/w/unknown",
             "https://civitai.com.evil.com/models/1",
             "https://evilcivitai.com/models/1",
@@ -1665,6 +1711,87 @@ mod tests {
             requests[0]
                 .to_ascii_lowercase()
                 .contains("authorization: bearer secret")
+        );
+    }
+
+    #[test]
+    fn reaction_urls_select_reaction_routes() {
+        assert_eq!(
+            t("https://civitai.com/user/w/images?section=reactions"),
+            Some(Target::ReactionImages(Some("section=reactions".into())))
+        );
+        assert!(matches!(
+            t("https://civitai.com/user/w/videos?section=reactions&sort=Newest"),
+            Some(Target::ReactionVideos(Some(_)))
+        ));
+        assert!(matches!(
+            t("https://civitai.com/user/w/images?section=images"),
+            Some(Target::UserImages(..))
+        ));
+    }
+
+    #[tokio::test]
+    async fn reactions_need_authentication() {
+        let http = client("civitai", Url::parse("http://127.0.0.1:9/").unwrap());
+        let events = extract(
+            &http,
+            Url::parse("https://civitai.com/user/USER/images?section=reactions").unwrap(),
+        );
+        let results: Vec<_> = crate::event::media_only(events).collect().await;
+        let message = results
+            .into_iter()
+            .find_map(Result::err)
+            .unwrap()
+            .to_string();
+        assert!(message.contains("authentication"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn reactions_query_the_authed_feed() {
+        let (root, server) = serve(vec![trpc_reply(
+            json!({"items": [image(5, 6)], "nextCursor": null}),
+        )]);
+        let http = client("civitai", root).with_api_key(Some("secret"));
+        let files = media(extract(
+            &http,
+            Url::parse("https://civitai.com/user/USER/videos?section=reactions&reactions=Heart")
+                .unwrap(),
+        ))
+        .await;
+        assert_eq!(files.len(), 1);
+        assert_eq!(keywords(&files[0])["subcategory"], "reactions-videos");
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET /api/trpc/image.getInfinite?input="));
+        let params = &input(&requests[0])["json"];
+        assert_eq!(params["authed"], true);
+        assert_eq!(params["useIndex"], false);
+        assert_eq!(params["reactions"], json!(["Heart"]));
+        assert_eq!(params["types"], json!(["video"]));
+        assert!(params.get("username").is_none());
+    }
+
+    #[tokio::test]
+    async fn reactions_use_trpc_with_a_session_cookie() {
+        let (root, server) = serve(vec![trpc_reply(
+            json!({"items": [image(5, 6)], "nextCursor": null}),
+        )]);
+        let http = client("civitai", root);
+        http.set_cookie(
+            &Url::parse("https://civitai.com/").unwrap(),
+            "__Secure-civitai-token=abc; Domain=.civitai.com; Path=/; Secure",
+        );
+        let files = media(extract(
+            &http,
+            Url::parse("https://civitai.com/user/USER/images?section=reactions").unwrap(),
+        ))
+        .await;
+        assert_eq!(files.len(), 1);
+        assert_eq!(keywords(&files[0])["subcategory"], "reactions-images");
+        let requests = server.join().unwrap();
+        let params = &input(&requests[0])["json"];
+        assert_eq!(
+            params["reactions"],
+            json!(["Like", "Dislike", "Heart", "Laugh", "Cry"])
         );
     }
 

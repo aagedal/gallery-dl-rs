@@ -1744,9 +1744,18 @@ check to this host). VSCO video (HLS via yt-dlp), avatar, collection and spaces
 views were ported the same way (VSCO returns HTTP 403 here).
 ArtStation albums, likes, collections, challenges, following, `artstn.co` links and the artwork page were ported too
 (Cloudflare blocks ArtStation here).
-**Remaining:** ArtStation search
-(CSRF-token POST API), DeviantArt scraps/search/
-(Eclipse API needing a CSRF session); DeviantArt `watch/deviations`,
+**Implemented 2026-10-31:** ArtStation search (`search?query=…`: the
+`public_csrf_token` POST API, `*_ids`/`tags` include filters, `pro-first`);
+DeviantArt scraps (`gallery/scraps`, `?catpath=scraps`), gallery searches
+(`gallery?q=`) and site searches (`search[/deviations]?…`) through the
+Eclipse `/_puppy` API with the front page's `__CSRF_TOKEN__` and a session
+cookie jar (configured `cookies` are now sent to DeviantArt pages); logged-out
+searches scrape result pages like upstream `_search_html`; Civitai reaction
+feeds (`user/USER/{images,videos}?section=reactions`, `api-key` or a
+`__Secure-civitai-token` cookie). A sweep of all 6064 upstream `#url`s now
+leaves only 500px liked and two live `ytdl:` URLs rejected. These were tested
+against local fixtures only (no live CSRF-token probes).
+**Remaining:** DeviantArt `watch/deviations`,
 `notifications/watch` and `watch/posts` use the `refresh-token` from
 `oauth:deviantart` (unverified without an account); journals and literature are saved as `.htm`
 from `deviation/content` (simpler than upstream's journal template; not yet
