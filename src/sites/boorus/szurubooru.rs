@@ -34,7 +34,26 @@ instance!(BCBNSFW, "bcbnsfw", "bcbnsfw");
 instance!(SNOOTBOORU, "snootbooru", "Snootbooru");
 instance!(VISUABUSTERS, "visuabusters", "Visuabusters");
 
+/// `szurubooru:https://HOST/...`: any other szurubooru instance.
+pub static SZURUBOORU: Site = Site {
+    category: "szurubooru",
+    name: "szurubooru",
+    matches: |url| {
+        crate::sites::custom_root(url, "szurubooru").is_some_and(|root| target(root, url).is_some())
+    },
+    extract: |http, url| match crate::sites::custom_root(&url, "szurubooru") {
+        Some(root) => extract(root, http, url),
+        None => crate::sites::fail(error("unsupported szurubooru URL")),
+    },
+    routes: &[&TAG, &POST],
+    api_key: false,
+    cookies: None,
+};
+
 fn site(category: &str) -> &'static Site {
+    if crate::sites::is_custom_root(category) {
+        return &SZURUBOORU;
+    }
     match category {
         "bcbnsfw" => &BCBNSFW,
         "snootbooru" => &SNOOTBOORU,
@@ -42,7 +61,10 @@ fn site(category: &str) -> &'static Site {
     }
 }
 
-fn root(category: &str) -> &'static str {
+fn root(category: &str) -> &str {
+    if crate::sites::is_custom_root(category) {
+        return category;
+    }
     match category {
         "bcbnsfw" => "https://booru.bcbnsfw.space",
         "snootbooru" => "https://snootbooru.com",
@@ -72,7 +94,11 @@ enum Target {
 }
 
 fn target(category: &str, url: &Url) -> Option<Target> {
-    let rest = crate::sites::boorus::below(url, roots(category))?;
+    let rest = if crate::sites::is_custom_root(category) {
+        crate::sites::boorus::below_custom(url, "szurubooru")?.1
+    } else {
+        crate::sites::boorus::below(url, roots(category))?
+    };
     if let Some(tail) = rest.strip_prefix("/posts") {
         let query = tail
             .strip_prefix("/query=")

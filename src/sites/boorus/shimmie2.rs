@@ -33,10 +33,26 @@ instance!(NOZRIP, "nozrip", "noz.rip");
 instance!(THECOLLECTIONS, "thecollectionS", "co.llection.pics");
 instance!(SOYBOORU, "soybooru", "soybooru");
 
+/// `shimmie2:https://HOST/...`: any other Shimmie2 instance.
+pub static SHIMMIE2: Site = Site {
+    category: "shimmie2",
+    name: "Shimmie2",
+    matches: |url| {
+        crate::sites::custom_root(url, "shimmie2").is_some_and(|root| target(root, url).is_some())
+    },
+    extract: |http, url| match crate::sites::custom_root(&url, "shimmie2") {
+        Some(root) => extract(root, http, url),
+        None => crate::sites::fail(error("unsupported Shimmie2 URL")),
+    },
+    routes: SOYBOORU.routes,
+    api_key: false,
+    cookies: None,
+};
+
 /// Per-instance settings from the upstream instance table.
-struct Instance {
+struct Instance<'a> {
     site: &'static Site,
-    root: &'static str,
+    root: &'a str,
     /// The `pattern` entry as `host[/prefix]`.
     pattern: &'static str,
     /// Whether the instance uses the `{0}/index.php?q=image/{2}.{4}` file URL.
@@ -45,7 +61,16 @@ struct Instance {
     quote: Option<&'static str>,
 }
 
-fn instance(category: &str) -> Instance {
+fn instance(category: &str) -> Instance<'_> {
+    if crate::sites::is_custom_root(category) {
+        return Instance {
+            site: &SHIMMIE2,
+            root: category,
+            pattern: "",
+            index_file_url: false,
+            quote: None,
+        };
+    }
     let (site, root, pattern, index_file_url, quote): (&'static Site, _, _, _, _) = match category {
         "cavemanon" => (
             &CAVEMANON,
@@ -104,7 +129,11 @@ enum Target {
 /// `BASE_PATTERN + r"post/view/(\d+)"`, where `BASE_PATTERN` ends in
 /// `/(?:index\.php\?q=/?)?`.
 fn target(category: &str, url: &Url) -> Option<Target> {
-    let raw = below(url, &[instance(category).pattern])?;
+    let raw = if crate::sites::is_custom_root(category) {
+        crate::sites::boorus::below_custom(url, "shimmie2")?.1
+    } else {
+        below(url, &[instance(category).pattern])?
+    };
     let rest = raw.strip_prefix('/')?;
     for rest in [
         rest.strip_prefix("index.php?q=")

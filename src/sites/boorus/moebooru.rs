@@ -45,7 +45,30 @@ instance!(KONACHAN, "konachan", "Konachan");
 instance!(SAKUGABOORU, "sakugabooru", "Sakugabooru");
 instance!(LOLIBOORU, "lolibooru", "Lolibooru");
 
+/// `moebooru:https://HOST/...`: any other Moebooru instance.
+pub static MOEBOORU: Site = Site {
+    category: "moebooru",
+    name: "Moebooru",
+    matches: |url| custom(url).is_some(),
+    extract: |http, url| match crate::sites::custom_root(&url, "moebooru") {
+        Some(root) => extract(root, http, url),
+        None => crate::sites::fail(error("unsupported Moebooru URL")),
+    },
+    routes: &[&POST, &TAG, &POOL, &POPULAR],
+    api_key: false,
+    cookies: None,
+};
+
+fn custom(url: &Url) -> Option<Target> {
+    let root = crate::sites::custom_root(url, "moebooru")?;
+    target(root, url)
+}
+
+/// Sites and roots by category, or by the root of a custom instance.
 fn site(category: &str) -> &'static Site {
+    if crate::sites::is_custom_root(category) {
+        return &MOEBOORU;
+    }
     match category {
         "yandere" => &YANDERE,
         "konachan" => &KONACHAN,
@@ -54,7 +77,10 @@ fn site(category: &str) -> &'static Site {
     }
 }
 
-fn root(category: &str) -> &'static str {
+fn root(category: &str) -> &str {
+    if crate::sites::is_custom_root(category) {
+        return category;
+    }
     match category {
         "yandere" => "https://yande.re",
         "konachan" => "https://konachan.com",
@@ -88,11 +114,19 @@ fn digits(text: &str) -> bool {
 }
 
 fn target(category: &str, url: &Url) -> Option<Target> {
+    let inner;
+    let url = if crate::sites::is_custom_root(category) {
+        inner = crate::sites::custom_domain(url, "moebooru")?;
+        &inner
+    } else {
+        url
+    };
     let host = url.host_str()?;
     if !crate::sites::plain(url)
-        || !hosts(category)
-            .iter()
-            .any(|h| host == *h || (category != "yandere" && host == format!("www.{h}")))
+        || !crate::sites::is_custom_root(category)
+            && !hosts(category)
+                .iter()
+                .any(|h| host == *h || (category != "yandere" && host == format!("www.{h}")))
     {
         return None;
     }
