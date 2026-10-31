@@ -1005,15 +1005,23 @@ characters, multi-file/non-visual submissions, and upstream's `metadata`
 option.
 
 **Implemented experimental native ArtStation:** projects and user portfolios
-via site JSON with browser-like headers. Remaining: Cloudflare challenges,
-video/embed assets (upstream ytdl), `4k` image upgrade with fallback, likes,
-albums by ID, collections, challenges, search/artwork listings, following.
+via site JSON with browser-like headers. Listings, challenges, following and
+search followed (2026-10-28/31). Since 2026-10-31 every asset with an image
+is downloaded like upstream (covers too), `/large/` images are upgraded to
+`8k` with `4k`/`large`/`medium`/`small` fallbacks, and embedded players are
+resolved: video clips (`videos`), Marmoset `.mview` files (`mviews`) and,
+with `external`, third-party players as yt-dlp pages; `previews` and
+`max-posts` are honored. Remaining: Cloudflare challenges, upstream's
+`userinfo`/listing metadata keywords.
 
 **Implemented experimental native Flickr:** photos, videos, albums, user
 photostreams and `flic.kr` short links via the REST API (overridable `api-key`).
-Remaining: OAuth/private content, favorites, galleries, groups, tags/search,
-album lists, `contexts`/`exif`/`metadata` options, upstream's `size-max`/
-`videos` options, and album metadata on listed items.
+Favorites, galleries, groups, search and album lists followed on
+2026-10-28; `size-max` (pixels or a format code/label; listings request
+upstream's eight `url_*` formats within the limit, `getSizes` drops larger
+sizes) on 2026-10-31. Remaining: OAuth/private content,
+`contexts`/`exif`/`info`/`metadata` options (no keyword dictionary for
+Flickr files yet), `videos: false`, and album metadata on listed items.
 
 **Implemented experimental native Reddit:** submissions, galleries, subreddit
 and user listings over public JSON; video-only v.redd.it MP4s. Since

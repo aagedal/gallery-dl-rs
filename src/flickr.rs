@@ -38,9 +38,81 @@ pub const DEFAULT_API_KEY: &str = "90c368449018a0cb880ea4889cbb8681";
 const MAX_RESPONSE: usize = 32 * 1024 * 1024;
 const PAGE_SIZE: usize = 500;
 const MAX_PAGES: u64 = 200;
-const EXTRAS: &str = "url_o,url_k,url_h,url_l,media,date_upload,owner_name,o_dims";
-/// Listing size suffixes, largest first.
-const LISTING_SIZES: [&str; 4] = ["o", "k", "h", "l"];
+const EXTRAS: &str = "media,date_upload,owner_name,o_dims";
+/// Upstream `FORMATS`: size suffix, label and maximum dimension, largest
+/// first (`None` for originals).
+const FORMATS: [(&str, &str, Option<u64>); 16] = [
+    ("o", "Original", None),
+    ("6k", "X-Large 6K", Some(6144)),
+    ("5k", "X-Large 5K", Some(5120)),
+    ("4k", "X-Large 4K", Some(4096)),
+    ("3k", "X-Large 3K", Some(3072)),
+    ("k", "Large 2048", Some(2048)),
+    ("h", "Large 1600", Some(1600)),
+    ("l", "Large", Some(1024)),
+    ("c", "Medium 800", Some(800)),
+    ("z", "Medium 640", Some(640)),
+    ("m", "Medium", Some(500)),
+    ("n", "Small 320", Some(320)),
+    ("s", "Small", Some(240)),
+    ("q", "Large Square", Some(150)),
+    ("t", "Thumbnail", Some(100)),
+    ("s", "Square", Some(75)),
+];
+
+/// Upstream `size-max`: the largest allowed image dimension and the (at
+/// most eight) listing formats requested as `url_*` extras.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SizeLimit {
+    max: Option<u64>,
+    formats: Vec<&'static str>,
+}
+
+impl Default for SizeLimit {
+    fn default() -> Self {
+        Self::new(None)
+    }
+}
+
+impl SizeLimit {
+    pub fn new(max: Option<u64>) -> Self {
+        let formats = FORMATS
+            .iter()
+            .filter(|(_, _, width)| max.is_none() || width.is_none_or(|w| Some(w) <= max))
+            .take(8)
+            .map(|(code, ..)| *code)
+            .collect();
+        Self { max, formats }
+    }
+
+    /// An integer, or a format code or label such as `"l"` or `"Medium"`;
+    /// unknown names disable the limit like upstream.
+    pub fn from_option(value: Option<&Value>) -> Self {
+        let max = match value {
+            Some(Value::Number(n)) => n.as_u64(),
+            Some(Value::String(name)) => FORMATS
+                .iter()
+                .find(|(code, label, _)| name == code || name == label)
+                .and_then(|(.., width)| *width),
+            _ => None,
+        };
+        Self::new(max.filter(|max| *max > 0))
+    }
+
+    fn exceeds(&self, width: Option<u64>, height: Option<u64>) -> bool {
+        self.max
+            .is_some_and(|max| width.unwrap_or(0) > max || height.unwrap_or(0) > max)
+    }
+
+    fn extras(&self) -> String {
+        let mut extras = EXTRAS.to_owned();
+        for code in &self.formats {
+            extras.push_str(",url_");
+            extras.push_str(code);
+        }
+        extras
+    }
+}
 const BASE58: &[u8] = b"123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ";
 /// `/photos/X` segments that are site pages rather than users.
 const RESERVED_USERS: [&str; 5] = ["tags", "upload", "organize", "friends", "search"];
@@ -253,12 +325,30 @@ fn video_rank(label: &str) -> u8 {
 /// Pick the best size from a `getSizes` response: the best video stream for
 /// videos, else "Original" or the largest photo.
 pub fn parse_sizes(bytes: &[u8], video: bool) -> Result<Size> {
+    parse_sizes_with(bytes, video, &SizeLimit::default())
+}
+
+/// [`parse_sizes`] with `size-max`: like upstream `photos_getSizes`, photo
+/// sizes from the first one (after the smallest) exceeding the limit are
+/// dropped, and the largest remaining one is used.
+pub fn parse_sizes_with(bytes: &[u8], video: bool, limit: &SizeLimit) -> Result<Size> {
     let body = check(bytes)?;
-    let sizes = body
+    let mut sizes: &[Value] = body
         .pointer("/sizes/size")
         .and_then(Value::as_array)
         .ok_or_else(|| error("Flickr response contains no size list"))?;
-    let candidates = sizes.iter().filter_map(|size| {
+    if !video
+        && limit.max.is_some()
+        && let Some(cut) = sizes
+            .iter()
+            .enumerate()
+            .skip(1)
+            .position(|(_, size)| limit.exceeds(number(size, "width"), number(size, "height")))
+    {
+        sizes = &sizes[..cut + 1];
+    }
+    let limited = !video && limit.max.is_some();
+    let candidates = sizes.iter().enumerate().filter_map(|(position, size)| {
         let is_video = size.get("media").and_then(Value::as_str) == Some("video")
             || field(size, "label").is_some_and(|l| l.contains("MP4") || l.contains("Video"));
         let url = media_url(&field(size, "source")?, is_video)?;
@@ -271,9 +361,11 @@ pub fn parse_sizes(bytes: &[u8], video: bool) -> Result<Size> {
         } else {
             u8::from(label == "Original")
         };
+        // Upstream takes the last remaining size under a limit.
+        let area = if limited { position as u64 } else { area };
         Some((
             is_video,
-            rank,
+            if limited { 0 } else { rank },
             area,
             Size {
                 url,
@@ -354,6 +446,11 @@ pub struct Page {
 /// Parse a `photosets.getPhotos` (`photoset`) or `people.getPhotos`
 /// (`photos`) response.
 pub fn parse_page(bytes: &[u8], fallback_user: &str) -> Result<Page> {
+    parse_page_with(bytes, fallback_user, &SizeLimit::default())
+}
+
+/// [`parse_page`] with `size-max`: the first listed format within the limit.
+pub fn parse_page_with(bytes: &[u8], fallback_user: &str, limit: &SizeLimit) -> Result<Page> {
     let body = check(bytes)?;
     let list = body
         .get("photoset")
@@ -369,12 +466,14 @@ pub fn parse_page(bytes: &[u8], fallback_user: &str) -> Result<Page> {
         .filter_map(|item| {
             let id = field(item, "id").filter(|id| valid_id(id))?;
             let video = item.get("media").and_then(Value::as_str) == Some("video");
-            let size = LISTING_SIZES.iter().find_map(|s| {
+            let size = limit.formats.iter().find_map(|s| {
                 let url = media_url(&field(item, &format!("url_{s}"))?, false)?;
-                Some(Size {
+                let width = number(item, &format!("width_{s}"));
+                let height = number(item, &format!("height_{s}"));
+                (!limit.exceeds(width, height)).then_some(Size {
                     url,
-                    width: number(item, &format!("width_{s}")),
-                    height: number(item, &format!("height_{s}")),
+                    width,
+                    height,
                     video: false,
                 })
             });
@@ -450,6 +549,7 @@ pub struct Flickr {
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
+    size_limit: SizeLimit,
 }
 
 enum Listing {
@@ -492,7 +592,14 @@ impl Flickr {
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
+            size_limit: SizeLimit::default(),
         })
+    }
+
+    /// Upstream `size-max`.
+    pub fn with_size_limit(mut self, limit: SizeLimit) -> Self {
+        self.size_limit = limit;
+        self
     }
 
     /// Apply proxy and user-agent settings to API requests and emitted media.
@@ -582,7 +689,7 @@ impl Flickr {
         let body = self
             .call("flickr.photos.getSizes", &[("photo_id", id)])
             .await?;
-        parse_sizes(&body, video)
+        parse_sizes_with(&body, video, &self.size_limit)
     }
 
     fn finish(&self, mut item: Media) -> VecDeque<ExtractionEvent> {
@@ -638,8 +745,9 @@ impl Flickr {
         };
         let page = (state.page + 1).to_string();
         let per_page = PAGE_SIZE.to_string();
+        let extras = self.size_limit.extras();
         let mut query = vec![
-            ("extras", EXTRAS),
+            ("extras", extras.as_str()),
             ("per_page", per_page.as_str()),
             ("page", page.as_str()),
         ];
@@ -672,7 +780,7 @@ impl Flickr {
             }
         };
         let body = self.call(method, &query).await?;
-        let parsed = parse_page(&body, &state.user)?;
+        let parsed = parse_page_with(&body, &state.user, &self.size_limit)?;
         state.page += 1;
         state.done =
             parsed.entries.is_empty() || parsed.page >= parsed.pages || state.page >= MAX_PAGES;
@@ -992,6 +1100,48 @@ mod tests {
             {"label": "Original", "source": "https://evil.example/x.jpg"}]}})
         .to_string();
         assert!(parse_sizes(none.as_bytes(), false).is_err());
+    }
+
+    #[test]
+    fn size_max_limits_listing_formats_and_sizes() {
+        assert_eq!(
+            SizeLimit::default().formats,
+            ["o", "6k", "5k", "4k", "3k", "k", "h", "l"]
+        );
+        let limit = SizeLimit::from_option(Some(&json!("Large")));
+        assert_eq!(limit, SizeLimit::from_option(Some(&json!(1024))));
+        assert_eq!(limit.formats, ["o", "l", "c", "z", "m", "n", "s", "q"]);
+        assert!(
+            limit
+                .extras()
+                .ends_with(",url_o,url_l,url_c,url_z,url_m,url_n,url_s,url_q")
+        );
+        assert_eq!(
+            SizeLimit::from_option(Some(&json!("huge"))),
+            SizeLimit::default()
+        );
+        let page = json!({"stat": "ok", "photos": {"page": 1, "pages": 1, "photo": [
+            {"id": "1", "media": "photo",
+             "url_o": "https://live.staticflickr.com/o.jpg", "width_o": 4000, "height_o": 3000,
+             "url_l": "https://live.staticflickr.com/l.jpg", "width_l": 1024, "height_l": 768}]}})
+        .to_string();
+        let page = parse_page_with(page.as_bytes(), "x", &limit).unwrap();
+        let size = page.entries[0].size.as_ref().unwrap();
+        assert_eq!(size.url.as_str(), "https://live.staticflickr.com/l.jpg");
+        let sizes = json!({"stat": "ok", "sizes": {"size": [
+            {"label": "Square", "width": 75, "height": 75,
+             "source": "https://live.staticflickr.com/sq.jpg"},
+            {"label": "Medium", "width": 500, "height": 375,
+             "source": "https://live.staticflickr.com/m.jpg"},
+            {"label": "Large 1600", "width": 1600, "height": 1200,
+             "source": "https://live.staticflickr.com/h.jpg"},
+            {"label": "Original", "width": 4000, "height": 3000,
+             "source": "https://live.staticflickr.com/o.jpg"}]}})
+        .to_string();
+        let size = parse_sizes_with(sizes.as_bytes(), false, &limit).unwrap();
+        assert_eq!(size.url.as_str(), "https://live.staticflickr.com/m.jpg");
+        let size = parse_sizes(sizes.as_bytes(), false).unwrap();
+        assert_eq!(size.url.as_str(), "https://live.staticflickr.com/o.jpg");
     }
 
     #[test]
