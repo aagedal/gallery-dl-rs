@@ -656,7 +656,12 @@ and empty post boundaries. Optional card images append outer-post previews with
 upstream thumbnail IDs, conservative archive eligibility and card-only traversal.
 Scoped config, compatibility forwarding, header
 privacy, split Link fields, date ordering and cancellation have local coverage.
-Remaining: OAuth/cache discovery, arbitrary/additional instances, followed views,
+Since 2026-10-31 `mastodon:https://HOST/...` reads any other instance
+anonymously (category `mastodon`, where upstream uses the host name; tokens
+stay bound to the built-in instances), including Pleroma/Akkoma `notice`
+links and alphanumeric flake IDs; followed accounts on such hosts are queued
+with the prefix. Pleroma `objects/UUID` redirects are not followed yet.
+Remaining: OAuth/cache discovery, configured additional instances, followed views,
 account-search fallback/moved handling, and fuller metadata/default
 naming. Authenticated live verification and real captures remain required.
 

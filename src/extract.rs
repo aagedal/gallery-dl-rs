@@ -105,7 +105,8 @@ impl Media {
             "mastodon" | "mastodon.social" | "pawoo" | "baraag" => {
                 let post = self.metadata.as_ref()?;
                 let instance = post.instance.as_deref()?;
-                if !crate::mastodon::INSTANCES.contains(&instance)
+                // `mastodon` files may come from any `mastodon:` instance.
+                if !(crate::mastodon::INSTANCES.contains(&instance) || self.category == "mastodon")
                     || (self.category != "mastodon"
                         && crate::mastodon::instance_category(instance)
                             != Some(self.category.as_str()))
@@ -782,7 +783,10 @@ pub fn http_url(value: &str) -> Result<Url> {
     // a shared engine that has no built-in instance for the host.
     // Opaque inputs such as `smugmug:album:ID` are accepted when a registry
     // site matches them; embedded HTTP(S) URLs are still validated.
-    if !matches!(url.scheme(), "http" | "https") && crate::sites::find(&url).is_some() {
+    if !matches!(url.scheme(), "http" | "https")
+        && (crate::sites::find(&url).is_some()
+            || url.scheme() == "mastodon" && crate::mastodon::target(&url).is_ok())
+    {
         if let Some((_, inner)) = value.split_once(':')
             && Url::parse(inner).is_ok_and(|inner| matches!(inner.scheme(), "http" | "https"))
         {
@@ -827,6 +831,9 @@ pub fn inline_text(data: String) -> Result<(Url, MediaJob)> {
 pub fn social_site(url: &Url) -> Option<&'static str> {
     if let Some(site) = crate::sites::find(url) {
         return Some(site.category);
+    }
+    if url.scheme() == "mastodon" && crate::mastodon::target(url).is_ok() {
+        return Some("mastodon");
     }
     let host = url.host_str()?;
     if crate::mastodon::INSTANCES.contains(&host) {

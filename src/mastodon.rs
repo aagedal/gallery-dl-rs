@@ -121,13 +121,18 @@ fn hashtag(raw: &str) -> Option<String> {
 }
 
 /// Status and attachment IDs are decimal snowflakes.
+/// Mastodon snowflakes are numeric; Pleroma/Akkoma flake IDs are
+/// alphanumeric (upstream accepts any path segment).
 pub fn valid_id(id: &str) -> bool {
-    (1..=24).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit())
+    (1..=32).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
 /// Preview-card identities follow upstream's instance-owned thumbnail IDs.
 pub fn valid_media_id(id: &str) -> bool {
-    valid_id(id) || id.strip_prefix("card").is_some_and(valid_id)
+    match id.strip_prefix("card") {
+        Some(rest) => (1..=24).contains(&rest.len()) && rest.bytes().all(|b| b.is_ascii_digit()),
+        None => valid_id(id),
+    }
 }
 
 fn card_id(url: &Url) -> String {
@@ -175,7 +180,44 @@ fn valid_acct(acct: &str) -> bool {
         && !(acct.contains('@') && domain.is_empty())
 }
 
+impl Target {
+    /// The instance host the target lives on.
+    pub fn host(&self) -> &str {
+        match self {
+            Self::Status { host, .. }
+            | Self::User { host, .. }
+            | Self::Collection { host, .. }
+            | Self::Following { host, .. } => host,
+        }
+    }
+}
+
+/// A page URL on `host`; other instances than the built-in ones keep
+/// upstream's `mastodon:` prefix.
+fn instance_url(host: &str, path: &str) -> Option<Url> {
+    if INSTANCES.contains(&host) {
+        Url::parse(&format!("https://{host}{path}")).ok()
+    } else {
+        Url::parse(&format!("mastodon:https://{host}{path}")).ok()
+    }
+}
+
+/// Upstream category of a Mastodon target URL: the built-in instance's
+/// category, else `mastodon` for `mastodon:https://HOST/...` instances.
+pub fn url_category(url: &Url) -> Option<&'static str> {
+    let target = target(url).ok()?;
+    Some(instance_category(target.host()).unwrap_or("mastodon"))
+}
+
 pub fn target(url: &Url) -> Result<Target> {
+    // `mastodon:https://HOST/...` selects any other instance.
+    if let Some(inner) = crate::sites::custom_domain(url, "mastodon") {
+        return target_on(&inner, true);
+    }
+    target_on(url, false)
+}
+
+fn target_on(url: &Url, custom: bool) -> Result<Target> {
     let unsupported = || {
         error(
             "unsupported Mastodon URL; expected a status, user, bookmarks, favourites, list or hashtag link on mastodon.social, pawoo.net or baraag.net",
@@ -186,7 +228,7 @@ pub fn target(url: &Url) -> Result<Target> {
         || url.port().is_some()
         || !url.username().is_empty()
         || url.password().is_some()
-        || !INSTANCES.contains(&host)
+        || !(custom || INSTANCES.contains(&host))
     {
         return Err(unsupported());
     }
@@ -853,7 +895,7 @@ impl Mastodon {
                     .filter_map(|account| {
                         let acct = string(&account, "acct")?.to_owned();
                         valid_acct(&acct).then_some(())?;
-                        let url = Url::parse(&format!("https://{host}/@{acct}")).ok()?;
+                        let url = instance_url(&host, &format!("/@{acct}"))?;
                         let data = account.as_object()?.clone();
                         Some(crate::event::child_job(
                             crate::event::ChildMetadata::from_raw("mastodon", "following", &data),
@@ -1178,7 +1220,7 @@ mod tests {
         let link = "<https://mastodon.social/api/v1/accounts/9/statuses?max_id=20&only_media=true>; rel=\"next\", <https://mastodon.social/api/v1/accounts/9/statuses?min_id=30>; rel=\"prev\"";
         assert_eq!(next_max_id(link).as_deref(), Some("20"));
         assert_eq!(next_max_id("<https://x/?min_id=1>; rel=\"prev\""), None);
-        assert_eq!(next_max_id("<https://x/?max_id=a>; rel=\"next\""), None);
+        assert_eq!(next_max_id("<https://x/?max_id=a.b>; rel=\"next\""), None);
     }
 
     #[test]
@@ -1218,7 +1260,7 @@ mod tests {
         for raw in [
             "https://mastodon.social/",
             "https://mastodon.social/alice",
-            "https://mastodon.social/@alice/abc",
+            "https://mastodon.social/@alice/a-b",
             "https://mastodon.social/@ali%2Fce",
             "https://mastodon.social/@alice@",
             "https://mastodon.social:444/@alice",
@@ -1228,6 +1270,21 @@ mod tests {
         ] {
             assert!(t(raw).is_err(), "{raw}");
         }
+        // `mastodon:` selects other instances, including Pleroma flake IDs.
+        assert_eq!(
+            t("mastodon:https://donotsta.re/@elly/AcoUaA7EH1igiYKmFU").unwrap(),
+            status("donotsta.re", "AcoUaA7EH1igiYKmFU")
+        );
+        assert_eq!(
+            t("mastodon:https://example.social/@alice").unwrap(),
+            user("example.social", "alice")
+        );
+        let custom = Url::parse("mastodon:https://example.social/@alice").unwrap();
+        assert_eq!(url_category(&custom), Some("mastodon"));
+        assert_eq!(
+            url_category(&Url::parse("https://pawoo.net/@alice").unwrap()),
+            Some("pawoo")
+        );
     }
 
     #[test]
@@ -1399,14 +1456,14 @@ mod tests {
             );
         }
         for path in [
-            "lists/other",
+            "lists/o-ther",
             "lists/42/extra",
             "tags/a%2Fb",
             "tags/a%26b",
             "tags/%FF",
             "tags/a%3Fb",
             "tags/a+b",
-            "@id:invalid",
+            "@id:in-valid",
         ] {
             assert!(
                 target(&Url::parse(&format!("https://pawoo.net/{path}")).unwrap()).is_err(),
