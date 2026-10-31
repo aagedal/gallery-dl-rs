@@ -62,7 +62,26 @@ instance!(PALANQ, "palanq", "Palanq");
 instance!(RBT, "rbt", "RebeccaBlackTech");
 instance!(THEBARCHIVE, "thebarchive", "The /b/ Archive");
 
+/// `foolfuuka:https://HOST/...`: any other FoolFuuka archive.
+pub static FOOLFUUKA: Site = Site {
+    category: "foolfuuka",
+    name: "FoolFuuka",
+    matches: |url| {
+        crate::sites::custom_root(url, "foolfuuka").is_some_and(|root| target(root, url).is_some())
+    },
+    extract: |http, url| match crate::sites::custom_root(&url, "foolfuuka") {
+        Some(root) => extract(root, http, url),
+        None => crate::sites::fail(error("unsupported FoolFuuka URL")),
+    },
+    routes: THEBARCHIVE.routes,
+    api_key: false,
+    cookies: None,
+};
+
 fn site(category: &str) -> &'static Site {
+    if crate::sites::is_custom_root(category) {
+        return &FOOLFUUKA;
+    }
     match category {
         "4plebs" => &FOURPLEBS,
         "archivedmoe" => &ARCHIVEDMOE,
@@ -76,7 +95,10 @@ fn site(category: &str) -> &'static Site {
     }
 }
 
-fn root(category: &str) -> &'static str {
+fn root(category: &str) -> &str {
+    if crate::sites::is_custom_root(category) {
+        return category;
+    }
     match category {
         "4plebs" => "https://archive.4plebs.org",
         "archivedmoe" => "https://archived.moe",
@@ -129,9 +151,15 @@ enum Target {
 }
 
 fn target(category: &str, url: &Url) -> Option<Target> {
-    if !host_in(url, hosts(category)) {
+    let inner;
+    let url = if crate::sites::is_custom_root(category) {
+        inner = crate::sites::custom_domain(url, "foolfuuka")?;
+        &inner
+    } else if host_in(url, hosts(category)) {
+        url
+    } else {
         return None;
-    }
+    };
     let (board, tail) = component(rest(url))?;
     // `/thread/(\d+)`
     if let Some((thread, _)) = tail.strip_prefix("/thread/").and_then(digits) {
@@ -319,7 +347,12 @@ fn board_events<'a>(
                 if digits(&num).is_none_or(|(_, tail)| !tail.is_empty()) {
                     continue;
                 }
-                let raw = format!("{base}/{board}/thread/{num}");
+                let prefix = if crate::sites::is_custom_root(category) {
+                    "foolfuuka:"
+                } else {
+                    ""
+                };
+                let raw = format!("{prefix}{base}/{board}/thread/{num}");
                 let Ok(url) = Url::parse(&raw) else {
                     continue;
                 };

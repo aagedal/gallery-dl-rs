@@ -38,8 +38,20 @@ instance!(BBWCHAN, "bbw-chan", "BBW-Chan");
 instance!(KOHLCHAN, "kohlchan", "Kohlchan");
 instance!(ENDCHAN, "endchan", "Endchan");
 
+/// `lynxchan:https://HOST/...`: any other LynxChan instance.
+pub static LYNXCHAN: Site = Site {
+    category: "lynxchan",
+    name: "LynxChan",
+    matches: |url| target("lynxchan", url).is_some(),
+    extract: |http, url| extract("lynxchan", http, url),
+    routes: &[&THREAD, &BOARD],
+    api_key: false,
+    cookies: None,
+};
+
 fn site(category: &str) -> &'static Site {
     match category {
+        "lynxchan" => &LYNXCHAN,
         "bbw-chan" => &BBWCHAN,
         "kohlchan" => &KOHLCHAN,
         _ => &ENDCHAN,
@@ -56,11 +68,36 @@ fn hosts(category: &str) -> &'static [&'static str] {
 
 /// Upstream instance root; `endchan` has none and uses the matched origin.
 fn root(category: &str, url: &Url) -> String {
+    if category == "lynxchan" {
+        return crate::sites::custom_domain(url, "lynxchan")
+            .map(|inner| {
+                format!(
+                    "{}://{}",
+                    inner.scheme(),
+                    inner.host_str().unwrap_or_default()
+                )
+            })
+            .unwrap_or_default();
+    }
     match category {
         "bbw-chan" => "https://bbw-chan.link".into(),
         "kohlchan" => "https://kohlchan.net".into(),
         _ => format!("{}://{}", url.scheme(), url.host_str().unwrap_or_default()),
     }
+}
+
+/// Thread URLs of custom instances keep the `lynxchan:` prefix.
+fn prefixed(
+    category: &str,
+    children: Vec<(Url, serde_json::Map<String, Value>)>,
+) -> Vec<(Url, serde_json::Map<String, Value>)> {
+    if category != "lynxchan" {
+        return children;
+    }
+    children
+        .into_iter()
+        .filter_map(|(url, data)| Some((Url::parse(&format!("lynxchan:{url}")).ok()?, data)))
+        .collect()
 }
 
 #[derive(Debug, PartialEq)]
@@ -70,9 +107,15 @@ enum Target {
 }
 
 fn target(category: &str, url: &Url) -> Option<Target> {
-    if !host_in(url, hosts(category)) {
+    let inner;
+    let url = if category == "lynxchan" {
+        inner = crate::sites::custom_domain(url, "lynxchan")?;
+        &inner
+    } else if host_in(url, hosts(category)) {
+        url
+    } else {
         return None;
-    }
+    };
     let (board, tail) = component(rest(url))?;
     if let Some((thread, _)) = tail.strip_prefix("/res/").and_then(digits) {
         return Some(Target::Thread {
@@ -113,6 +156,7 @@ fn extract<'a>(category: &'static str, http: &'a Http, url: Url) -> Events<'a> {
                     Some((url, data))
                 })
                 .collect();
+            let children = prefixed(category, children);
             Ok(super::queue_all(http, site(category), &BOARD, children))
         }),
         None => crate::sites::fail(error("unsupported LynxChan URL")),

@@ -1770,7 +1770,20 @@ leaves only 500px liked and two live `ytdl:` URLs rejected. These were tested
 against local fixtures only (no live CSRF-token probes). Instagram now
 honors `order-files` (`desc`/`reverse`; `num` keeps the displayed order,
 story reels reverse their items) and `static-videos: false` (photo-generated
-story videos are saved as their photo).
+story videos are saved as their photo). Upstream `BASECATEGORY:https://HOST/...`
+inputs now select custom instances for `philomena`, `moebooru`,
+`szurubooru`, `shimmie2`, `misskey`, `foolfuuka`, `vichan`, `lynxchan`,
+`hatenablog`, `bunkr` and `mastodon` (category is the base name, where
+upstream uses the host; listings queue prefixed children). Still without
+prefix support: danbooru, e621, jschan, wikimedia, xenforo, chevereto,
+reactor, manganelo, imhentai, nijie, urlshortener and `tumblr:` custom
+domains. A live comparison against upstream on 611 sample URLs (2026-10-31) left
+uninvestigated native-only failures: empty results without an error for
+bit.ly, e926 pools/posts, ibb.co albums, myhentaigallery, thehentaiworld and
+urlgalleries; Derpibooru HTTP 501; a Coomer network error; and login
+demands where upstream succeeds anonymously (nijie, horne, weibo user
+pages, vm.tiktok.com). Others were HTTP 403s that upstream passes, which
+may come from its browser-like default User-Agent.
 **Remaining:** DeviantArt `watch/deviations`,
 `notifications/watch` and `watch/posts` use the `refresh-token` from
 `oauth:deviantart` (unverified without an account); journals and literature are saved as `.htm`
