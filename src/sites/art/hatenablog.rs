@@ -74,7 +74,15 @@ fn archive_path(path: &str) -> bool {
 }
 
 fn target(url: &Url) -> Option<Target> {
-    let domain = domain(url)?;
+    // `hatenablog:https://HOST/...` selects a custom blog domain.
+    if let Some(inner) = crate::sites::custom_domain(url, "hatenablog") {
+        let domain = inner.host_str()?.to_owned();
+        return target_on(&inner, domain);
+    }
+    target_on(url, domain(url)?)
+}
+
+fn target_on(url: &Url, domain: String) -> Option<Target> {
     let path = url.path();
     if let Some(entry) = path.strip_prefix("/entry/") {
         return (!entry.is_empty()).then(|| Target::Entry {
@@ -185,11 +193,13 @@ fn page_events<'a>(
                 break;
             }
             let link = unescape(extr(section, "<a class=\"entry-title-link\" href=\"", "\""));
-            // Upstream queues `hatenablog:URL`; only canonical hosts are
-            // dispatchable here.
-            if let Ok(child) = Url::parse(&link)
-                && matches!(target(&child), Some(Target::Entry { .. }))
-            {
+            // Upstream queues `hatenablog:URL`; canonical hosts stay plain.
+            let child = Url::parse(&link)
+                .ok()
+                .filter(|child| matches!(target(child), Some(Target::Entry { .. })))
+                .or_else(|| Url::parse(&format!("hatenablog:{link}")).ok())
+                .filter(|child| matches!(target(child), Some(Target::Entry { .. })));
+            if let Some(child) = child {
                 children.push(child);
             }
         }
@@ -429,20 +439,22 @@ mod tests {
             <a class=\"entry-title-link\" href=\"https://x.hatenablog.com/entry/2020/05/28/003227\">t</a></section>\
             <section class=\"archive-entry x\"><a class=\"entry-title-link\" href=\"https://custom.example/entry/1\">t</a></section>";
         let entry = format!("<body>{ARTICLE}");
-        let (root, server) = serve(vec![html(&first), html(second), html(&entry)]);
+        let (root, server) = serve(vec![html(&first), html(second), html(&entry), html(&entry)]);
         let http = http("hatenablog", root);
         let files = media(extract(
             &http,
             Url::parse("https://x.hatenablog.com/?page=5").unwrap(),
         ))
         .await;
-        assert_eq!(files.len(), 4);
+        // Like upstream, custom-domain entries are queued as `hatenablog:URL`.
+        assert_eq!(files.len(), 6);
         assert_eq!(keywords(&files[0])["subcategory"], "home");
         assert_eq!(keywords(&files[2])["subcategory"], "entry");
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /?page=5 "), "{}", requests[0]);
         assert!(requests[1].starts_with("GET /?page=1590000000 "));
         assert!(requests[2].starts_with("GET /entry/2020/05/28/003227 "));
+        assert!(requests[3].starts_with("GET /entry/1 "));
     }
 
     #[test]

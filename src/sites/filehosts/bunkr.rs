@@ -87,10 +87,18 @@ fn domain(url: &Url) -> Option<String> {
 }
 
 fn target(url: &Url) -> Option<Target> {
+    // `bunkr:[https://]HOST/...` selects a custom domain.
+    if let Some(inner) = crate::sites::custom_domain(url, "bunkr") {
+        let domain = inner.host_str()?.to_owned();
+        return target_on(&inner, domain);
+    }
     if !crate::sites::plain(url) {
         return None;
     }
-    let domain = domain(url)?;
+    target_on(url, domain(url)?)
+}
+
+fn target_on(url: &Url, domain: String) -> Option<Target> {
     let parts = crate::sites::segments(url);
     match parts.as_slice() {
         [a, id, ..] if a == "a" => Some(Target::Album {
@@ -416,6 +424,19 @@ mod tests {
     #[test]
     fn classifies_urls() {
         let t = |raw: &str| target(&Url::parse(raw).unwrap());
+        for raw in [
+            "bunkr:http://example.org/a/Lktg9Keq",
+            "bunkr:example.org/a/Lktg9Keq",
+        ] {
+            assert_eq!(
+                t(raw),
+                Some(Target::Album {
+                    domain: "example.org".into(),
+                    id: "Lktg9Keq".into()
+                }),
+                "{raw}"
+            );
+        }
         assert_eq!(
             t("https://bunkr.si/a/Lktg9Keq"),
             Some(Target::Album {

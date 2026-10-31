@@ -663,6 +663,22 @@ pub(crate) fn plain(url: &Url) -> bool {
         && url.password().is_none()
 }
 
+/// The embedded URL of a gallery-dl `PREFIX:[https://]HOST/...` input,
+/// which selects an extractor for a custom domain (upstream patterns like
+/// `hatenablog:https?://([^/?#]+)`).
+pub(crate) fn custom_domain(url: &Url, prefix: &str) -> Option<Url> {
+    if url.scheme() != prefix {
+        return None;
+    }
+    let rest = url.as_str().get(prefix.len() + 1..)?;
+    let inner = if rest.starts_with("http://") || rest.starts_with("https://") {
+        Url::parse(rest).ok()?
+    } else {
+        Url::parse(&format!("https://{rest}")).ok()?
+    };
+    (plain(&inner) && inner.host_str().is_some()).then_some(inner)
+}
+
 /// Host equal to `domain` or one of `prefixes` followed by `.domain`.
 pub(crate) fn host_is(url: &Url, domains: &[&str]) -> bool {
     let Some(host) = url.host_str() else {
