@@ -25,6 +25,7 @@ pub(super) static SITES: &[&Site] = &[
     &misskey::MISSKEY_ART,
     &misskey::LESBIAN_ENERGY,
     &misskey::SUSHI_SKI,
+    &misskey::MISSKEY,
     &wikimedia::WIKIPEDIA,
     &wikimedia::WIKTIONARY,
     &wikimedia::WIKIQUOTE,

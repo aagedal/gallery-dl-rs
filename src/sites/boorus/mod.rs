@@ -37,9 +37,11 @@ pub(super) static SITES: &[&Site] = &[
     &moebooru::KONACHAN,
     &moebooru::SAKUGABOORU,
     &moebooru::LOLIBOORU,
+    &moebooru::MOEBOORU,
     &philomena::DERPIBOORU,
     &philomena::PONYBOORU,
     &philomena::FURBOORU,
+    &philomena::PHILOMENA,
     &twibooru::SITE,
     &shimmie2::CAVEMANON,
     &shimmie2::RULE34HENTAI,
@@ -47,6 +49,7 @@ pub(super) static SITES: &[&Site] = &[
     &shimmie2::NOZRIP,
     &shimmie2::THECOLLECTIONS,
     &shimmie2::SOYBOORU,
+    &shimmie2::SHIMMIE2,
     &paheal::SITE,
     &realbooru::SITE,
     &rule34us::SITE,
@@ -56,6 +59,7 @@ pub(super) static SITES: &[&Site] = &[
     &szurubooru::BCBNSFW,
     &szurubooru::SNOOTBOORU,
     &szurubooru::VISUABUSTERS,
+    &szurubooru::SZURUBOORU,
     &gelbooru_v02::RULE34,
     &gelbooru_v02::TBIB,
     &gelbooru_v02::HYPNOHUB,
@@ -89,6 +93,19 @@ pub(super) static SITES: &[&Site] = &[
 /// root is an exact `host` or `host/prefix` (no implicit `www.`). Rejects
 /// ports, credentials and non-HTTP schemes. The returned text keeps the
 /// URL's percent-encoding, like the upstream regexes see it.
+/// Upstream `BASECATEGORY:https://HOST/...` inputs for instances without a
+/// built-in entry: the instance root and the path with its query.
+pub(crate) fn below_custom(url: &Url, base: &str) -> Option<(String, String)> {
+    let inner = crate::sites::custom_domain(url, base)?;
+    let root = format!("{}://{}", inner.scheme(), inner.host_str()?);
+    let mut rest = inner.path().to_owned();
+    if let Some(query) = inner.query() {
+        rest.push('?');
+        rest.push_str(query);
+    }
+    Some((root, rest))
+}
+
 pub(crate) fn below(url: &Url, roots: &[&str]) -> Option<String> {
     if !crate::sites::plain(url) {
         return None;

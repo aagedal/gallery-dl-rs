@@ -306,7 +306,7 @@ impl Instagram {
         endpoint.query_pairs_mut().append_pair("reel_ids", &reel.id);
         let data = self.request_json(&endpoint, "", state.budget).await?;
         validate_response(&data)?;
-        let mut items = parse_reel(&data, &reel)?;
+        let items = parse_reel_with(&data, &reel, self.static_videos)?;
         state.done = state.reels.is_empty();
         if data
             .get("reels_media")
@@ -317,9 +317,7 @@ impl Instagram {
             // reel whose items array is empty still emits its post boundary.
             return Ok(());
         }
-        for item in &mut items {
-            self.network.apply_media(item);
-        }
+        let items = self.finish_files(items);
         let metadata = reel_metadata(&data, &reel)?;
         state.pending = event::group(items, "instagram");
         if let Some(ExtractionEvent::Post(post)) = state.pending.front_mut() {
@@ -392,7 +390,12 @@ fn validate_owner(user: &Value, expected: Option<&str>, username: Option<&str>) 
     Ok(id)
 }
 
+#[cfg(test)]
 fn parse_reel(data: &Value, expected: &Reel) -> Result<Vec<Media>> {
+    parse_reel_with(data, expected, true)
+}
+
+fn parse_reel_with(data: &Value, expected: &Reel, static_videos: bool) -> Result<Vec<Media>> {
     let reels = data
         .get("reels_media")
         .and_then(Value::as_array)
@@ -491,7 +494,7 @@ fn parse_reel(data: &Value, expected: &Reel) -> Result<Vec<Media>> {
         {
             post["taken_at"] = created;
         }
-        let mut parsed = parse_post(&post, &code)?;
+        let mut parsed = parse_post_with(&post, &code, static_videos)?;
         for item in &mut parsed {
             if let Some(meta) = &mut item.metadata {
                 meta.index = index + 1;

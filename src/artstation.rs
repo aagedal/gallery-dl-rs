@@ -110,6 +110,10 @@ pub enum Target {
     Following {
         user: String,
     },
+    /// `search?QUERY`: the decoded query parameters, in order.
+    Search {
+        params: Vec<(String, String)>,
+    },
 }
 
 fn plain(url: &Url) -> bool {
@@ -164,6 +168,12 @@ pub fn target(url: &Url) -> Result<Target> {
                     .map(|(_, v)| v.into_owned())
                     .filter(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_lowercase()))
                     .unwrap_or_else(|| "popular".into()),
+            }),
+            ["search"] if url.query().is_some_and(|q| !q.is_empty()) => Ok(Target::Search {
+                params: crate::sites::gdl::parse_query(url.query().unwrap_or_default())
+                    .into_iter()
+                    .map(|(k, v)| (k, v.as_str().unwrap_or_default().to_owned()))
+                    .collect(),
             }),
             ["artwork"] if url.query().is_some() => Ok(Target::Listing {
                 path: format!("projects.json?{}", url.query().unwrap_or_default()),
@@ -250,11 +260,59 @@ fn extension(url: &Url) -> String {
         .unwrap_or_else(|| "jpg".into())
 }
 
+/// Upstream embed and asset options: `videos`, `mviews`, `external` and
+/// `previews`.
+#[derive(Clone, Copy, Debug)]
+pub struct AssetOptions {
+    pub videos: bool,
+    pub mviews: bool,
+    pub external: bool,
+    pub previews: bool,
+}
+
+impl Default for AssetOptions {
+    fn default() -> Self {
+        Self {
+            videos: true,
+            mviews: true,
+            external: false,
+            previews: false,
+        }
+    }
+}
+
+/// One project file: ready to download, or an ArtStation-hosted player page
+/// that names the file (`marmoset` for `.mview` viewers, else a video clip).
+enum Asset {
+    Ready(Media),
+    Embed {
+        media: Media,
+        page: Url,
+        marmoset: bool,
+    },
+}
+
 /// Parse a `projects/HASH.json` response into its image assets.
 pub fn parse_project(bytes: &[u8], hash: &str) -> Result<Vec<Media>> {
-    parse_project_data(bytes, hash).map(|(media, _)| media)
+    parse_project_data(bytes, hash, &AssetOptions::default()).map(|(assets, _)| {
+        assets
+            .into_iter()
+            .filter_map(|asset| match asset {
+                Asset::Ready(media) => Some(media),
+                Asset::Embed { .. } => None,
+            })
+            .collect()
+    })
 }
-fn parse_project_data(bytes: &[u8], hash: &str) -> Result<(Vec<Media>, usize)> {
+
+/// Upstream `items`: each asset's embedded player (per the options), then
+/// its image unless the player replaced it. ArtStation image URLs are
+/// upgraded to `8k` with `4k`/`large`/`medium`/`small` fallbacks.
+fn parse_project_data(
+    bytes: &[u8],
+    hash: &str,
+    options: &AssetOptions,
+) -> Result<(Vec<Asset>, usize)> {
     let project: Value =
         serde_json::from_slice(bytes).map_err(|_| error("ArtStation returned invalid JSON"))?;
     if text(&project, "hash_id").as_deref() != Some(hash) {
@@ -272,30 +330,22 @@ fn parse_project_data(bytes: &[u8], hash: &str) -> Result<(Vec<Media>, usize)> {
         .ok_or_else(|| error("ArtStation project contains no asset list"))?;
     let mut items = Vec::new();
     for (position, asset) in assets.iter().enumerate() {
-        if text(asset, "asset_type").as_deref() != Some("image")
-            || asset.get("has_image").and_then(Value::as_bool) == Some(false)
-        {
-            continue;
-        }
         let Some(id) = text(asset, "id").filter(|id| valid_id(id)) else {
             continue;
         };
-        let Some(url) = text(asset, "image_url").and_then(|u| media_url(&u)) else {
-            continue;
-        };
-        items.push(Media {
-            filename: format!("{hash}_{id}.{}", extension(&url)),
+        let item = |url: Url, ext: String, video: bool| Media {
+            filename: format!("{hash}_{id}.{ext}"),
             job: MediaJob::DirectHttp,
             category: "artstation".into(),
             metadata: Some(PostMetadata {
                 file: Some(FileMetadata {
                     width: number(asset, "width"),
                     height: number(asset, "height"),
-                    media_type: Some(Arc::from("photo")),
+                    media_type: Some(Arc::from(if video { "video" } else { "photo" })),
                     ..FileMetadata::default()
                 }),
                 post_id: hash.into(),
-                media_id: id,
+                media_id: id.clone(),
                 username: username.clone(),
                 caption: caption.clone(),
                 timestamp,
@@ -305,9 +355,88 @@ fn parse_project_data(bytes: &[u8], hash: &str) -> Result<(Vec<Media>, usize)> {
             url,
             headers: BTreeMap::new(),
             handoff: BTreeMap::new(),
-        });
+        };
+        if asset.get("has_embedded_player").and_then(Value::as_bool) == Some(true) {
+            let player = text(asset, "player_embedded").unwrap_or_default();
+            let src = crate::sites::extr(&player, "src=\"", "\"")
+                .filter(|s| !s.is_empty())
+                .or_else(|| crate::sites::extr(&player, "src='", "'"))
+                .unwrap_or_default();
+            let kind = text(asset, "image_url")
+                .and_then(|u| crate::sites::extr(&u, "/assets/", "/").map(str::to_owned))
+                .unwrap_or_default();
+            let hosted = src.starts_with("https://www.artstation.com") && !kind.is_empty();
+            if hosted {
+                let marmoset = kind == "marmosets";
+                if (if marmoset {
+                    options.mviews
+                } else {
+                    options.videos
+                }) && let Ok(page) = Url::parse(src)
+                {
+                    let placeholder = page.clone();
+                    items.push(Asset::Embed {
+                        media: item(placeholder, String::new(), !marmoset),
+                        page,
+                        marmoset,
+                    });
+                }
+            } else if !src.is_empty()
+                && options.external
+                && let Ok(page) = Url::parse(src)
+                && matches!(page.scheme(), "http" | "https")
+            {
+                let mut media = item(page.clone(), "mp4".into(), true);
+                media.job = MediaJob::VideoPage { page_url: page };
+                items.push(Asset::Ready(media));
+            }
+            if !options.previews {
+                continue;
+            }
+        }
+        let has_image = match asset.get("has_image") {
+            Some(value) => value.as_bool() == Some(true),
+            None => text(asset, "asset_type").as_deref() == Some("image"),
+        };
+        if !has_image {
+            continue;
+        }
+        let Some(url) = text(asset, "image_url").and_then(|u| media_url(&u)) else {
+            continue;
+        };
+        let ext = extension(&url);
+        let mut media = item(url.clone(), ext, false);
+        if url.path().contains("/images/images/")
+            && let Some((lhs, rhs)) = url.as_str().split_once("/large/")
+            && !rhs.is_empty()
+            && let Ok(large) = Url::parse(&format!("{lhs}/8k/{rhs}"))
+        {
+            media.url = large;
+            let fallback: Vec<Value> = ["4k", "large", "medium", "small"]
+                .iter()
+                .map(|size| Value::String(format!("{lhs}/{size}/{rhs}")))
+                .collect();
+            media
+                .handoff
+                .insert("_fallback".into(), Value::Array(fallback));
+        }
+        items.push(Asset::Ready(media));
     }
     Ok((items, assets.len()))
+}
+
+/// The file URL named by an ArtStation player page (upstream
+/// `_extract_embed`).
+fn embed_url(page: &str, marmoset: bool) -> Option<Url> {
+    let raw = if marmoset {
+        crate::sites::extr(page, "marmoset.embed(", "\",")?
+            .trim_matches(|c| matches!(c, '"' | '\'' | ' '))
+            .to_owned()
+    } else {
+        let from = page.find("id=\"video\"").map_or(0, |at| at + 1);
+        crate::sites::extr(&page[from..], " src=\"", "\"")?.to_owned()
+    };
+    media_url(&raw)
 }
 
 /// Parse a `users/USER/projects.json` page into project hashes and
@@ -337,13 +466,65 @@ pub struct ArtStation {
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
+    /// Upstream `pro-first` (search ordering).
+    pro_first: bool,
+    assets: AssetOptions,
+    /// Upstream `max-posts`: at most this many projects per listing.
+    max_posts: Option<u64>,
+}
+
+/// A JSON POST body and its extra headers.
+struct Post {
+    body: Vec<u8>,
+    headers: Vec<(&'static str, String)>,
+}
+
+/// Upstream `ArtstationSearchExtractor.projects`: the search request body;
+/// `*_ids` and `tags` parameters become include filters.
+fn search_body(params: &[(String, String)], pro_first: bool) -> Value {
+    let param = |key: &str| {
+        params
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    };
+    let query = param("query")
+        .filter(|q| !q.is_empty())
+        .or_else(|| param("q"))
+        .unwrap_or_default();
+    let filters: Vec<Value> = params
+        .iter()
+        .filter(|(key, _)| key.ends_with("_ids") || key == "tags")
+        .map(|(key, value)| {
+            serde_json::json!({
+                "field": key,
+                "method": "include",
+                "value": value.split(',').collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "query": crate::sites::percent_decode(query),
+        "page": null,
+        "per_page": 50,
+        "sorting": param("sort_by").unwrap_or("relevance").to_lowercase(),
+        "pro_first": if pro_first { "1" } else { "0" },
+        "filters": filters,
+        "additional_fields": [],
+    })
 }
 
 struct ListingState {
     /// API path, possibly with a query.
     path: String,
+    /// JSON body of a POST listing (search), with its `page` updated.
+    post: Option<Value>,
+    /// `PUBLIC-CSRF-TOKEN` for POST listings, fetched before the first page.
+    csrf: Option<String>,
     page: u64,
     seen: u64,
+    /// Projects queued so far (for `max-posts`).
+    projects: u64,
     done: bool,
     pending: VecDeque<ExtractionEvent>,
 }
@@ -358,7 +539,46 @@ impl ArtStation {
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
+            pro_first: true,
+            assets: AssetOptions::default(),
+            max_posts: None,
         })
+    }
+
+    /// Upstream `max-posts` (a typed option, outside the site options).
+    pub fn with_max_posts(mut self, max: Option<usize>) -> Self {
+        if let Some(max) = max.filter(|max| *max > 0) {
+            self.max_posts = Some(max as u64);
+        }
+        self
+    }
+
+    /// Upstream `videos` (a typed option, outside the site options).
+    pub fn with_videos(mut self, videos: bool) -> Self {
+        self.assets.videos = videos;
+        self
+    }
+
+    /// Site options: `pro-first` (default `true`), `videos`, `mviews`,
+    /// `external` and `previews`.
+    pub fn with_options(mut self, options: Option<&serde_json::Map<String, Value>>) -> Self {
+        let flag = |key: &str, default: bool| {
+            options
+                .and_then(|o| o.get(key))
+                .map_or(default, |value| crate::sites::gdl::truthy(Some(value)))
+        };
+        self.pro_first = flag("pro-first", true);
+        self.assets = AssetOptions {
+            videos: flag("videos", true),
+            mviews: flag("mviews", true),
+            external: flag("external", false),
+            previews: flag("previews", false),
+        };
+        self.max_posts = options
+            .and_then(|o| o.get("max-posts"))
+            .and_then(Value::as_u64)
+            .filter(|max| *max > 0);
+        self
     }
 
     /// Apply proxy and user-agent settings to API requests and emitted media.
@@ -387,17 +607,67 @@ impl ArtStation {
     }
 
     async fn call(&self, path: &str) -> Result<Vec<u8>> {
+        self.call_with(path, None).await
+    }
+
+    /// A GET, or a JSON POST with extra headers.
+    async fn call_with(&self, path: &str, post: Option<&Post>) -> Result<Vec<u8>> {
         let endpoint = self.api_root.join(path).expect("validated ArtStation path");
-        tokio::time::timeout(self.timeout, self.request(&endpoint))
+        tokio::time::timeout(self.timeout, self.request(&endpoint, post))
             .await
             .map_err(|_| error("native ArtStation extraction timed out"))?
     }
 
+    /// Upstream `_init_csrf_token`.
+    async fn csrf_token(&self) -> Result<String> {
+        let origin = self.origin();
+        let post = Post {
+            body: b"{}".to_vec(),
+            headers: vec![("Accept", "*/*".into()), ("Origin", origin)],
+        };
+        let body = self
+            .call_with("api/v2/csrf_protection/token.json", Some(&post))
+            .await?;
+        serde_json::from_slice::<Value>(&body)
+            .ok()
+            .and_then(|v| v.get("public_csrf_token")?.as_str().map(str::to_owned))
+            .ok_or_else(|| error("ArtStation returned no CSRF token"))
+    }
+
+    fn origin(&self) -> String {
+        self.api_root.as_str().trim_end_matches('/').to_owned()
+    }
+
     async fn project(&self, hash: &str) -> Result<VecDeque<ExtractionEvent>> {
         let body = self.call(&format!("projects/{hash}.json")).await?;
-        let (mut items, count) = parse_project_data(&body, hash)?;
-        for item in &mut items {
-            self.network.apply_media(item);
+        let (assets, count) = parse_project_data(&body, hash, &self.assets)?;
+        let mut items = Vec::new();
+        for asset in assets {
+            let mut item = match asset {
+                Asset::Ready(media) => media,
+                Asset::Embed {
+                    mut media,
+                    page,
+                    marmoset,
+                } => {
+                    // Player pages are fetched relative to the API origin.
+                    let path = page
+                        .as_str()
+                        .trim_start_matches("https://www.artstation.com/");
+                    let page = String::from_utf8_lossy(&self.call(path).await?).into_owned();
+                    let Some(url) = embed_url(&page, marmoset) else {
+                        continue;
+                    };
+                    let (_, ext) = crate::sites::nameext(&url);
+                    media
+                        .filename
+                        .push_str(if ext.is_empty() { "mp4" } else { &ext });
+                    media.url = url;
+                    media
+                }
+            };
+            self.network.apply_media(&mut item);
+            items.push(item);
         }
         // Upstream emits Directory for each asset, even within one project.
         // Each asset's Url then reuses that Directory dictionary.
@@ -424,13 +694,35 @@ impl ArtStation {
 
     async fn next_page(&self, state: &mut ListingState) -> Result<()> {
         state.page += 1;
-        let separator = if state.path.contains('?') { '&' } else { '?' };
-        let body = self
-            .call(&format!("{}{separator}page={}", state.path, state.page))
-            .await?;
-        let (hashes, total) = parse_listing(&body)?;
-        state.seen += hashes.len() as u64;
-        state.done = hashes.is_empty() || state.seen >= total || state.page >= MAX_PAGES;
+        let body = if let Some(json) = state.post.as_mut() {
+            if state.csrf.is_none() {
+                state.csrf = Some(self.csrf_token().await?);
+            }
+            json["page"] = state.page.into();
+            let post = Post {
+                body: json.to_string().into_bytes(),
+                headers: vec![
+                    ("Origin", self.origin()),
+                    ("PUBLIC-CSRF-TOKEN", state.csrf.clone().unwrap_or_default()),
+                ],
+            };
+            self.call_with(&state.path, Some(&post)).await?
+        } else {
+            let separator = if state.path.contains('?') { '&' } else { '?' };
+            self.call(&format!("{}{separator}page={}", state.path, state.page))
+                .await?
+        };
+        let (mut hashes, total) = parse_listing(&body)?;
+        let listed = hashes.len() as u64;
+        if let Some(max) = self.max_posts {
+            hashes.truncate(max.saturating_sub(state.projects) as usize);
+        }
+        state.projects += hashes.len() as u64;
+        state.seen += listed;
+        state.done = listed == 0
+            || state.seen >= total
+            || state.page >= MAX_PAGES
+            || self.max_posts.is_some_and(|max| state.projects >= max);
         for hash in hashes {
             let events = self.project(&hash).await?;
             state.pending.extend(events);
@@ -633,9 +925,14 @@ impl ArtStation {
 
     /// Emit one post boundary per project; portfolios paginate lazily.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let mut post = None;
         let path = match target(url) {
             Ok(Target::User { user }) => format!("users/{user}/projects.json"),
             Ok(Target::Listing { path }) => path,
+            Ok(Target::Search { params }) => {
+                post = Some(search_body(&params, self.pro_first));
+                "api/v2/search/projects.json".into()
+            }
             Ok(Target::Collections { user }) => return self.collections(user),
             Ok(Target::Challenge { id, sorting }) => return self.challenge(id, sorting),
             Ok(Target::Following { user }) => return self.following(user),
@@ -652,8 +949,11 @@ impl ArtStation {
         };
         let state = ListingState {
             path,
+            post,
+            csrf: None,
             page: 0,
             seen: 0,
+            projects: 0,
             done: false,
             pending: VecDeque::new(),
         };
@@ -674,9 +974,9 @@ impl ArtStation {
         .boxed()
     }
 
-    async fn request(&self, endpoint: &Url) -> Result<Vec<u8>> {
+    async fn request(&self, endpoint: &Url, post: Option<&Post>) -> Result<Vec<u8>> {
         for attempt in 0..=self.retries {
-            match self.attempt(endpoint, attempt).await {
+            match self.attempt(endpoint, post, attempt).await {
                 Ok(body) => return Ok(body),
                 Err(failure) if failure.retry && attempt < self.retries => {
                     tokio::time::sleep(backoff(attempt)).await;
@@ -687,17 +987,34 @@ impl ArtStation {
         unreachable!()
     }
 
-    async fn attempt(&self, endpoint: &Url, attempt: u8) -> std::result::Result<Vec<u8>, Failure> {
+    async fn attempt(
+        &self,
+        endpoint: &Url,
+        post: Option<&Post>,
+        attempt: u8,
+    ) -> std::result::Result<Vec<u8>, Failure> {
         let mut target = endpoint.clone();
         let mut redirects = Redirects::new(endpoint);
         let mut response = loop {
             self.rate_limits.wait(&target, self.timeout).await?;
-            let mut request = self
-                .client
-                .get(target.clone())
-                .timeout(self.request_timeout);
+            let mut request = match post {
+                Some(_) => self.client.post(target.clone()),
+                None => self.client.get(target.clone()),
+            }
+            .timeout(self.request_timeout);
             for (name, value) in BROWSER_HEADERS {
+                if post.is_some_and(|p| p.headers.iter().any(|(n, _)| *n == name)) {
+                    continue;
+                }
                 request = request.header(name, value);
+            }
+            if let Some(post) = post {
+                for (name, value) in &post.headers {
+                    request = request.header(*name, value);
+                }
+                request = request
+                    .header("Content-Type", "application/json")
+                    .body(post.body.clone());
             }
             let response = request.send().await.map_err(|_| {
                 Failure::transient("ArtStation request failed; check network access")
@@ -809,8 +1126,10 @@ mod tests {
     #[test]
     fn parses_project_image_assets() {
         let body = project("LQVJr").to_string();
-        let items = parse_project(body.as_bytes(), "LQVJr").unwrap();
-        assert_eq!(items.len(), 2);
+        let mut items = parse_project(body.as_bytes(), "LQVJr").unwrap();
+        // Like upstream, every asset with an image is downloaded (covers too).
+        assert_eq!(items.len(), 3);
+        assert_eq!(items.remove(0).filename, "LQVJr_11.jpg");
         assert_eq!(items[0].filename, "LQVJr_12.png");
         assert_eq!(items[1].filename, "LQVJr_16.jpg");
         assert!(items[0].url.as_str().ends_with("/large/a.png?1700"));
@@ -980,7 +1299,7 @@ mod tests {
             .events(&Url::parse("https://www.artstation.com/artwork/LQVJr").unwrap())
             .collect()
             .await;
-        assert_eq!(events.len(), 6);
+        assert_eq!(events.len(), 9);
         for (position, group) in events.as_chunks::<3>().0.iter().enumerate() {
             let ExtractionEvent::Post(post) = group[0].as_ref().unwrap() else {
                 panic!("one source Directory per asset")
@@ -994,9 +1313,9 @@ mod tests {
             else {
                 panic!("ArtStation asset must reuse Directory keywords")
             };
-            assert_eq!(post_fields["num"], [2, 6][position]);
+            assert_eq!(post_fields["num"], [1, 2, 6][position]);
             let filter = crate::filter::FilterExpression::parse("num == 2 and count == 6").unwrap();
-            assert_eq!(filter.matches_post(post).unwrap(), position == 0);
+            assert_eq!(filter.matches_post(post).unwrap(), position == 1);
             assert_eq!(
                 file_fields.as_ref(),
                 &["num", "index", "media_id", "filename", "name", "extension"]
@@ -1027,8 +1346,23 @@ mod tests {
             .collect()
             .await;
         let media: Vec<_> = media.into_iter().map(|m| m.unwrap()).collect();
-        assert_eq!(media.len(), 4);
-        assert_eq!(media[2].filename, "b_12.png");
+        assert_eq!(media.len(), 6);
+        let limited = artstation(
+            serve(vec![
+                ok(json!({"data": [{"hash_id": "a"}, {"hash_id": "b"}], "total_count": 9})),
+                ok(project("a")),
+            ])
+            .0,
+        )
+        .with_options(Some(&serde_json::Map::from_iter([(
+            "max-posts".to_owned(),
+            json!(1),
+        )])))
+        .stream(&Url::parse("https://www.artstation.com/alice").unwrap())
+        .collect::<Vec<_>>()
+        .await;
+        assert_eq!(limited.len(), 3);
+        assert_eq!(media[4].filename, "b_12.png");
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /users/alice/projects.json?page=1 "));
         assert!(requests[2].starts_with("GET /users/alice/projects.json?page=2 "));
@@ -1046,5 +1380,90 @@ mod tests {
             "{error}"
         );
         server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn search_posts_queries_with_a_csrf_token() {
+        let (root, server) = serve(vec![
+            ok(json!({"public_csrf_token": "tok"})),
+            ok(json!({"data": [{"hash_id": "a"}], "total_count": 1})),
+            ok(project("a")),
+        ]);
+        let media: Vec<_> = artstation(root)
+            .stream(
+                &Url::parse(
+                    "https://www.artstation.com/search?query=ancient&sort_by=rank&tags=a,b&medium_ids=7",
+                )
+                .unwrap(),
+            )
+            .collect()
+            .await;
+        assert_eq!(media.len(), 3, "{media:?}");
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("POST /api/v2/csrf_protection/token.json "));
+        assert!(requests[1].starts_with("POST /api/v2/search/projects.json "));
+        assert!(
+            requests[1]
+                .to_ascii_lowercase()
+                .contains("public-csrf-token: tok")
+        );
+        let body: Value =
+            serde_json::from_str(requests[1].split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body["query"], "ancient");
+        assert_eq!(body["sorting"], "rank");
+        assert_eq!(body["page"], 1);
+        assert_eq!(body["pro_first"], "1");
+        assert_eq!(
+            body["filters"],
+            json!([{"field": "tags", "method": "include", "value": ["a", "b"]},
+                {"field": "medium_ids", "method": "include", "value": ["7"]}])
+        );
+    }
+
+    #[tokio::test]
+    async fn resolves_embeds_and_upgrades_images_to_8k() {
+        let image = "https://cdna.artstation.com/p/assets/images/images/008/760/279/large/x.jpg?1";
+        let project = json!({"hash_id": "e1", "title": "T", "user": {"username": "u"}, "assets": [
+            {"id": 1, "asset_type": "image", "has_image": true, "image_url": image},
+            {"id": 2, "asset_type": "video_clip", "has_image": true, "has_embedded_player": true,
+             "image_url": "https://cdna.artstation.com/p/assets/video_clips/images/1/large/c.jpg",
+             "player_embedded": "<iframe src=\"https://www.artstation.com/api/v2/animation/video_clips/2/player\"></iframe>"},
+            {"id": 3, "asset_type": "marmoset", "has_image": true, "has_embedded_player": true,
+             "image_url": "https://cdna.artstation.com/p/assets/marmosets/images/3/large/m.jpg",
+             "player_embedded": "<iframe src='https://www.artstation.com/embed/3'></iframe>"},
+            {"id": 4, "asset_type": "video", "has_image": true, "has_embedded_player": true,
+             "image_url": "https://cdna.artstation.com/p/assets/covers/4/large/y.jpg",
+             "player_embedded": "<iframe src=\"https://www.youtube.com/embed/JNFfJtwwrU0\"></iframe>"}]});
+        let (root, server) = serve(vec![
+            ok(project),
+            response("200 OK", br#"<video id="video"><source src="https://cdn.artstation.com/p/video_sources/000/819/843/infection-4.mp4" type="video/mp4"></video>"#),
+            response("200 OK", br#"marmoset.embed("https://cdna.artstation.com/p/assets/marmosets/attachments/010/915/068/original/Orca.mview?1526922111", {})"#),
+        ]);
+        let media: Vec<_> = artstation(root)
+            .with_options(Some(&serde_json::Map::from_iter([(
+                "external".to_owned(),
+                json!(true),
+            )])))
+            .stream(&Url::parse("https://www.artstation.com/artwork/e1").unwrap())
+            .collect()
+            .await;
+        let media: Vec<_> = media.into_iter().map(|m| m.unwrap()).collect();
+        let names: Vec<_> = media.iter().map(|m| m.filename.as_str()).collect();
+        assert_eq!(names, ["e1_1.jpg", "e1_2.mp4", "e1_3.mview", "e1_4.mp4"]);
+        assert_eq!(
+            media[0].url.as_str(),
+            "https://cdna.artstation.com/p/assets/images/images/008/760/279/8k/x.jpg?1"
+        );
+        assert_eq!(
+            media[0].handoff["_fallback"][0],
+            image.replace("/large/", "/4k/")
+        );
+        assert!(media[1].url.as_str().ends_with("/infection-4.mp4"));
+        assert!(media[2].url.as_str().ends_with("/Orca.mview?1526922111"));
+        assert!(matches!(&media[3].job, MediaJob::VideoPage { page_url }
+            if page_url.as_str() == "https://www.youtube.com/embed/JNFfJtwwrU0"));
+        let requests = server.join().unwrap();
+        assert!(requests[1].starts_with("GET /api/v2/animation/video_clips/2/player "));
+        assert!(requests[2].starts_with("GET /embed/3 "));
     }
 }

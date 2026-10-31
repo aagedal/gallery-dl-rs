@@ -38,6 +38,23 @@ fn target(url: &Url) -> Option<Target> {
         .as_str()
         .strip_prefix("g:")
         .or_else(|| url.as_str().strip_prefix("generic:"))?;
+    // Opaque URLs percent-encode non-ASCII hosts such as `räksmörgås.se`.
+    let decoded;
+    let rest = match rest.find("://").map(|at| at + 3) {
+        Some(start) if rest.contains('%') => {
+            let end = rest[start..]
+                .find(['/', '?', '#'])
+                .map_or(rest.len(), |at| start + at);
+            decoded = format!(
+                "{}{}{}",
+                &rest[..start],
+                crate::sites::percent_decode(&rest[start..end]),
+                &rest[end..]
+            );
+            decoded.as_str()
+        }
+        _ => rest,
+    };
     let c = re!(r"^(?i)(https?://)?([-\w\.]+)(/[^?#]*)?(?:\?[^#]*)?(?:#.*)?$").captures(rest)?;
     let scheme = c.get(1).map_or("https://", |m| m.as_str());
     let url = if c.get(1).is_some() {
@@ -167,6 +184,8 @@ mod tests {
             (page.url.as_str(), page.domain.as_str(), page.path.as_str()),
             ("https://www.nongnu.org/lzip/", "www.nongnu.org", "/lzip/")
         );
+        let idn = t("generic:https://räksmörgås.josefsson.org/").unwrap();
+        assert_eq!(idn.domain, "räksmörgås.josefsson.org");
         let bare = t("g:example.org/a/b.html").unwrap();
         assert_eq!(
             (bare.url.as_str(), bare.scheme.as_str()),

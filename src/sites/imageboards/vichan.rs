@@ -31,8 +31,20 @@ instance!(EIGHTKUN, "8kun", "8kun");
 instance!(SMUGLOLI, "smugloli", "smugloli");
 instance!(GUROCHAN, "gurochan", "gurochan");
 
+/// `vichan:https://HOST/...`: any other vichan instance.
+pub static VICHAN: Site = Site {
+    category: "vichan",
+    name: "vichan",
+    matches: |url| target("vichan", url).is_some(),
+    extract: |http, url| extract("vichan", http, url),
+    routes: &[&THREAD, &BOARD],
+    api_key: false,
+    cookies: None,
+};
+
 fn site(category: &str) -> &'static Site {
     match category {
+        "vichan" => &VICHAN,
         "8kun" => &EIGHTKUN,
         "smugloli" => &SMUGLOLI,
         _ => &GUROCHAN,
@@ -49,11 +61,36 @@ fn hosts(category: &str) -> &'static [&'static str] {
 
 /// Upstream instance root; `smugloli` has none and uses the matched origin.
 fn root(category: &str, url: &Url) -> String {
+    if category == "vichan" {
+        return crate::sites::custom_domain(url, "vichan")
+            .map(|inner| {
+                format!(
+                    "{}://{}",
+                    inner.scheme(),
+                    inner.host_str().unwrap_or_default()
+                )
+            })
+            .unwrap_or_default();
+    }
     match category {
         "8kun" => "https://8kun.top".into(),
         "gurochan" => "https://boards.guro.cx".into(),
         _ => format!("{}://{}", url.scheme(), url.host_str().unwrap_or_default()),
     }
+}
+
+/// Thread URLs of custom instances keep the `vichan:` prefix.
+fn prefixed(
+    category: &str,
+    children: Vec<(Url, Map<String, Value>)>,
+) -> Vec<(Url, Map<String, Value>)> {
+    if category != "vichan" {
+        return children;
+    }
+    children
+        .into_iter()
+        .filter_map(|(url, data)| Some((Url::parse(&format!("vichan:{url}")).ok()?, data)))
+        .collect()
 }
 
 #[derive(Debug, PartialEq)]
@@ -63,9 +100,15 @@ enum Target {
 }
 
 fn target(category: &str, url: &Url) -> Option<Target> {
-    if !host_in(url, hosts(category)) {
+    let inner;
+    let url = if category == "vichan" {
+        inner = crate::sites::custom_domain(url, "vichan")?;
+        &inner
+    } else if host_in(url, hosts(category)) {
+        url
+    } else {
         return None;
-    }
+    };
     let (board, tail) = component(rest(url))?;
     if let Some((thread, _)) = tail.strip_prefix("/res/").and_then(digits) {
         return Some(Target::Thread {
@@ -94,6 +137,7 @@ fn extract<'a>(category: &'static str, http: &'a Http, url: Url) -> Events<'a> {
             let api = http.api(&format!("{root}/{board}/threads.json"))?;
             let body = http.json(&api).await?;
             let children = parse_board(&root, &board, &body)?;
+            let children = prefixed(category, children);
             Ok(super::queue_all(http, site(category), &BOARD, children))
         }),
         None => crate::sites::fail(error("unsupported vichan URL")),

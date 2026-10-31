@@ -146,11 +146,8 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
     if crate::reddit::target(url).is_ok() {
         return Some(descriptor("reddit", "{filename}"));
     }
-    if crate::mastodon::target(url).is_ok() {
-        return Some(descriptor(
-            crate::mastodon::instance_category(url.host_str()?)?,
-            "{media[id]}",
-        ));
+    if let Some(category) = crate::mastodon::url_category(url) {
+        return Some(descriptor(category, "{media[id]}"));
     }
     if crate::tumblr::target(url).is_ok() {
         return Some(descriptor("tumblr", "{id}_{num}"));
@@ -196,7 +193,12 @@ pub fn for_url(url: &Url) -> Option<ArchiveDescriptor> {
             crate::deviantart::Target::Journals(_) => "j_{_username}_{index}.{extension}",
             crate::deviantart::Target::Stash(..) => "{index}.{extension}",
             crate::deviantart::Target::Statuses(_) => "S_{_username}_{index}.{extension}",
-            crate::deviantart::Target::Watch { .. } => "g_{_username}_{index}.{extension}",
+            crate::deviantart::Target::Watch { .. }
+            | crate::deviantart::Target::GallerySearch { .. } => {
+                "g_{_username}_{index}.{extension}"
+            }
+            crate::deviantart::Target::Scraps(_) => "s_{_username}_{index}.{extension}",
+            crate::deviantart::Target::Search(_) => "Q_{search_tags}_{index}.{extension}",
             crate::deviantart::Target::Gallery(_) => {
                 if path.split('/').any(|part| part == "gallery") {
                     "g_{_username}_{index}.{extension}"
@@ -440,7 +442,10 @@ pub fn project_keywords(media: &Media, context: &mut serde_json::Map<String, ser
                 .entry("submitid")
                 .or_insert_with(|| metadata.post_id.clone().into());
         }
-        "mastodon.social" | "pawoo" | "baraag" if crate::mastodon::valid_id(&metadata.media_id) => {
+        "mastodon.social" | "pawoo" | "baraag"
+            if crate::mastodon::valid_id(&metadata.media_id)
+                && !metadata.media_id.starts_with("card") =>
+        {
             // Attachment IDs are copied verbatim. Preview cards deliberately do
             // not qualify: their synthetic native IDs have additional guards.
             context

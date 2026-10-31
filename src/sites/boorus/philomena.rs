@@ -37,35 +37,54 @@ macro_rules! instance {
 instance!(DERPIBOORU, "derpibooru", "Derpibooru");
 instance!(PONYBOORU, "ponybooru", "Ponybooru");
 instance!(FURBOORU, "furbooru", "Furbooru");
+// `philomena:https://HOST/...`: any other Philomena instance.
+instance!(PHILOMENA, "philomena", "Philomena");
 
+#[derive(Clone)]
 struct Instance {
     site: &'static Site,
-    root: &'static str,
+    root: String,
     hosts: &'static [&'static str],
     filter_id: &'static str,
 }
 
 fn instance(category: &str) -> Instance {
-    match category {
-        "derpibooru" => Instance {
-            site: &DERPIBOORU,
-            root: "https://derpibooru.org",
-            hosts: &["derpibooru.org", "www.derpibooru.org"],
-            filter_id: "56027",
-        },
-        "ponybooru" => Instance {
-            site: &PONYBOORU,
-            root: "https://ponybooru.org",
-            hosts: &["ponybooru.org", "www.ponybooru.org"],
-            filter_id: "3",
-        },
-        _ => Instance {
-            site: &FURBOORU,
-            root: "https://furbooru.org",
-            hosts: &["furbooru.org"],
-            filter_id: "2",
-        },
+    let (site, root, hosts, filter_id): (_, _, &'static [&'static str], _) = match category {
+        "derpibooru" => (
+            &DERPIBOORU,
+            "https://derpibooru.org",
+            &["derpibooru.org", "www.derpibooru.org"],
+            "56027",
+        ),
+        "ponybooru" => (
+            &PONYBOORU,
+            "https://ponybooru.org",
+            &["ponybooru.org", "www.ponybooru.org"],
+            "3",
+        ),
+        "philomena" => (&PHILOMENA, "", &[], "2"),
+        _ => (&FURBOORU, "https://furbooru.org", &["furbooru.org"], "2"),
+    };
+    Instance {
+        site,
+        root: root.into(),
+        hosts,
+        filter_id,
     }
+}
+
+/// The instance and target of a URL; custom instances take their root
+/// from a `philomena:` input.
+fn resolve(category: &str, url: &Url) -> Option<(Instance, Target)> {
+    let mut inst = instance(category);
+    let rest = if category == "philomena" {
+        let (root, rest) = super::below_custom(url, "philomena")?;
+        inst.root = root;
+        rest
+    } else {
+        super::below(url, inst.hosts)?
+    };
+    Some((inst, classify(&rest, true)?))
 }
 
 #[derive(Debug, PartialEq)]
@@ -117,14 +136,13 @@ pub(crate) fn tag_query(tag: &str) -> String {
 }
 
 fn target(category: &str, url: &Url) -> Option<Target> {
-    classify(&super::below(url, instance(category).hosts)?, true)
+    resolve(category, url).map(|(_, target)| target)
 }
 
 fn extract<'a>(category: &'static str, http: &'a Http, url: Url) -> Events<'a> {
-    let Some(target) = target(category, &url) else {
+    let Some((inst, target)) = resolve(category, &url) else {
         return crate::sites::fail(error("unsupported Philomena URL"));
     };
-    let inst = instance(category);
     let api = format!("{}/api/v1/json", inst.root);
     match target {
         Target::Post(id) => crate::sites::once(async move {
@@ -134,7 +152,7 @@ fn extract<'a>(category: &'static str, http: &'a Http, url: Url) -> Events<'a> {
                 .get("image")
                 .ok_or_else(|| error("Philomena image response lacks an image"))?;
             Ok(crate::sites::events(images_events(
-                inst.site,
+                &inst,
                 http,
                 &POST,
                 std::slice::from_ref(image),
@@ -147,7 +165,7 @@ fn extract<'a>(category: &'static str, http: &'a Http, url: Url) -> Events<'a> {
                 "search_tags".into(),
                 super::query_get(&params, "q").unwrap_or_default().into(),
             );
-            search(http, category, &SEARCH, params, data)
+            search(http, inst, &SEARCH, params, data)
         }
         Target::Gallery(id) => crate::sites::once(async move {
             let mut url = http.api(&format!("{api}/search/galleries"))?;
@@ -166,19 +184,18 @@ fn extract<'a>(category: &'static str, http: &'a Http, url: Url) -> Events<'a> {
                 ("sf".into(), filter.clone()),
                 ("q".into(), filter),
             ];
-            Ok(search(http, category, &GALLERY, params, data))
+            Ok(search(http, inst, &GALLERY, params, data))
         }),
     }
 }
 
 fn search<'a>(
     http: &'a Http,
-    category: &'static str,
+    inst: Instance,
     route: &'static Route,
     mut params: Vec<(String, String)>,
     data: Map<String, Value>,
 ) -> Events<'a> {
-    let inst = instance(category);
     if let Some(key) = http.api_key() {
         params.push(("key".into(), key.into()));
     }
@@ -192,6 +209,7 @@ fn search<'a>(
         let params = params.clone();
         let data = data.clone();
         let endpoint = endpoint.clone();
+        let inst = inst.clone();
         async move {
             let Some(page) = page else {
                 return Ok(None);
@@ -206,7 +224,7 @@ fn search<'a>(
                 .get("images")
                 .and_then(Value::as_array)
                 .ok_or_else(|| error("Philomena search response lacks images"))?;
-            let events = images_events(inst.site, http, route, images, &data);
+            let events = images_events(&inst, http, route, images, &data);
             let next = (images.len() >= PER_PAGE).then_some(page + 1);
             Ok(Some((crate::sites::events(events), next)))
         }
@@ -223,7 +241,7 @@ pub(crate) fn filter_option(http: &Http) -> Option<String> {
 }
 
 fn images_events(
-    site: &'static Site,
+    inst: &Instance,
     http: &Http,
     route: &'static Route,
     images: &[Value],
@@ -232,13 +250,18 @@ fn images_events(
     let svg = http.option_bool("svg", true);
     let items = images
         .iter()
-        .filter_map(|image| parse_image(image, data, svg))
+        .filter_map(|image| parse_image(image, data, svg, &inst.root))
         .collect();
-    super::per_post(site, http, route, items)
+    super::per_post(inst.site, http, route, items)
 }
 
 /// One API image as a file with its upstream keywords.
-fn parse_image(image: &Value, data: &Map<String, Value>, svg: bool) -> Option<crate::sites::Item> {
+fn parse_image(
+    image: &Value,
+    data: &Map<String, Value>,
+    svg: bool,
+    root: &str,
+) -> Option<crate::sites::Item> {
     let mut fields = image.as_object()?.clone();
     let mut raw = fields
         .get("representations")
@@ -249,7 +272,8 @@ fn parse_image(image: &Value, data: &Map<String, Value>, svg: bool) -> Option<cr
     if svg && fields.get("format").and_then(Value::as_str) == Some("svg") {
         raw = format!("{}.svg", super::rpartition(&raw, ".").0);
     }
-    let url = super::file_url("", &raw).filter(|u| u.host_str().is_some())?;
+    // Some instances answer with root-relative file URLs.
+    let url = super::file_url(root, &raw).filter(|u| u.host_str().is_some())?;
     super::booru_fields(&url, &mut fields, data);
     let created = fields
         .get("created_at")
@@ -268,6 +292,20 @@ mod tests {
     #[test]
     fn classifies_urls() {
         let t = |c, raw: &str| target(c, &Url::parse(raw).unwrap());
+        assert_eq!(
+            t("philomena", "philomena:https://ponerpics.org/images/1"),
+            Some(Target::Post("1".into()))
+        );
+        let (inst, _) = resolve(
+            "philomena",
+            &Url::parse("philomena:https://manebooru.art/307071").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            (inst.root.as_str(), inst.filter_id),
+            ("https://manebooru.art", "2")
+        );
+        assert_eq!(t("philomena", "https://ponerpics.org/images/1"), None);
         assert_eq!(
             t("derpibooru", "https://derpibooru.org/images/1"),
             Some(Target::Post("1".into()))

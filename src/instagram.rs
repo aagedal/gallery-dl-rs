@@ -62,6 +62,10 @@ pub struct Instagram {
     /// Read a profile's first posts from its public page when the API
     /// refuses a session-less client; off in unit tests unless enabled.
     logged_out_profiles: bool,
+    /// Upstream `static-videos`: keep story "videos" generated from a photo.
+    static_videos: bool,
+    /// Upstream `order-files: desc`: each post's files in reverse order.
+    reverse_files: bool,
 }
 
 impl Instagram {
@@ -98,7 +102,39 @@ impl Instagram {
             include: None,
             api_base: Url::parse("https://www.instagram.com/api/v1/").unwrap(),
             logged_out_profiles: !cfg!(test),
+            static_videos: true,
+            reverse_files: false,
         })
+    }
+
+    /// Site options: `static-videos` (default `true`) and `order-files`
+    /// (`asc`, or `desc`/`reverse`; file numbers keep the displayed order).
+    pub fn with_options(mut self, options: Option<&serde_json::Map<String, Value>>) -> Self {
+        if let Some(value) = options.and_then(|o| o.get("static-videos")) {
+            self.static_videos = crate::sites::gdl::truthy(Some(value));
+        }
+        self.reverse_files = options
+            .and_then(|o| o.get("order-files"))
+            .and_then(Value::as_str)
+            .is_some_and(|order| order.starts_with(['r', 'd']));
+        self
+    }
+
+    /// One post's files with the file options applied and network settings
+    /// attached.
+    pub(crate) fn post_files(&self, post: &Value, code: &str) -> Result<Vec<Media>> {
+        let media = parse_post_with(post, code, self.static_videos)?;
+        Ok(self.finish_files(media))
+    }
+
+    pub(crate) fn finish_files(&self, mut media: Vec<Media>) -> Vec<Media> {
+        if self.reverse_files {
+            media.reverse();
+        }
+        for item in &mut media {
+            self.network.apply_media(item);
+        }
+        media
     }
 
     /// Apply proxy and user-agent settings to API requests and emitted media.
@@ -420,11 +456,8 @@ impl Instagram {
 
     async fn extract_endpoint(&self, endpoint: &Url, code: &str) -> Result<Vec<Media>> {
         let data = self.request_json(endpoint, code, self.timeout).await?;
-        let mut media = parse_value(&data, code)?;
-        for item in &mut media {
-            self.network.apply_media(item);
-        }
-        Ok(media)
+        let media = parse_value_with(&data, code, self.static_videos)?;
+        Ok(self.finish_files(media))
     }
 
     async fn request_json(&self, endpoint: &Url, referer: &str, budget: Duration) -> Result<Value> {
@@ -627,10 +660,7 @@ impl Instagram {
                 .and_then(Value::as_str)
                 .ok_or_else(|| error("Instagram feed post shortcode is missing"))?;
             media_id(code)?;
-            let mut media = parse_post(post, code)?;
-            for item in &mut media {
-                self.network.apply_media(item);
-            }
+            let media = self.post_files(post, code)?;
             pending.extend(event::group_with_keywords(
                 media,
                 "instagram",
@@ -1030,6 +1060,10 @@ fn validate_response(data: &Value) -> Result<()> {
 }
 
 fn parse_value(data: &Value, code: &str) -> Result<Vec<Media>> {
+    parse_value_with(data, code, true)
+}
+
+fn parse_value_with(data: &Value, code: &str, static_videos: bool) -> Result<Vec<Media>> {
     validate_response(data)?;
     let posts = data
         .get("items")
@@ -1042,7 +1076,31 @@ fn parse_value(data: &Value, code: &str) -> Result<Vec<Media>> {
             "Instagram response does not match the requested post",
         ));
     }
-    parse_post(post, code)
+    parse_post_with(post, code, static_videos)
+}
+
+/// [`parse_post`]; without `static_videos`, items whose original media was
+/// a photo (`original_media_type` 1) are parsed as that photo, like upstream.
+pub(crate) fn parse_post_with(post: &Value, code: &str, static_videos: bool) -> Result<Vec<Media>> {
+    if static_videos {
+        return parse_post(post, code);
+    }
+    let mut post = post.clone();
+    let photo = |item: &mut Value| {
+        let original = item.get("original_media_type").and_then(Value::as_u64);
+        let kind = item.get("media_type").and_then(Value::as_u64);
+        if original == Some(1) && kind != Some(1) && kind != Some(8) {
+            item["media_type"] = 1.into();
+            if let Some(item) = item.as_object_mut() {
+                item.remove("video_versions");
+            }
+        }
+    };
+    photo(&mut post);
+    if let Some(children) = post.get_mut("carousel_media").and_then(Value::as_array_mut) {
+        children.iter_mut().for_each(photo);
+    }
+    parse_post(&post, code)
 }
 
 fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
@@ -1222,6 +1280,42 @@ fn identifier(value: Option<&Value>) -> Result<String> {
         return Err(error("invalid Instagram media identifier"));
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod file_option_tests {
+    use super::*;
+
+    #[test]
+    fn order_files_reverses_and_static_videos_become_photos() {
+        let data: Value =
+            serde_json::from_slice(include_bytes!("../tests/fixtures/instagram/carousel.json"))
+                .unwrap();
+        let instagram = Instagram::from_cookie_jar(CookieJar::default(), Duration::from_secs(1))
+            .unwrap()
+            .with_options(Some(&serde_json::Map::from_iter([(
+                "order-files".to_owned(),
+                Value::from("desc"),
+            )])));
+        let media =
+            instagram.finish_files(parse_value_with(&data, "BA", instagram.static_videos).unwrap());
+        let ids: Vec<_> = media
+            .iter()
+            .map(|m| m.metadata.as_ref().unwrap().media_id.as_str())
+            .collect();
+        assert_eq!(ids, ["67", "66", "65"]);
+        assert_eq!(media[0].metadata.as_ref().unwrap().index, 3);
+
+        let mut post = data["items"][0].clone();
+        post["carousel_media"][1]["original_media_type"] = 1.into();
+        post["carousel_media"][1]["image_versions2"]["candidates"][0]["url"] =
+            "https://cdn.example/66.jpg".into();
+        let kept = parse_post_with(&post, "BA", true).unwrap();
+        assert!(kept[1].filename.ends_with(".mp4"));
+        let photo = parse_post_with(&post, "BA", false).unwrap();
+        assert_eq!(photo[1].url.as_str(), "https://cdn.example/66.jpg");
+        assert!(photo[1].filename.ends_with(".jpg"));
+    }
 }
 
 #[cfg(test)]

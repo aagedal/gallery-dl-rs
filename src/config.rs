@@ -3304,6 +3304,20 @@ mod site_scope_tests {
         let options = tumblr.site_options.unwrap();
         assert_eq!(options["external"], serde_json::json!(true));
         assert!(!options.contains_key("posts"));
+        let config = super::Config::parse_with_options(
+            br#"{"extractor":{"artstation":{"mviews":false,"pro-first":false,"max-posts":2},
+                "flickr":{"size-max":"Large"}}}"#,
+            &dir,
+            &[],
+        )
+        .unwrap();
+        let artstation = config.resolve("artstation").unwrap();
+        assert_eq!(artstation.max_posts, Some(2));
+        let options = artstation.site_options.unwrap();
+        assert_eq!(options["mviews"], serde_json::json!(false));
+        assert_eq!(options["pro-first"], serde_json::json!(false));
+        let options = config.resolve("flickr").unwrap().site_options.unwrap();
+        assert_eq!(options["size-max"], serde_json::json!("Large"));
         for bad in [
             &br#"{"extractor":{"4chan":{"retries":1},"4chan":{"retries":2}}}"#[..],
             br#"{"extractor":{"4chan":{"retries":1,"retries":2}}}"#,

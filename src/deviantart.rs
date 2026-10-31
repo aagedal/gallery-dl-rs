@@ -9,8 +9,15 @@
 //! downloadable deviations. Deviations without `content` (literature, journals,
 //! statuses) are skipped. Media URLs carry signed `token` queries and are never
 //! included in errors.
+//!
+//! Scraps, gallery searches and site searches use upstream's Eclipse
+//! (`/_puppy`) web API with the page's `__CSRF_TOKEN__` and the session
+//! cookies; each listed deviation is then fetched through the OAuth API.
+//! Without login cookies, site searches scrape the search result pages.
 use crate::{
-    Result, error,
+    Result,
+    cookies::CookieJar,
+    error,
     event::{ExtractionEvent, group},
     extract::{Media, MediaJob, PostMetadata},
     file_metadata::FileMetadata,
@@ -112,6 +119,16 @@ pub enum Target {
     Statuses(String),
     /// A Sta.sh item or folder; `true` for legacy `sta.sh` links.
     Stash(String, bool),
+    /// `USER/gallery/scraps` (or `gallery/?catpath=scraps`).
+    Scraps(String),
+    /// `USER/gallery?q=QUERY[&sort=ORDER]`.
+    GallerySearch {
+        user: String,
+        query: String,
+        order: String,
+    },
+    /// `search[/deviations]?QUERY`: the decoded query parameters.
+    Search(Vec<(String, String)>),
 }
 
 /// Upstream `util.b36decode`.
@@ -200,6 +217,17 @@ pub fn target(url: &Url) -> Result<Target> {
                 return Ok(Target::Watch { posts: false });
             }
             ["watch", "posts"] => return Ok(Target::Watch { posts: true }),
+            ["search"] | ["search", "deviations"] if host == "www.deviantart.com" => {
+                return match url.query().filter(|q| !q.is_empty()) {
+                    Some(query) => Ok(Target::Search(
+                        crate::sites::gdl::parse_query(query)
+                            .into_iter()
+                            .map(|(k, v)| (k, v.as_str().unwrap_or_default().to_owned()))
+                            .collect(),
+                    )),
+                    None => Err(unsupported()),
+                };
+            }
             _ => {}
         }
     }
@@ -244,6 +272,27 @@ pub fn target(url: &Url) -> Result<Target> {
                     Some(crate::sites::percent_decode(name).to_ascii_lowercase()),
                 )),
                 user,
+            });
+        }
+        _ => {}
+    }
+    let query = url.query().unwrap_or_default();
+    match rest {
+        ["gallery", "scraps", ..] => return Ok(Target::Scraps(user)),
+        ["gallery"]
+            if query == "catpath=scraps"
+                || query.starts_with("catpath=scraps&")
+                || query.starts_with("catpath=scraps#") =>
+        {
+            return Ok(Target::Scraps(user));
+        }
+        ["gallery"] if query.starts_with("q=") => {
+            let params = crate::sites::gdl::parse_query(query);
+            let param = |key: &str| params.get(key).and_then(Value::as_str).map(str::to_owned);
+            return Ok(Target::GallerySearch {
+                user,
+                query: param("q").unwrap_or_default(),
+                order: param("sort").unwrap_or_else(|| "most-recent".into()),
             });
         }
         _ => {}
@@ -427,6 +476,40 @@ pub struct DeviantArt {
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
+    /// Site session cookies (configured ones plus `Set-Cookie` replies).
+    cookies: std::sync::Mutex<CookieJar>,
+    /// Eclipse API `csrf_token`, fetched from the front page once.
+    csrf: tokio::sync::Mutex<Option<String>>,
+}
+
+/// Upstream login cookie names (`cookies_names`).
+const LOGIN_COOKIES: &[&str] = &["auth", "auth_secure", "userinfo"];
+
+/// One Eclipse API listing: its endpoint, parameters and result key.
+struct Eclipse {
+    endpoint: &'static str,
+    params: BTreeMap<String, String>,
+    key: &'static str,
+}
+
+impl Eclipse {
+    fn new(endpoint: &'static str, params: &[(&str, &str)], key: &'static str) -> Self {
+        Self {
+            endpoint,
+            params: params
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
+            key,
+        }
+    }
+}
+
+/// Where the next page of an Eclipse-backed listing comes from.
+enum Source {
+    Api(Eclipse),
+    /// Logged-out site search: result pages and their `cursor`.
+    Html(BTreeMap<String, String>),
 }
 
 struct ListingState {
@@ -453,7 +536,18 @@ impl DeviantArt {
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
+            cookies: std::sync::Mutex::new(CookieJar::default()),
+            csrf: tokio::sync::Mutex::new(None),
         })
+    }
+
+    /// Session cookies for site pages and the Eclipse API; login cookies
+    /// (`auth`, `auth_secure`, `userinfo`) switch searches to the API.
+    pub fn with_cookies(self, cookies: CookieJar) -> Self {
+        if let Ok(mut jar) = self.cookies.lock() {
+            jar.extend(cookies);
+        }
+        self
     }
 
     /// Apply proxy and user-agent settings to API requests and emitted media.
@@ -923,16 +1017,17 @@ impl DeviantArt {
     /// (or sta.sh); returns the final URL and body.
     async fn fetch_page(&self, mut page: Url) -> Result<(Url, Vec<u8>)> {
         for _ in 0..5 {
-            let response = tokio::time::timeout(
-                self.timeout,
-                self.client
-                    .get(page.clone())
-                    .timeout(self.request_timeout)
-                    .send(),
-            )
-            .await
-            .map_err(|_| error("native DeviantArt extraction timed out"))?
-            .map_err(|_| error("DeviantArt request failed; check network access"))?;
+            let mut request = self.client.get(page.clone()).timeout(self.request_timeout);
+            if let Some(cookie) = self.cookies.lock().ok().and_then(|jar| jar.header(&page)) {
+                request = request.header(reqwest::header::COOKIE, cookie);
+            }
+            let response = tokio::time::timeout(self.timeout, request.send())
+                .await
+                .map_err(|_| error("native DeviantArt extraction timed out"))?
+                .map_err(|_| error("DeviantArt request failed; check network access"))?;
+            if let Ok(mut jar) = self.cookies.lock() {
+                jar.store_response(&page, response.headers());
+            }
             let status = response.status();
             if status.is_redirection() {
                 page = response
@@ -1045,6 +1140,198 @@ impl DeviantArt {
         Ok(vec![media])
     }
 
+    /// Upstream `login`: whether login cookies are configured.
+    fn logged_in(&self) -> bool {
+        self.cookies.lock().is_ok_and(|jar| {
+            LOGIN_COOKIES
+                .iter()
+                .any(|name| jar.value(&self.root, name).is_some())
+        })
+    }
+
+    /// Upstream `_fetch_csrf_token`: `window.__CSRF_TOKEN__` of the front page.
+    async fn csrf_token(&self) -> Result<String> {
+        let mut cached = self.csrf.lock().await;
+        if let Some(token) = cached.as_ref() {
+            return Ok(token.clone());
+        }
+        let (_, body) = self.fetch_page(self.root.clone()).await?;
+        let page = String::from_utf8_lossy(&body);
+        let token = crate::sites::extr(&page, "window.__CSRF_TOKEN__ = '", "'")
+            .unwrap_or_default()
+            .to_owned();
+        *cached = Some(token.clone());
+        Ok(token)
+    }
+
+    /// Upstream `DeviantartEclipseAPI._call`: a `/_puppy` request; replies
+    /// that are not JSON become `{"error": TEXT}`.
+    async fn eclipse_call(
+        &self,
+        endpoint: &str,
+        params: &BTreeMap<String, String>,
+    ) -> Result<Value> {
+        let token = self.csrf_token().await?;
+        let mut url = self
+            .root
+            .join(endpoint)
+            .map_err(|_| error("invalid DeviantArt endpoint"))?;
+        {
+            let mut query = url.query_pairs_mut();
+            for (key, value) in params {
+                query.append_pair(key, value);
+            }
+            query.append_pair("csrf_token", &token);
+        }
+        let (_, body) = self.fetch_page(url).await?;
+        Ok(serde_json::from_slice(&body)
+            .unwrap_or_else(|_| serde_json::json!({"error": String::from_utf8_lossy(&body)})))
+    }
+
+    /// One page of an Eclipse listing (upstream `_pagination`) or of the
+    /// search result HTML (upstream `_search_html`).
+    async fn eclipse_page(&self, source: Source) -> Result<(Vec<Value>, Option<Source>)> {
+        match source {
+            Source::Api(mut eclipse) => {
+                let mut data = self.eclipse_call(eclipse.endpoint, &eclipse.params).await?;
+                let results = match data.get_mut(eclipse.key).map(Value::take) {
+                    Some(Value::Array(results)) => results,
+                    _ => return Ok((Vec::new(), None)),
+                };
+                let more = crate::sites::gdl::truthy(data.get("hasMore"));
+                if !more {
+                    return Ok((results, None));
+                }
+                let scalar = |v: &Value| match v {
+                    Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                if let Some(cursor) = data.get("nextCursor") {
+                    eclipse.params.remove("offset");
+                    eclipse.params.insert("cursor".into(), scalar(cursor));
+                } else if let Some(offset) = data.get("nextOffset") {
+                    eclipse.params.insert("offset".into(), scalar(offset));
+                    eclipse.params.remove("cursor");
+                } else if let Some(offset) = eclipse.params.get("offset") {
+                    let next = offset.parse::<usize>().unwrap_or(0) + results.len();
+                    eclipse.params.insert("offset".into(), next.to_string());
+                } else {
+                    return Ok((results, None));
+                }
+                Ok((results, Some(Source::Api(eclipse))))
+            }
+            Source::Html(mut params) => {
+                let mut url = self
+                    .root
+                    .join("search")
+                    .map_err(|_| error("invalid DeviantArt search"))?;
+                url.query_pairs_mut().extend_pairs(params.iter());
+                let (final_url, body) = self.fetch_page(url).await?;
+                if final_url.path().contains("/users/login") {
+                    return Err(error("HTTP redirect to login page"));
+                }
+                let page = String::from_utf8_lossy(&body);
+                let found: Vec<_> = crate::sites::gdl::re!(
+                    r#"href="https://www.deviantart.com/([^/?#]+)/(art|journal)/(?:[^"]+-)?(\d+)"#
+                )
+                .captures_iter(&page)
+                .map(|c| (c[1].to_owned(), c[2].to_owned(), c[3].to_owned()))
+                .collect();
+                // Python `findall(page)[:-3:3]`.
+                let results = found[..found.len().saturating_sub(3)]
+                    .iter()
+                    .step_by(3)
+                    .map(|(user, kind, id)| {
+                        serde_json::json!({
+                            "deviationId": id,
+                            "author": {"username": user},
+                            "isJournal": kind == "journal",
+                        })
+                    })
+                    .collect();
+                let next = crate::sites::extr(&page, r#"\"cursor\":\""#, "\\")
+                    .filter(|cursor| !cursor.is_empty())
+                    .map(|cursor| {
+                        params.insert("cursor".into(), cursor.to_owned());
+                        Source::Html(params)
+                    });
+                Ok((results, next))
+            }
+        }
+    }
+
+    /// Upstream `_eclipse_to_oauth`: resolve an Eclipse deviation to its
+    /// UUID (`dadeviation/init`), then fetch it through the OAuth API.
+    async fn eclipse_media(&self, item: &Value) -> Result<Option<Media>> {
+        let deviation = item.get("deviation").unwrap_or(item);
+        let id = match deviation.get("deviationId") {
+            Some(Value::String(id)) => id.clone(),
+            Some(Value::Number(id)) => id.to_string(),
+            _ => return Ok(None),
+        };
+        let user = deviation
+            .get("author")
+            .and_then(|a| string(a, "username"))
+            .unwrap_or_default();
+        let journal = deviation.get("isJournal").and_then(Value::as_bool) == Some(true);
+        let params = BTreeMap::from_iter(
+            [
+                ("deviationid", id.as_str()),
+                ("username", user),
+                ("type", if journal { "journal" } else { "art" }),
+                ("include_session", "false"),
+                ("expand", "deviation.related"),
+                ("da_minor_version", "20230710"),
+            ]
+            .map(|(k, v)| (k.to_owned(), v.to_owned())),
+        );
+        let data = self
+            .eclipse_call("_puppy/dadeviation/init", &params)
+            .await?;
+        let uuid = data
+            .pointer("/deviation/extended/deviationUuid")
+            .and_then(Value::as_str)
+            .filter(|uuid| valid_uuid(uuid))
+            .ok_or_else(|| error("DeviantArt deviation data contains no deviation UUID"))?;
+        let deviation = self.get(&self.api(&format!("deviation/{uuid}"))).await?;
+        Ok(self.media(&deviation).await)
+    }
+
+    /// Eclipse-backed listings: scraps, gallery searches and site searches
+    /// (`search_tags` is set for the latter two).
+    fn eclipse_listing(
+        &self,
+        source: Source,
+        search_tags: Option<String>,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let tags: Option<std::sync::Arc<str>> = search_tags.map(Into::into);
+        stream::try_unfold((Some(source), 0usize), move |(source, pages)| {
+            let tags = tags.clone();
+            async move {
+                let Some(source) = source.filter(|_| pages < MAX_PAGES) else {
+                    return Ok(None);
+                };
+                let (items, next) = self.eclipse_page(source).await?;
+                let mut events = Vec::new();
+                for item in &items {
+                    if let Some(mut media) = self.eclipse_media(item).await? {
+                        if let Some(metadata) = media.metadata.as_mut() {
+                            metadata.search_tags = tags.clone();
+                        }
+                        events.extend(group(vec![media], "deviantart").into_iter().map(Ok));
+                    }
+                }
+                Ok::<_, crate::Error>(Some((stream::iter(events), (next, pages + 1))))
+            }
+        })
+        .map(|result| match result {
+            Ok(events) => events.boxed(),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
     /// Upstream `DeviantartFollowingExtractor`: queue every watched user.
     fn following(&self, user: String) -> BoxStream<'_, Result<ExtractionEvent>> {
         stream::try_unfold((Some(0u64), 0usize), move |(offset, pages)| {
@@ -1111,6 +1398,59 @@ impl DeviantArt {
             }
             Target::Following(user) => return self.following(user),
             Target::Stash(id, legacy) => return self.stash(id, legacy, 0),
+            Target::Scraps(user) => {
+                let params = [
+                    ("username", user.as_str()),
+                    ("type", "gallery"),
+                    ("offset", "0"),
+                    ("limit", "24"),
+                    ("scraps_folder", "true"),
+                ];
+                return self.eclipse_listing(
+                    Source::Api(Eclipse::new(
+                        "_puppy/dashared/gallection/contents",
+                        &params,
+                        "results",
+                    )),
+                    None,
+                );
+            }
+            Target::GallerySearch { user, query, order } => {
+                let params = [
+                    ("username", user.as_str()),
+                    ("type", "gallery"),
+                    ("order", order.as_str()),
+                    ("q", query.as_str()),
+                    ("offset", "0"),
+                    ("limit", "24"),
+                ];
+                return self.eclipse_listing(
+                    Source::Api(Eclipse::new(
+                        "_puppy/dashared/gallection/search",
+                        &params,
+                        "results",
+                    )),
+                    Some(query),
+                );
+            }
+            Target::Search(params) => {
+                let tags = params
+                    .iter()
+                    .find(|(k, _)| k == "q")
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or_default();
+                let params: BTreeMap<String, String> = params.into_iter().collect();
+                let source = if self.logged_in() {
+                    Source::Api(Eclipse {
+                        endpoint: "_puppy/dabrowse/search/deviations",
+                        params,
+                        key: "deviations",
+                    })
+                } else {
+                    Source::Html(params)
+                };
+                return self.eclipse_listing(source, Some(tags));
+            }
             Target::Journals(user) => ("user/profile/posts", user, None),
             Target::Statuses(user) => ("statuses", user, None),
             Target::Watch { posts: false } => ("browse/deviantsyouwatch", String::new(), None),
@@ -1618,6 +1958,120 @@ mod tests {
         );
         assert!(requests[2].starts_with(&format!("{folder}&offset=0&limit=24 ")));
         assert!(requests[3].starts_with(&format!("{folder}&offset=24&limit=24 ")));
+    }
+
+    #[test]
+    fn classifies_eclipse_listings() {
+        let t = |raw: &str| target(&Url::parse(raw).unwrap()).unwrap();
+        for raw in [
+            "https://www.deviantart.com/shimoda7/gallery/scraps",
+            "https://www.deviantart.com/shimoda7/gallery/?catpath=scraps",
+            "https://shimoda7.deviantart.com/gallery/?catpath=scraps",
+        ] {
+            assert_eq!(t(raw), Target::Scraps("shimoda7".into()), "{raw}");
+        }
+        assert_eq!(
+            t("https://www.deviantart.com/shimoda7/gallery?q=memory&sort=popular"),
+            Target::GallerySearch {
+                user: "shimoda7".into(),
+                query: "memory".into(),
+                order: "popular".into(),
+            }
+        );
+        assert_eq!(
+            t("https://www.deviantart.com/search?q=tree"),
+            Target::Search(vec![("q".into(), "tree".into())])
+        );
+        assert_eq!(
+            t("https://www.deviantart.com/search/deviations?order=popular-1-week"),
+            Target::Search(vec![("order".into(), "popular-1-week".into())])
+        );
+        assert!(target(&Url::parse("https://www.deviantart.com/search").unwrap()).is_err());
+    }
+
+    fn init(id: u8) -> Vec<u8> {
+        ok(json!({"deviation": {"extended": {"deviationUuid": uuid(id)}}}))
+    }
+
+    #[tokio::test]
+    async fn scraps_page_through_eclipse_and_resolve_uuids() {
+        let front = b"<script>window.__CSRF_TOKEN__ = 'csrf.123';</script>";
+        let mut front_reply = response("200 OK", front);
+        let at = front_reply
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .unwrap();
+        front_reply.splice(
+            at + 2..at + 2,
+            b"Set-Cookie: td=0:1; Path=/\r\n".iter().copied(),
+        );
+        let (root, server) = serve(vec![
+            front_reply,
+            ok(json!({"hasMore": true, "nextOffset": 1,
+                "results": [{"deviationId": 101, "author": {"username": "alice"}, "isJournal": false}]})),
+            init(1),
+            token("t"),
+            ok(deviation(&uuid(1), false)),
+            ok(json!({"hasMore": false, "results": [{"deviation":
+                {"deviationId": 102, "author": {"username": "alice"}, "isJournal": true}}]})),
+            init(2),
+            ok(deviation(&uuid(2), false)),
+        ]);
+        let media: Vec<_> = client(root)
+            .stream(&Url::parse("https://www.deviantart.com/alice/gallery/scraps").unwrap())
+            .collect()
+            .await;
+        assert_eq!(media.len(), 2, "{media:?}");
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET / "));
+        assert!(requests[1].starts_with(
+            "GET /_puppy/dashared/gallection/contents?limit=24&offset=0&scraps_folder=true&type=gallery&username=alice&csrf_token=csrf.123 "
+        ));
+        assert!(requests[1].to_ascii_lowercase().contains("cookie: td=0:1"));
+        assert!(requests[2].starts_with(
+            "GET /_puppy/dadeviation/init?da_minor_version=20230710&deviationid=101&expand=deviation.related&include_session=false&type=art&username=alice&csrf_token=csrf.123 "
+        ));
+        assert!(requests[4].starts_with(&format!(
+            "GET /api/v1/oauth2/deviation/{}?mature_content=true ",
+            uuid(1)
+        )));
+        assert!(requests[5].contains("offset=1&"));
+        assert!(requests[6].contains("&type=journal&"));
+    }
+
+    #[tokio::test]
+    async fn logged_out_search_scrapes_result_pages() {
+        let link = |user: &str, id: u32| {
+            format!(r#"<a href="https://www.deviantart.com/{user}/art/Tree-{id}">"#)
+        };
+        let page: String = (1..=7).map(|n| link("bob", 200 + n)).collect();
+        let (root, server) = serve(vec![
+            response("200 OK", page.as_bytes()),
+            response("200 OK", b"window.__CSRF_TOKEN__ = 'c';"),
+            init(1),
+            token("t"),
+            ok(deviation(&uuid(1), false)),
+            init(2),
+            ok(deviation(&uuid(2), false)),
+        ]);
+        let events: Vec<_> = client(root)
+            .events(&Url::parse("https://www.deviantart.com/search?q=tree").unwrap())
+            .collect()
+            .await;
+        let media: Vec<_> = events
+            .into_iter()
+            .filter_map(|event| match event.unwrap() {
+                ExtractionEvent::Media(media) => Some(media),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(media.len(), 2);
+        let meta = media[0].metadata.as_ref().unwrap();
+        assert_eq!(meta.search_tags.as_deref(), Some("tree"));
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET /search?q=tree "));
+        assert!(requests[2].contains("deviationid=201&"));
+        assert!(requests[5].contains("deviationid=204&"));
     }
 
     #[tokio::test]

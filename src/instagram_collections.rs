@@ -320,10 +320,7 @@ impl Instagram {
                 .and_then(Value::as_str)
                 .ok_or_else(|| error("Instagram collection post shortcode is missing"))?;
             media_id(code)?;
-            let mut media = parse_post(post, code)?;
-            for item in &mut media {
-                self.network.apply_media(item);
-            }
+            let media = self.post_files(post, code)?;
             pending.extend(event::group(media, "instagram"));
         }
         state.pending = pending;

@@ -603,9 +603,7 @@ fn routed_site(url: &url::Url, extractor: Extractor) -> Option<&'static str> {
 
 fn settings_category(url: &url::Url, extractor: Extractor) -> &'static str {
     match routed_site(url, extractor) {
-        Some("mastodon") => {
-            gallery_dl_rs::mastodon::instance_category(url.host_str().unwrap()).unwrap()
-        }
+        Some("mastodon") => gallery_dl_rs::mastodon::url_category(url).unwrap_or("mastodon"),
         Some(category) => category,
         None => "direct",
     }
@@ -1942,7 +1940,8 @@ struct Extractors {
     booru: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
     booru_artist: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
     booru_artist_search: [OnceCell<Result<gallery_dl_rs::booru::Booru>>; 4],
-    mastodon: [OnceCell<Result<gallery_dl_rs::mastodon::Mastodon>>; 3],
+    /// The built-in instances, then one shared client for `mastodon:` hosts.
+    mastodon: [OnceCell<Result<gallery_dl_rs::mastodon::Mastodon>>; 4],
     kemono: [OnceCell<Result<gallery_dl_rs::kemono::Kemono>>; 2],
     imagehosts: [OnceCell<Result<gallery_dl_rs::imagehosts::ImageHosts>>; 4],
     tumblr: OnceCell<Result<gallery_dl_rs::tumblr::Tumblr>>,
@@ -2089,6 +2088,7 @@ fn extract_input<'a>(
                             .and_then(|native| {
                                 native
                                     .with_include(options.include.clone())
+                                    .with_options(options.site_options.as_deref())
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -2274,11 +2274,22 @@ fn extract_input<'a>(
                     )
                 }
                 Extractor::Native if category == "mastodon" => {
-                    let host = url.host_str().expect("Mastodon input host");
-                    let slot = gallery_dl_rs::mastodon::INSTANCES
+                    let host = gallery_dl_rs::mastodon::target(&url)
+                        .map(|target| target.host().to_owned())
+                        .unwrap_or_default();
+                    let builtin = gallery_dl_rs::mastodon::INSTANCES
                         .iter()
-                        .position(|candidate| *candidate == host)
-                        .expect("supported instance");
+                        .position(|candidate| *candidate == host);
+                    let slot = builtin.unwrap_or(gallery_dl_rs::mastodon::INSTANCES.len());
+                    // Tokens are bound to built-in instances; `mastodon:`
+                    // hosts are read anonymously.
+                    let (host, token) = match builtin {
+                        Some(index) => (
+                            gallery_dl_rs::mastodon::INSTANCES[index],
+                            options.access_token.as_deref(),
+                        ),
+                        None => (gallery_dl_rs::mastodon::INSTANCES[0], None),
+                    };
                     let native = extractors.mastodon[slot]
                         .get_or_init(|| async {
                             gallery_dl_rs::mastodon::Mastodon::new(backend.timeout).and_then(
@@ -2297,10 +2308,7 @@ fn extract_input<'a>(
                                         ));
                                     }
                                     native
-                                        .with_access_token_for(
-                                            host,
-                                            options.access_token.as_deref(),
-                                        )?
+                                        .with_access_token_for(host, token)?
                                         .with_selection(gallery_dl_rs::mastodon::SelectionOptions {
                                             reblogs: options.reblogs.unwrap_or(false),
                                             replies: options.replies
@@ -2385,6 +2393,12 @@ fn extract_input<'a>(
                             gallery_dl_rs::flickr::Flickr::new(backend.timeout).and_then(|native| {
                                 native
                                     .with_api_key(options.api_key.as_deref())
+                                    .with_size_limit(gallery_dl_rs::flickr::SizeLimit::from_option(
+                                        options
+                                            .site_options
+                                            .as_deref()
+                                            .and_then(|o| o.get("size-max")),
+                                    ))
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -2402,6 +2416,12 @@ fn extract_input<'a>(
                             gallery_dl_rs::artstation::ArtStation::new(backend.timeout).and_then(
                                 |native| {
                                     native
+                                        .with_options(options.site_options.as_deref())
+                                        .with_max_posts(options.max_posts)
+                                        .with_videos(!matches!(
+                                            options.videos,
+                                            Some(gallery_dl_rs::twitter::VideoMode::Skip)
+                                        ))
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -2580,9 +2600,11 @@ fn extract_input<'a>(
                     let native = extractors
                         .deviantart
                         .get_or_init(|| async {
+                            let jar = extractors.cookie_jar(configured, "deviantart.com").await?;
                             gallery_dl_rs::deviantart::DeviantArt::new(backend.timeout).and_then(
                                 |native| {
                                     native
+                                        .with_cookies(jar)
                                         .with_credentials(
                                             options.client_id.as_deref(),
                                             options.client_secret.as_deref(),

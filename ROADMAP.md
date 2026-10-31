@@ -656,7 +656,12 @@ and empty post boundaries. Optional card images append outer-post previews with
 upstream thumbnail IDs, conservative archive eligibility and card-only traversal.
 Scoped config, compatibility forwarding, header
 privacy, split Link fields, date ordering and cancellation have local coverage.
-Remaining: OAuth/cache discovery, arbitrary/additional instances, followed views,
+Since 2026-10-31 `mastodon:https://HOST/...` reads any other instance
+anonymously (category `mastodon`, where upstream uses the host name; tokens
+stay bound to the built-in instances), including Pleroma/Akkoma `notice`
+links and alphanumeric flake IDs; followed accounts on such hosts are queued
+with the prefix. Pleroma `objects/UUID` redirects are not followed yet.
+Remaining: OAuth/cache discovery, configured additional instances, followed views,
 account-search fallback/moved handling, and fuller metadata/default
 naming. Authenticated live verification and real captures remain required.
 
@@ -1005,15 +1010,23 @@ characters, multi-file/non-visual submissions, and upstream's `metadata`
 option.
 
 **Implemented experimental native ArtStation:** projects and user portfolios
-via site JSON with browser-like headers. Remaining: Cloudflare challenges,
-video/embed assets (upstream ytdl), `4k` image upgrade with fallback, likes,
-albums by ID, collections, challenges, search/artwork listings, following.
+via site JSON with browser-like headers. Listings, challenges, following and
+search followed (2026-10-28/31). Since 2026-10-31 every asset with an image
+is downloaded like upstream (covers too), `/large/` images are upgraded to
+`8k` with `4k`/`large`/`medium`/`small` fallbacks, and embedded players are
+resolved: video clips (`videos`), Marmoset `.mview` files (`mviews`) and,
+with `external`, third-party players as yt-dlp pages; `previews` and
+`max-posts` are honored. Remaining: Cloudflare challenges, upstream's
+`userinfo`/listing metadata keywords.
 
 **Implemented experimental native Flickr:** photos, videos, albums, user
 photostreams and `flic.kr` short links via the REST API (overridable `api-key`).
-Remaining: OAuth/private content, favorites, galleries, groups, tags/search,
-album lists, `contexts`/`exif`/`metadata` options, upstream's `size-max`/
-`videos` options, and album metadata on listed items.
+Favorites, galleries, groups, search and album lists followed on
+2026-10-28; `size-max` (pixels or a format code/label; listings request
+upstream's eight `url_*` formats within the limit, `getSizes` drops larger
+sizes) on 2026-10-31. Remaining: OAuth/private content,
+`contexts`/`exif`/`info`/`metadata` options (no keyword dictionary for
+Flickr files yet), `videos: false`, and album metadata on listed items.
 
 **Implemented experimental native Reddit:** submissions, galleries, subreddit
 and user listings over public JSON; video-only v.redd.it MP4s. Since
@@ -1744,9 +1757,34 @@ check to this host). VSCO video (HLS via yt-dlp), avatar, collection and spaces
 views were ported the same way (VSCO returns HTTP 403 here).
 ArtStation albums, likes, collections, challenges, following, `artstn.co` links and the artwork page were ported too
 (Cloudflare blocks ArtStation here).
-**Remaining:** ArtStation search
-(CSRF-token POST API), DeviantArt scraps/search/
-(Eclipse API needing a CSRF session); DeviantArt `watch/deviations`,
+**Implemented 2026-10-31:** ArtStation search (`search?query=…`: the
+`public_csrf_token` POST API, `*_ids`/`tags` include filters, `pro-first`);
+DeviantArt scraps (`gallery/scraps`, `?catpath=scraps`), gallery searches
+(`gallery?q=`) and site searches (`search[/deviations]?…`) through the
+Eclipse `/_puppy` API with the front page's `__CSRF_TOKEN__` and a session
+cookie jar (configured `cookies` are now sent to DeviantArt pages); logged-out
+searches scrape result pages like upstream `_search_html`; Civitai reaction
+feeds (`user/USER/{images,videos}?section=reactions`, `api-key` or a
+`__Secure-civitai-token` cookie). A sweep of all 6064 upstream `#url`s now
+leaves only 500px liked and two live `ytdl:` URLs rejected. These were tested
+against local fixtures only (no live CSRF-token probes). Instagram now
+honors `order-files` (`desc`/`reverse`; `num` keeps the displayed order,
+story reels reverse their items) and `static-videos: false` (photo-generated
+story videos are saved as their photo). Upstream `BASECATEGORY:https://HOST/...`
+inputs now select custom instances for `philomena`, `moebooru`,
+`szurubooru`, `shimmie2`, `misskey`, `foolfuuka`, `vichan`, `lynxchan`,
+`hatenablog`, `bunkr` and `mastodon` (category is the base name, where
+upstream uses the host; listings queue prefixed children). Still without
+prefix support: danbooru, e621, jschan, wikimedia, xenforo, chevereto,
+reactor, manganelo, imhentai, nijie, urlshortener and `tumblr:` custom
+domains. A live comparison against upstream on 611 sample URLs (2026-10-31) left
+uninvestigated native-only failures: empty results without an error for
+bit.ly, e926 pools/posts, ibb.co albums, myhentaigallery, thehentaiworld and
+urlgalleries; Derpibooru HTTP 501; a Coomer network error; and login
+demands where upstream succeeds anonymously (nijie, horne, weibo user
+pages, vm.tiktok.com). Others were HTTP 403s that upstream passes, which
+may come from its browser-like default User-Agent.
+**Remaining:** DeviantArt `watch/deviations`,
 `notifications/watch` and `watch/posts` use the `refresh-token` from
 `oauth:deviantart` (unverified without an account); journals and literature are saved as `.htm`
 from `deviation/content` (simpler than upstream's journal template; not yet

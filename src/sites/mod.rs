@@ -663,6 +663,51 @@ pub(crate) fn plain(url: &Url) -> bool {
         && url.password().is_none()
 }
 
+/// The embedded URL of a gallery-dl `PREFIX:[https://]HOST/...` input,
+/// which selects an extractor for a custom domain (upstream patterns like
+/// `hatenablog:https?://([^/?#]+)`).
+pub(crate) fn custom_domain(url: &Url, prefix: &str) -> Option<Url> {
+    if url.scheme() != prefix {
+        return None;
+    }
+    let rest = url.as_str().get(prefix.len() + 1..)?;
+    let inner = if rest.starts_with("http://") || rest.starts_with("https://") {
+        Url::parse(rest).ok()?
+    } else {
+        Url::parse(&format!("https://{rest}")).ok()?
+    };
+    (plain(&inner) && inner.host_str().is_some()).then_some(inner)
+}
+
+/// The `scheme://host` root of a [`custom_domain`] input, interned so
+/// engines can use it where they otherwise dispatch on a static category.
+/// One entry is kept per distinct root (bounded by the inputs).
+pub(crate) fn custom_root(url: &Url, prefix: &str) -> Option<&'static str> {
+    let inner = custom_domain(url, prefix)?;
+    Some(intern(format!(
+        "{}://{}",
+        inner.scheme(),
+        inner.host_str()?
+    )))
+}
+
+/// Whether an engine dispatch key is a [`custom_root`] rather than a category.
+pub(crate) fn is_custom_root(key: &str) -> bool {
+    key.starts_with("https://") || key.starts_with("http://")
+}
+
+fn intern(value: String) -> &'static str {
+    static STRINGS: std::sync::Mutex<std::collections::BTreeSet<&'static str>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    let mut strings = STRINGS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(existing) = strings.get(value.as_str()) {
+        return existing;
+    }
+    let leaked: &'static str = Box::leak(value.into_boxed_str());
+    strings.insert(leaked);
+    leaked
+}
+
 /// Host equal to `domain` or one of `prefixes` followed by `.domain`.
 pub(crate) fn host_is(url: &Url, domains: &[&str]) -> bool {
     let Some(host) = url.host_str() else {
