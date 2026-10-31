@@ -23,7 +23,16 @@ macro_rules! instance {
             category: $category,
             name: $name,
             matches: |url| target($category, url).is_some(),
-            extract: |http, url| extract(&$ident, http, url),
+            extract: |http, url| {
+                extract(
+                    Inst {
+                        site: &$ident,
+                        root: concat!("https://", $category),
+                    },
+                    http,
+                    url,
+                )
+            },
             routes: &[
                 &NOTE,
                 &USER,
@@ -45,6 +54,53 @@ instance!(MISSKEY_ART, "misskey.art", "misskey.art");
 instance!(LESBIAN_ENERGY, "lesbian.energy", "lesbian.energy");
 instance!(SUSHI_SKI, "sushi.ski", "sushi.ski");
 
+/// `misskey:https://HOST/...`: any other Misskey instance.
+pub static MISSKEY: Site = Site {
+    category: "misskey",
+    name: "Misskey",
+    matches: |url| {
+        crate::sites::custom_root(url, "misskey").is_some_and(|root| target(root, url).is_some())
+    },
+    extract: |http, url| match crate::sites::custom_root(&url, "misskey") {
+        Some(root) => extract(
+            Inst {
+                site: &MISSKEY,
+                root,
+            },
+            http,
+            url,
+        ),
+        None => crate::sites::fail(error("unsupported Misskey URL")),
+    },
+    routes: MISSKEY_IO.routes,
+    api_key: false,
+    cookies: None,
+};
+
+/// A Misskey instance: its registry site and `https://HOST` root.
+#[derive(Clone, Copy)]
+struct Inst {
+    site: &'static Site,
+    root: &'static str,
+}
+
+impl Inst {
+    fn host(self) -> &'static str {
+        self.root
+            .split_once("://")
+            .map_or(self.root, |(_, host)| host)
+    }
+
+    /// A page URL on the instance, `misskey:`-prefixed for custom hosts.
+    fn page(self, path: &str) -> String {
+        if self.site.category == "misskey" {
+            format!("misskey:{}{path}", self.root)
+        } else {
+            format!("{}{path}", self.root)
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 enum Target {
     User(String),
@@ -58,8 +114,18 @@ enum Target {
 }
 
 /// The instance host itself; upstream patterns have no `www.` alternative.
+/// `category` is the instance host, or the root of a `misskey:` input.
 fn target(category: &str, url: &Url) -> Option<Target> {
-    if !crate::sites::plain(url) || url.host_str() != Some(category) {
+    let inner;
+    let url = if crate::sites::is_custom_root(category) {
+        inner = crate::sites::custom_domain(url, "misskey")?;
+        &inner
+    } else {
+        url
+    };
+    if !crate::sites::plain(url)
+        || !crate::sites::is_custom_root(category) && url.host_str() != Some(category)
+    {
         return None;
     }
     let parts = crate::sites::segments(url);
@@ -95,16 +161,16 @@ fn target(category: &str, url: &Url) -> Option<Target> {
     }
 }
 
-fn root(site: &Site) -> String {
-    format!("https://{}", site.category)
+fn root(site: Inst) -> String {
+    site.root.to_owned()
 }
 
-async fn call(http: &Http, site: &Site, endpoint: &str, data: &Value) -> Result<Value> {
+async fn call(http: &Http, site: Inst, endpoint: &str, data: &Value) -> Result<Value> {
     let url = http.api(&format!("{}/api{endpoint}", root(site)))?;
     http.post_json(&url, data, &[]).await
 }
 
-async fn users_show(http: &Http, site: &Site, username: &str) -> Result<Value> {
+async fn users_show(http: &Http, site: Inst, username: &str) -> Result<Value> {
     let (name, host) = username.split_once('@').unwrap_or((username, ""));
     let host = if host.is_empty() {
         Value::Null
@@ -123,8 +189,13 @@ async fn users_show(http: &Http, site: &Site, username: &str) -> Result<Value> {
         .ok_or_else(|| error("Misskey user response is not an object"))
 }
 
-fn extract<'a>(site: &'static Site, http: &'a Http, url: Url) -> Events<'a> {
-    let Some(target) = target(site.category, &url) else {
+fn extract<'a>(site: Inst, http: &'a Http, url: Url) -> Events<'a> {
+    let key = if site.site.category == "misskey" {
+        site.root
+    } else {
+        site.site.category
+    };
+    let Some(target) = target(key, &url) else {
         return crate::sites::fail(error("unsupported Misskey URL"));
     };
     match target {
@@ -184,8 +255,8 @@ fn user_id(user: &Value) -> Result<String> {
 }
 
 /// `Dispatch._dispatch_extractors` with the default `include` of `notes`.
-fn dispatch<'a>(site: &'static Site, http: &'a Http, user: &str) -> Events<'a> {
-    let base = format!("{}/@{user}/", root(site));
+fn dispatch<'a>(site: Inst, http: &'a Http, user: &str) -> Events<'a> {
+    let base = site.page(&format!("/@{user}/"));
     let all = ["info", "avatar", "background", "notes"];
     let include: Vec<String> = match http.option("include") {
         None => vec!["notes".into()],
@@ -211,7 +282,7 @@ fn dispatch<'a>(site: &'static Site, http: &'a Http, user: &str) -> Events<'a> {
             children.push(url);
         }
     }
-    let category = site.category;
+    let category = site.site.category;
     futures_util::StreamExt::boxed(futures_util::StreamExt::flatten(
         futures_util::stream::iter(
             children
@@ -222,7 +293,7 @@ fn dispatch<'a>(site: &'static Site, http: &'a Http, user: &str) -> Events<'a> {
 }
 
 fn profile_image<'a>(
-    site: &'static Site,
+    site: Inst,
     http: &'a Http,
     user: String,
     route: &'static Route,
@@ -267,7 +338,7 @@ fn make_note(kind: &str, user: &Value, url: &str) -> Value {
 
 /// `_pagination`: 100 notes per request, continued with `untilId`.
 fn paginate<'a>(
-    site: &'static Site,
+    site: Inst,
     http: &'a Http,
     route: &'static Route,
     endpoint: &'static str,
@@ -299,7 +370,7 @@ fn paginate<'a>(
     })
 }
 
-fn following_events<'a>(site: &'static Site, http: &'a Http, entries: Vec<Value>) -> Events<'a> {
+fn following_events<'a>(site: Inst, http: &'a Http, entries: Vec<Value>) -> Events<'a> {
     let mut children = Vec::new();
     for entry in entries {
         let Some(user) = entry.get("followee").and_then(Value::as_object) else {
@@ -309,7 +380,7 @@ fn following_events<'a>(site: &'static Site, http: &'a Http, entries: Vec<Value>
         if name.is_empty() || name.contains(['/', '?', '#', '@']) {
             continue;
         }
-        let mut url = format!("{}/@{name}", root(site));
+        let mut url = site.page(&format!("/@{name}"));
         if let Some(host) = user.get("host").and_then(Value::as_str) {
             if host.contains(['/', '?', '#', '@']) {
                 continue;
@@ -320,7 +391,7 @@ fn following_events<'a>(site: &'static Site, http: &'a Http, entries: Vec<Value>
             children.push((url, user.clone()));
         }
     }
-    let category = site.category;
+    let category = site.site.category;
     futures_util::StreamExt::boxed(futures_util::StreamExt::flatten(
         futures_util::stream::iter(
             children.into_iter().map(move |(url, data)| {
@@ -332,7 +403,7 @@ fn following_events<'a>(site: &'static Site, http: &'a Http, entries: Vec<Value>
 
 /// `items()`: one post per note with its own, renoted and replied files.
 fn notes_events(
-    site: &'static Site,
+    site: Inst,
     http: &Http,
     route: &'static Route,
     notes: Vec<Value>,
@@ -370,7 +441,7 @@ fn notes_events(
             .and_then(|u| u.get("host"))
             .cloned()
             .unwrap_or(Value::Null);
-        note.insert("instance".into(), site.category.into());
+        note.insert("instance".into(), site.host().into());
         note.insert("instance_remote".into(), host);
         note.insert("count".into(), files.len().into());
         let created = crate::sites::media::iso_ts(crate::sites::media::str_of(
@@ -414,7 +485,7 @@ fn notes_events(
                     .timestamp(created.or(file_ts)),
             );
         }
-        events.extend(crate::sites::post(site, http, route, items));
+        events.extend(crate::sites::post(site.site, http, route, items));
     }
     events
 }
@@ -428,6 +499,10 @@ fn attached(note: &Value) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
+    const IO: Inst = Inst {
+        site: &MISSKEY_IO,
+        root: "https://misskey.io",
+    };
     use super::*;
     use crate::sites::testing::{http, json as reply, keywords, media, serve};
 
@@ -487,7 +562,7 @@ mod tests {
         ]);
         let http = http("misskey.io", root);
         let files = media(extract(
-            &MISSKEY_IO,
+            IO,
             &http,
             Url::parse("https://misskey.io/@alice/notes").unwrap(),
         ))
@@ -525,7 +600,7 @@ mod tests {
             "avatarUrl": "https://misskey.io/proxy/avatar.webp?url=https%3A%2F%2Fmedia.misskeyusercontent.jp%2Fio%2Fabc.png&avatar=1"}))]);
         let http = http("misskey.io", root);
         let files = media(extract(
-            &MISSKEY_IO,
+            IO,
             &http,
             Url::parse("https://misskey.io/@alice/avatar").unwrap(),
         ))
@@ -549,7 +624,7 @@ mod tests {
         ]);
         let http = http("misskey.io", root);
         let files = media(extract(
-            &MISSKEY_IO,
+            IO,
             &http,
             Url::parse("https://misskey.io/@alice").unwrap(),
         ))
