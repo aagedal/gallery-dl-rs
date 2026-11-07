@@ -530,6 +530,12 @@ fn parse_reel_with(data: &Value, expected: &Reel, static_videos: bool) -> Result
         {
             post["taken_at"] = created;
         }
+        // Upstream reads a story's track from its first music sticker.
+        if post.get("music_metadata").is_none()
+            && let Some(sticker) = post.pointer("/story_music_stickers/0").cloned()
+        {
+            post["music_metadata"] = serde_json::json!({ "music_info": sticker });
+        }
         let mut parsed = parse_post_with(&post, &code, static_videos)?;
         for item in &mut parsed {
             if let Some(meta) = &mut item.metadata {
@@ -657,6 +663,24 @@ mod tests {
             let message = parse_reel(&data, &expected()).unwrap_err().to_string();
             assert!(!message.contains("private-value"), "{message}");
         }
+    }
+
+    #[test]
+    fn story_music_stickers_add_audio_keywords() {
+        let mut item = image("101");
+        item["story_music_stickers"] = json!([{"music_asset_info": {"id": "5",
+            "title": "Track", "progressive_download_url": "https://cdn.example/t.m4a"}}]);
+        let media = parse_reel(&reel(json!([item])), &expected()).unwrap();
+        assert_eq!(media.len(), 1);
+        let fields = &media[0]
+            .metadata
+            .as_ref()
+            .unwrap()
+            .site_keywords
+            .as_ref()
+            .unwrap()
+            .fields;
+        assert_eq!(fields["audio_title"], "Track");
     }
 
     #[test]
