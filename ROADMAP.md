@@ -1843,7 +1843,8 @@ A 2026-11-07 re-run of the URL sweep routed Pixiv image URLs
 folder extractor, and fixed host-less `tumblr:DOMAIN` inputs. Reddit
 (`i.redd.it`, `preview.redd.it` rewritten to the original) and Catbox file
 links keep downloading directly but carry upstream's `reddit:image` and
-`catbox:file` classes and paths.
+`catbox:file` classes and paths; Flickr static file URLs resolve their photo
+like upstream's `FlickrImageExtractor`.
 
 **Implemented upstream URL coverage for dedicated extractors, 2026-10-28:**
 a sweep of every `#url` in upstream's `test/results` (excluding `#fail` and

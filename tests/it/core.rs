@@ -482,7 +482,10 @@ fn routes_social_hosts_without_lookalike_domains() {
         ("https://www.flickr.com/photos/alice", Some("flickr")),
         ("https://flic.kr/p/FPVo9U", Some("flickr")),
         ("https://www.flickr.com/", None),
-        ("https://live.staticflickr.com/65535/1_a_o.jpg", None),
+        (
+            "https://live.staticflickr.com/65535/1_a_o.jpg",
+            Some("flickr"),
+        ),
         ("https://www.flickr.com.evil.example/photos/alice", None),
         ("https://www.pixiv.net/artworks/1", Some("pixiv")),
         ("https://www.pixiv.net/en/artworks/1", Some("pixiv")),
