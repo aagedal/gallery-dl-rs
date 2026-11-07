@@ -1548,7 +1548,11 @@ async fn run(args: Args) -> Result<()> {
         let skip_filter = &skip_filter;
         let results = media
             .map(|(index, job)| {
-                let gallery_dl_rs::postprocess::jobs::JobMedia { media: item, scope } = job;
+                let gallery_dl_rs::postprocess::jobs::JobMedia {
+                    media: item,
+                    scope,
+                    child,
+                } = job;
                 let settings = settings_for(index);
                 let settings = &settings[media_settings_key(&item, args.extractor, settings)];
                 let client = client
@@ -1576,6 +1580,15 @@ async fn run(args: Args) -> Result<()> {
                     write_metadata: args.write_metadata,
                     directory: settings.directory.as_ref(),
                 };
+                // Upstream `parent-skip`: a child job's skips count toward
+                // its parent's limit instead of its own.
+                let parent_skip = settings
+                    .options
+                    .site_options
+                    .as_deref()
+                    .and_then(|options| options.get("parent-skip"))
+                    .is_some_and(gallery_dl_rs::postprocess::truthy);
+                let child = child.filter(|_| !parent_skip);
                 async move {
                     // Downloads queued before an abort are dropped unstarted.
                     if terminated.load(std::sync::atomic::Ordering::Acquire)
@@ -1583,6 +1596,7 @@ async fn run(args: Args) -> Result<()> {
                             .lock()
                             .expect("abort state lock poisoned")
                             .contains(&index)
+                        || child.as_ref().is_some_and(|child| child.is_cancelled())
                     {
                         return (index, None);
                     }
@@ -1649,17 +1663,44 @@ async fn run(args: Args) -> Result<()> {
                     let counted = skip_filter
                         .as_ref()
                         .is_none_or(|filter| filter.matches(&item).unwrap_or(false));
-                    (index, Some((result, counted)))
+                    (index, Some((result, counted, child)))
                 }
             })
             .buffer_unordered(args.jobs as usize);
         tokio::pin!(results);
         let mut skipped = 0u64;
         let mut input_skipped = BTreeMap::<usize, u64>::new();
+        let mut child_skipped = std::collections::HashMap::<usize, u64>::new();
         while let Some((index, result)) = results.next().await {
-            let Some((result, counted)) = result else {
+            let Some((result, counted, child)) = result else {
                 continue;
             };
+            // Like upstream's per-job counters, `-A`/`abort:N` inside a child
+            // job stops only that child; the parent continues.
+            if let Some(child) = &child {
+                let count = child_skipped.entry(child.key()).or_default();
+                if counted
+                    && matches!(
+                        result,
+                        Ok(ArchiveOutcome::Completed(Outcome::Skipped(_))
+                            | ArchiveOutcome::AlreadyArchived)
+                    )
+                {
+                    *count += 1;
+                    if args.abort.is_some_and(|limit| *count == limit) {
+                        child.cancel();
+                        eprintln!(
+                            "stopping a child job of input {} after {count} consecutive skipped files",
+                            index + 1
+                        );
+                    }
+                } else if matches!(
+                    result,
+                    Ok(ArchiveOutcome::Completed(Outcome::Downloaded(_)))
+                ) {
+                    *count = 0;
+                }
+            }
             let input = input_skipped.entry(index).or_default();
             if counted
                 && matches!(
@@ -1669,15 +1710,21 @@ async fn run(args: Args) -> Result<()> {
                 )
             {
                 skipped += 1;
-                *input += 1;
+                // Child jobs keep their own counters.
+                if child.is_none() {
+                    *input += 1;
+                }
             } else if matches!(
                 result,
                 Ok(ArchiveOutcome::Completed(Outcome::Downloaded(_)))
             ) {
                 skipped = 0;
-                *input = 0;
+                if child.is_none() {
+                    *input = 0;
+                }
             }
-            if args.abort.is_some_and(|limit| *input >= limit)
+            if child.is_none()
+                && args.abort.is_some_and(|limit| *input >= limit)
                 && aborted
                     .lock()
                     .expect("abort state lock poisoned")

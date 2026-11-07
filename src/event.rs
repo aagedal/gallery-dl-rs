@@ -29,6 +29,11 @@ impl ChildControl {
     pub fn same_scope(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
+
+    /// A key identifying this scope while it is alive.
+    pub fn key(&self) -> usize {
+        Arc::as_ptr(&self.0) as usize
+    }
 }
 
 impl std::fmt::Debug for ChildControl {

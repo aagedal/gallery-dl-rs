@@ -1614,8 +1614,9 @@ without effect: `metadata-extractor` (inserts the Python extractor object),
 `extractor.module-sources` (Python extractor modules), `path-extended` and
 `output.ansi` (Windows console/path workarounds handled by Rust's standard
 library), and `downloader.http.consume-content` (connection reuse).
-Remaining: `parent-session` and `parent-skip` (per-child-job skip counters;
-`-A`/`abort:N` currently stop the whole input rather than one child job).
+`-A`/`abort:N` counts consecutive skips per child job like upstream, stopping
+only that child (`parent-skip` makes children count toward their input).
+Remaining: `parent-session` (native extractors keep per-site sessions).
 
 **Implemented input, auth and pacing options, 2026-10-28:** input files accept
 upstream's `-KEY=VALUE` (next URL) and `-G KEY=VALUE` (all following URLs)
