@@ -906,7 +906,13 @@ pub fn parse_postimg_image(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
     let url = download
         .or_else(|| meta_property(page, "og:image").and_then(|src| media_url(Site::Postimg, src)))
         .ok_or_else(|| error("Postimg page has no image"))?;
-    let name = between(page, " class=\"imagename\">", "<").and_then(clean_text);
+    // Upstream: the `alt` text after the download link (the uploaded name).
+    let name = page
+        .find(" id=\"download\"")
+        .and_then(|at| between(&page[at..], " alt=\"", "\""))
+        .map(unescape)
+        .filter(|name| !name.is_empty())
+        .or_else(|| between(page, " class=\"imagename\">", "<").and_then(clean_text));
     let ext = url_extension(&url)
         .or_else(|| name.as_deref().and_then(extension_of))
         .unwrap_or_else(|| "jpg".into());
@@ -1131,7 +1137,12 @@ impl ImageHosts {
                     let title = html(Site::Postimg, &page)
                         .ok()
                         .and_then(|page| meta_property(page, "og:title"))
-                        .and_then(clean_text);
+                        .and_then(clean_text)
+                        .map(|title| {
+                            title
+                                .strip_suffix(" — Postimages")
+                                .map_or(title.clone(), str::to_owned)
+                        });
                     (title, images)
                 };
                 let mut items = Vec::new();
