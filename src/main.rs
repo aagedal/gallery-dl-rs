@@ -1521,6 +1521,14 @@ async fn run(args: Args) -> Result<()> {
                     .filter_map(|code| code.as_u64()?.try_into().ok())
                     .collect(),
             )
+            .with_headers(
+                downloader_option("headers")
+                    .and_then(|v| v.as_object().cloned())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|(name, value)| Some((name, value.as_str()?.to_owned())))
+                    .collect(),
+            )
             .with_part_directory(
                 downloader_option("part-directory")
                     .as_ref()

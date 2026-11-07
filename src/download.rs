@@ -58,6 +58,9 @@ pub struct DownloadClient {
     pub(crate) validate_html: bool,
     /// Upstream `retry-codes`: further HTTP status codes to retry.
     pub(crate) retry_codes: std::sync::Arc<[u16]>,
+    /// Upstream `downloader.http.headers`: sent with every file request,
+    /// overriding file-specific headers.
+    headers: std::sync::Arc<[(String, String)]>,
     /// Upstream `downloader.progress`: show progress on standard error for
     /// downloads that take longer than this.
     pub(crate) progress: Option<Duration>,
@@ -340,6 +343,12 @@ impl DownloadClient {
         self
     }
 
+    /// Upstream `downloader.http.headers`.
+    pub fn with_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.headers = headers.into();
+        self
+    }
+
     /// Show download progress after this delay (`downloader.progress`).
     pub fn with_progress(mut self, delay: Option<Duration>) -> Self {
         self.progress = delay;
@@ -421,6 +430,7 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         adjust_extensions: true,
         validate_html: true,
         retry_codes: std::sync::Arc::new([]),
+        headers: std::sync::Arc::new([]),
         part_directory: None,
         progress: None,
         enumerate: false,
@@ -1189,7 +1199,9 @@ async fn download_media(
             Ok(()) => {
                 tokio::fs::create_dir_all(parent).await?;
                 let mut headers = HeaderMap::new();
-                for (name, value) in &candidate.headers {
+                // General headers follow and override file-specific ones.
+                let general = client.headers.iter().map(|(n, v)| (n, v));
+                for (name, value) in candidate.headers.iter().chain(general) {
                     let name = HeaderName::from_bytes(name.as_bytes())?;
                     if matches!(
                         name.as_str(),
