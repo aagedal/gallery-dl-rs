@@ -1713,7 +1713,8 @@ configuration files now load typical upstream `config.json` files. Unknown
 keys are ignored by dedicated extractors and passed to registry sites with
 upstream's root → `extractor` → category inheritance; the `downloader`
 section's `rate`, `retries`, `timeout`, `verify`, `mtime` and (since
-2026-11-07) `http.headers` apply; `output`
+2026-11-07) `http.headers` apply, and registry sites send an object-valued
+`extractor.*.headers` (not credential headers, nor the browser presets); `output`
 and `cache` are ignored. Credentials stay confined to supporting categories,
 and `base-directory`, `archive` and cookie-file paths expand `~` and
 environment variables. The `output` section's `logfile`, `unsupportedfile`, `errorfile` (paths or
