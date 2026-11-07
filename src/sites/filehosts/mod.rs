@@ -32,6 +32,7 @@ mod koofr;
 mod lensdump;
 mod lolisafe;
 mod mixdrop;
+mod noop;
 mod recursive;
 mod telegraph;
 mod tenor;
@@ -100,6 +101,7 @@ pub(super) static SITES: &[&Site] = &[
     &itchio::SITE,
     &uploadir::SITE,
     &generic::SITE,
+    &noop::SITE,
     &recursive::SITE,
 ];
 

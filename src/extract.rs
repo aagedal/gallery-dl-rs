@@ -778,6 +778,10 @@ pub struct Backend {
 }
 
 pub fn http_url(value: &str) -> Result<Url> {
+    // Upstream `noop` (pattern `(?i)noo?p$`).
+    if value.eq_ignore_ascii_case("noop") || value.eq_ignore_ascii_case("nop") {
+        return Ok(Url::parse("noop:").expect("static URL"));
+    }
     let url = Url::parse(value)?;
     // gallery-dl `basecategory:https://host/...` inputs address readers of
     // a shared engine that has no built-in instance for the host.
