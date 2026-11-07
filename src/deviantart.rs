@@ -586,6 +586,8 @@ pub struct ContentOptions {
     pub flat: bool,
     /// `subfolders`: queue a folder's subfolders.
     pub subfolders: bool,
+    /// `comments` (or `comments-avatars`): add each deviation's comments.
+    pub comments: bool,
 }
 
 impl Default for ContentOptions {
@@ -598,12 +600,18 @@ impl Default for ContentOptions {
             wait_min: 0,
             flat: true,
             subfolders: true,
+            comments: false,
         }
     }
 }
 
 impl ContentOptions {
     pub fn from_options(options: Option<&Map<String, Value>>) -> Self {
+        Self::from_options_with(options, None)
+    }
+
+    /// Like [`Self::from_options`], with the typed `comments` setting.
+    pub fn from_options_with(options: Option<&Map<String, Value>>, comments: Option<bool>) -> Self {
         let get = |key: &str| options.and_then(|o| o.get(key));
         let flag = |key: &str, default: bool| get(key).map_or(default, crate::postprocess::truthy);
         let defaults = Self::default();
@@ -629,6 +637,9 @@ impl ContentOptions {
             wait_min: get("wait-min").and_then(Value::as_u64).unwrap_or(0),
             flat: flag("flat", true),
             subfolders: flag("subfolders", true),
+            comments: comments.unwrap_or(false)
+                || flag("comments", false)
+                || flag("comments-avatars", false),
         }
     }
 
@@ -1043,8 +1054,84 @@ impl DeviantArt {
             Some(media) => media,
             None => self.journal(deviation).await?,
         };
+        if self.content.comments
+            && let Some(keywords) = media
+                .metadata
+                .as_mut()
+                .and_then(|m| m.site_keywords.as_mut())
+        {
+            let any = deviation
+                .pointer("/stats/comments")
+                .and_then(Value::as_u64)
+                .is_some_and(|count| count > 0);
+            let comments = match string(deviation, "deviationid") {
+                Some(id) if any => self.comments(id).await.unwrap_or_default(),
+                _ => Vec::new(),
+            };
+            Arc::make_mut(keywords)
+                .fields
+                .insert("comments".into(), comments.into());
+        }
         self.network.apply_media(&mut media);
         Some(media)
+    }
+
+    /// Upstream `_extract_comments`: every thread, following replies that
+    /// were not expanded on their page.
+    async fn comments(&self, id: &str) -> Result<Vec<Value>> {
+        let mut results: Vec<Value> = Vec::new();
+        let mut pending = vec![None::<String>];
+        let mut requests = 0;
+        while let Some(comment) = pending.pop() {
+            let mut offset = 0;
+            let mut page_comments = Vec::new();
+            loop {
+                requests += 1;
+                if requests > MAX_PAGES {
+                    return Ok(results);
+                }
+                let mut endpoint = self.api(&format!("comments/deviation/{id}"));
+                {
+                    let mut query = endpoint.query_pairs_mut();
+                    if let Some(comment) = &comment {
+                        query.append_pair("commentid", comment);
+                    }
+                    query
+                        .append_pair("maxdepth", "5")
+                        .append_pair("offset", &offset.to_string())
+                        .append_pair("limit", "50");
+                }
+                let body = self.get(&endpoint).await?;
+                page_comments.extend(
+                    body.get("thread")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default(),
+                );
+                match (
+                    body.get("has_more").and_then(Value::as_bool),
+                    body.get("next_offset").and_then(Value::as_u64),
+                ) {
+                    (Some(true), Some(next)) if next > offset => offset = next,
+                    _ => break,
+                }
+            }
+            let parents: std::collections::HashSet<&str> = page_comments
+                .iter()
+                .filter_map(|c| string(c, "parentid"))
+                .collect();
+            for comment in &page_comments {
+                let replies = comment.get("replies").and_then(Value::as_u64).unwrap_or(0);
+                if let Some(cid) = string(comment, "commentid")
+                    && replies > 0
+                    && !parents.contains(cid)
+                {
+                    pending.push(Some(cid.to_owned()));
+                }
+            }
+            results.extend(page_comments);
+        }
+        Ok(results)
     }
 
     /// Literature and journals (upstream `journals: "html"`): the
@@ -2664,5 +2751,45 @@ mod tests {
             )]
         );
         server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn comments_follow_unexpanded_replies() {
+        let page =
+            format!(r#"<meta property="da:appurl" content="DeviantArt://deviation/{UUID}">"#);
+        let mut item = deviation(UUID, false);
+        item["stats"] = json!({"comments": 3});
+        let (root, server) = serve(vec![
+            response("200 OK", page.as_bytes()),
+            token("t"),
+            ok(item),
+            ok(json!({"thread": [
+                {"commentid": "c1", "parentid": null, "replies": 1, "body": "top"},
+                {"commentid": "c2", "parentid": null, "replies": 0, "body": "other"}],
+                "has_more": false})),
+            ok(
+                json!({"thread": [{"commentid": "c3", "parentid": "c1", "replies": 0, "body": "reply"}],
+                "has_more": false}),
+            ),
+        ]);
+        let media: Vec<_> = client(root)
+            .with_content_options(ContentOptions::from_options_with(None, Some(true)))
+            .stream(&Url::parse("https://alice.deviantart.com/art/My-Art-123").unwrap())
+            .collect()
+            .await;
+        let media = media.into_iter().next().unwrap().unwrap();
+        let fields = &media.metadata.unwrap().site_keywords.unwrap().fields;
+        let bodies: Vec<_> = fields["comments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["body"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(bodies, ["top", "other", "reply"]);
+        let requests = server.join().unwrap();
+        assert!(requests[3].contains(&format!(
+            "/comments/deviation/{UUID}?mature_content=true&maxdepth=5"
+        )));
+        assert!(requests[4].contains("commentid=c1"));
     }
 }

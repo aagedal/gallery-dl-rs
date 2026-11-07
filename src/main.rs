@@ -2683,8 +2683,9 @@ fn extract_input<'a>(
                                         )
                                         .with_refresh_token(options.refresh_token.as_deref())
                                         .with_content_options(
-                                            gallery_dl_rs::deviantart::ContentOptions::from_options(
+                                            gallery_dl_rs::deviantart::ContentOptions::from_options_with(
                                                 options.site_options.as_deref(),
+                                                options.comments,
                                             ),
                                         )
                                         .with_retries(options.retries.unwrap())
