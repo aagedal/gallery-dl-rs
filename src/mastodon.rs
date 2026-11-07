@@ -6,6 +6,7 @@
 //! in the `instance` metadata field and the archive key. Media attachments are
 //! served from instance-chosen CDNs, so any HTTPS host is accepted for files;
 //! no API headers or cookies are attached to media requests.
+use crate::sites::{Route, SiteKeywords};
 use crate::{
     Result, error,
     event::{ExtractionEvent, KeywordPolicy, Post, group_with_keywords},
@@ -381,6 +382,61 @@ fn post_metadata(status: &Value, instance: &str) -> PostMetadata {
 }
 
 /// Parse one status using the default media-only selection.
+static STATUS: Route = Route::new(
+    "status",
+    "{category}_{id}_{media[id]}.{extension}",
+    &["mastodon", "{instance}", "{account[username]}"],
+    "{media[id]}",
+);
+
+/// Upstream `items` keywords: the status without its attachments, plus
+/// `instance`, `instance_remote`, `count`, tag names, `date`, `num`,
+/// `media` and URL name parts.
+fn attach_keywords(media: &mut [Media], status: &Value, instance: &str, objects: Vec<Value>) {
+    let mut data = status.as_object().cloned().unwrap_or_default();
+    data.remove("media_attachments");
+    data.insert("instance".into(), instance.into());
+    let acct = status
+        .pointer("/account/acct")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let remote = acct
+        .rsplit_once('@')
+        .map_or(Value::Null, |(_, host)| host.into());
+    data.insert("instance_remote".into(), remote);
+    data.insert("count".into(), media.len().into());
+    let tags: Vec<Value> = status
+        .get("tags")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|tag| tag.get("name").cloned())
+        .collect();
+    data.insert("tags".into(), tags.into());
+    let created = string(status, "created_at").unwrap_or("");
+    let created = created.get(..19).unwrap_or(created);
+    let timestamp = crate::date::parse_date(created).ok();
+    data.insert(
+        "date".into(),
+        crate::filter::source_date_text(timestamp).into(),
+    );
+    for (num, (item, object)) in media.iter_mut().zip(objects).enumerate() {
+        let mut fields = data.clone();
+        fields.insert("num".into(), (num + 1).into());
+        fields.insert("media".into(), object);
+        let (filename, extension) = crate::sites::nameext(&item.url);
+        let extension = crate::path_options::map_extension(&extension).unwrap_or(extension);
+        fields.insert("filename".into(), filename.into());
+        fields.insert("extension".into(), extension.into());
+        if let Some(metadata) = item.metadata.as_mut() {
+            metadata.site_keywords = Some(Arc::new(SiteKeywords {
+                route: &STATUS,
+                fields,
+            }));
+        }
+    }
+}
+
 pub fn parse_status(status: &Value, instance: &str) -> Vec<Media> {
     parse_status_with_options(status, instance, SelectionOptions::default())
 }
@@ -410,6 +466,7 @@ pub fn parse_status_with_options(
         );
     let mut seen = HashSet::new();
     let mut media = Vec::new();
+    let mut objects = Vec::new();
     for attachment in attachments {
         let Some(kind) = string(attachment, "type")
             .filter(|kind| matches!(*kind, "image" | "gifv" | "video" | "audio"))
@@ -432,6 +489,7 @@ pub fn parse_status_with_options(
         let positive = |key: &str| original.get(key).and_then(Value::as_u64).filter(|v| *v > 0);
         let index = media.len() + 1;
         let ext = extension(&url, kind);
+        objects.push(attachment.clone());
         media.push(Media {
             url,
             job: MediaJob::DirectHttp,
@@ -464,6 +522,14 @@ pub fn parse_status_with_options(
     {
         let media_id = card_id(&url);
         let ext = extension(&url, "image");
+        let mut object = card.clone();
+        if let Value::Object(card) = &mut object {
+            let weburl = card.get("url").cloned().unwrap_or(Value::Null);
+            card.insert("weburl".into(), weburl);
+            card.insert("url".into(), url.as_str().into());
+            card.insert("id".into(), media_id.clone().into());
+        }
+        objects.push(object);
         let positive = |key| card.get(key).and_then(Value::as_u64).filter(|n| *n > 0);
         media.push(Media {
             filename: format!("{id}_{media_id}.{ext}"),
@@ -488,6 +554,7 @@ pub fn parse_status_with_options(
             handoff: BTreeMap::new(),
         });
     }
+    attach_keywords(&mut media, status, instance, objects);
     media
 }
 
@@ -1704,11 +1771,27 @@ mod tests {
         assert_eq!(file.width, Some(400));
         assert_eq!(file.height, Some(300));
         assert_eq!(file.description.as_deref(), Some("Preview"));
+        // Only upstream's keywords (`card`, `media[weburl]`) carry the link.
+        let mut typed = card.clone();
+        let keywords = typed
+            .metadata
+            .as_mut()
+            .unwrap()
+            .site_keywords
+            .take()
+            .unwrap();
         assert!(
-            !serde_json::to_string(card)
+            !serde_json::to_string(&typed)
                 .unwrap()
                 .contains("private=ignored")
         );
+        assert_eq!(keywords.fields["media"]["id"], "card123456");
+        assert_eq!(
+            keywords.fields["media"]["weburl"],
+            "https://article.example/page?private=ignored"
+        );
+        assert_eq!(keywords.fields["num"], 3);
+        assert_eq!(keywords.fields["instance"], "mastodon.social");
         let mut other = post.clone();
         other["id"] = serde_json::json!("200");
         assert_eq!(

@@ -718,6 +718,8 @@ mod tests {
         let mut context = crate::postprocess::context(&media);
         project_keywords(&media, &mut context);
         assert_eq!(context["media"]["id"], "77");
+        // Without upstream keywords, synthetic IDs are not projected.
+        media.metadata.as_mut().unwrap().site_keywords = None;
         media.metadata.as_mut().unwrap().media_id = "card77".into();
         let mut context = crate::postprocess::context(&media);
         project_keywords(&media, &mut context);
