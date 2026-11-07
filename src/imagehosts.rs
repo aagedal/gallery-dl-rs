@@ -592,6 +592,46 @@ fn url_fields(fields: &mut Map<String, Value>, url: &Url) {
     fields.insert("extension".into(), extension.into());
 }
 
+static PIXELDRAIN_FOLDER: Route = Route::new(
+    "folder",
+    "{filename[:230]}.{extension}",
+    &["{category}"],
+    "{path}_{num}",
+);
+
+/// Upstream `PixeldrainFolderExtractor.metadata` plus file fields.
+fn pixeldrain_folder_fields(
+    child: &Value,
+    folder_id: &str,
+    num: usize,
+    url: &Url,
+) -> Map<String, Value> {
+    let get = |key: &str| child.get(key).cloned().unwrap_or(Value::Null);
+    let mut fields = Map::new();
+    fields.insert("type".into(), get("type"));
+    fields.insert("path".into(), get("path"));
+    fields.insert("name".into(), get("name"));
+    fields.insert("mime_type".into(), get("file_type"));
+    fields.insert("size".into(), get("file_size"));
+    fields.insert("hash_sha256".into(), get("sha256_sum"));
+    let date = string(child, "created").and_then(|d| crate::date::parse_date(d).ok());
+    fields.insert("date".into(), crate::filter::source_date_text(date).into());
+    fields.insert("id".into(), folder_id.into());
+    fields.insert("num".into(), num.into());
+    fields.insert("url".into(), url.as_str().into());
+    let path = string(child, "path").unwrap_or_default();
+    fields.insert(
+        "share_url".into(),
+        format!("https://pixeldrain.com/d{path}").into(),
+    );
+    // Upstream `rpartition(".")`: no extension keeps the name empty.
+    let name = string(child, "name").unwrap_or_default();
+    let (filename, extension) = name.rsplit_once('.').unwrap_or(("", name));
+    fields.insert("filename".into(), filename.into());
+    fields.insert("extension".into(), extension.into());
+    fields
+}
+
 /// A Pixeldrain file's upstream dictionary.
 fn pixeldrain_fields(file: &Value, url: &Url) -> Map<String, Value> {
     let mut fields = file.as_object().cloned().unwrap_or_default();
@@ -1196,6 +1236,9 @@ impl ImageHosts {
                             headers: BTreeMap::new(),
                             handoff: BTreeMap::new(),
                         });
+                        let file = media.last_mut().expect("just pushed");
+                        let fields = pixeldrain_folder_fields(&child, &folder_id, num, &file.url);
+                        attach(file, &PIXELDRAIN_FOLDER, fields);
                     }
                     Some("dir") if self.pixeldrain_recursive => {
                         folders.push((child_path.trim_start_matches('/').to_owned(), child))
