@@ -301,6 +301,9 @@ pub struct Options {
     pub only: Option<bool>,
     pub id_min: Option<u128>,
     pub id_max: Option<u128>,
+    /// Upstream `date-min`/`date-max`: `created_utc` bounds in Unix seconds.
+    pub date_min: Option<i64>,
+    pub date_max: Option<i64>,
     pub limit: Option<u64>,
     /// Accepted for compatibility; every file already carries its submission keywords.
     pub parent_directory: bool,
@@ -321,6 +324,8 @@ impl Default for Options {
             only: None,
             id_min: None,
             id_max: None,
+            date_min: None,
+            date_max: None,
             limit: None,
             parent_directory: false,
             oauth: false,
@@ -411,6 +416,20 @@ impl Options {
         if let Some(value) = boolean("parent-directory")? {
             options.parent_directory = value;
         }
+        let date = |key: &str| -> Result<Option<i64>> {
+            match map.get(key) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::Number(n)) => n
+                    .as_f64()
+                    .map(|n| Some(n as i64))
+                    .ok_or_else(|| error("Reddit date-min/date-max must be numbers or dates")),
+                // Upstream ignores unparsable ISO 8601 values.
+                Some(Value::String(s)) => Ok(crate::date::parse_date(s).ok()),
+                Some(_) => Err(error("Reddit date-min/date-max must be numbers or dates")),
+            }
+        };
+        options.date_min = date("date-min")?;
+        options.date_max = date("date-max")?;
         options.id_min = id("id-min")?;
         options.id_max = id("id-max")?;
         // Upstream ignores the legacy "zik0zj" (2**31 - 1) id-max default.
@@ -1395,8 +1414,19 @@ impl Reddit {
 
     fn in_range(&self, post: &Value) -> bool {
         let id = string(post, "id").and_then(b36decode).unwrap_or(0);
+        let created = post.get("created_utc").and_then(Value::as_f64);
+        let date_ok = |created: f64| {
+            self.options
+                .date_min
+                .is_none_or(|min| created >= min as f64)
+                && self
+                    .options
+                    .date_max
+                    .is_none_or(|max| created <= max as f64)
+        };
         self.options.id_min.is_none_or(|min| id >= min)
             && self.options.id_max.is_none_or(|max| id <= max)
+            && created.is_none_or(date_ok)
     }
 
     /// Upstream `RedditAPI._pagination` for one page.
@@ -2499,6 +2529,12 @@ mod tests {
         assert_eq!((options.selftext, options.only), (Some(true), Some(false)));
         assert_eq!((options.id_min, options.id_max), (Some(36), None));
         assert_eq!(options.limit, Some(25));
+        let dates =
+            parse(json!({"date-min": 1700000000, "date-max": "2024-01-01T00:00:00"})).unwrap();
+        assert_eq!(
+            (dates.date_min, dates.date_max),
+            (Some(1700000000), Some(1704067200))
+        );
         assert_eq!(
             parse(json!({"videos": false})).unwrap().videos,
             Videos::Disabled

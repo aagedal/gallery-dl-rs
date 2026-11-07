@@ -41,6 +41,8 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
             "only",
             "id-min",
             "id-max",
+            "date-min",
+            "date-max",
             "limit",
             "parent-directory",
         ],

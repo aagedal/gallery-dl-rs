@@ -1052,8 +1052,8 @@ supported. Remaining: OAuth/private content.
 **Implemented experimental native Reddit:** submissions, galleries, subreddit
 and user listings over public JSON; video-only v.redd.it MP4s. Since
 2026-10-29 `api: "oauth"` uses oauth.reddit.com with a `refresh-token`/
-`client-id` or an anonymous installed-client token. Remaining: `date-min`/
-`date-max`, preview fallbacks for failed child jobs, the 100-page listing cap.
+`client-id` or an anonymous installed-client token; `date-min`/`date-max`
+filter listings (2026-11-07). Remaining: preview fallbacks for failed child jobs, the 100-page listing cap.
 
 **Implemented experimental native Bluesky:** single posts, author media/posts
 feeds, public custom feeds and list feeds via the public AppView, with full-size
