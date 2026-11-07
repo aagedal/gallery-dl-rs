@@ -1272,7 +1272,7 @@ impl Booru {
             }
             _ => None,
         }
-        .filter(|_| self.site == Site::Danbooru)
+        .filter(|_| self.site.danbooru_dialect())
         .map(|includes| format!("{includes},id"));
         self
     }
@@ -1369,12 +1369,23 @@ impl Booru {
             self.call(root, "index.php", &Self::dapi(&[("id", &id)]))
                 .await?
         };
-        let posts = posts(self.site, &body)?;
+        let mut posts = posts(self.site, &body)?;
         if !posts
             .iter()
             .any(|p| number(p.get("id")).map(|v| v.to_string()) == Some(id.clone()))
         {
             return Err(error(format!("{} post not found", self.site.name())));
+        }
+        if let Some(includes) = self.includes.as_deref()
+            && self.site.danbooru_dialect()
+        {
+            let path = format!("posts/{id}.json");
+            let body = self.call(root, &path, &[("only", includes)]).await?;
+            if let (Some(Value::Object(post)), Ok(Value::Object(meta))) =
+                (posts.first_mut(), serde_json::from_slice::<Value>(&body))
+            {
+                post.extend(meta);
+            }
         }
         Ok(posts)
     }
@@ -1557,11 +1568,12 @@ impl Booru {
                     "favorites.json"
                 };
                 let body = self.call(&state.root, path, &query).await?;
-                let raw = if state.popular.is_some() {
+                let mut raw = if state.popular.is_some() {
                     popular::posts(&body)?
                 } else {
                     posts(self.site, &body)?
                 };
+                self.include_metadata(&state.root, &mut raw).await?;
                 state.done = raw.len() < self.threshold.unwrap_or(limit - 20);
                 *page = Some(match *page {
                     None => 2,
@@ -2865,6 +2877,28 @@ mod tests {
             "{}",
             requests[1]
         );
+    }
+
+    #[tokio::test]
+    async fn danbooru_metadata_includes_are_merged_into_single_posts() {
+        let post = danbooru_post(42).to_string();
+        let extra = json!({"id": 42, "uploader": {"name": "alice"}}).to_string();
+        let (root, server) = serve(vec![
+            response("200 OK", "", post.as_bytes()),
+            response("200 OK", "", extra.as_bytes()),
+        ]);
+        let media: Vec<_> = booru(Site::Danbooru, root)
+            .with_metadata(Some(&json!(true)))
+            .stream(&Url::parse("https://danbooru.donmai.us/posts/42").unwrap())
+            .collect()
+            .await;
+        let media = media.into_iter().next().unwrap().unwrap();
+        let fields = media.metadata.unwrap().booru_keywords.unwrap();
+        assert_eq!(fields["uploader"]["name"], "alice");
+        let requests = server.join().unwrap();
+        assert!(requests[1].starts_with(
+            "GET /posts/42.json?only=artist_commentary%2Cchildren%2Cnotes%2Cparent%2Cuploader%2Cid "
+        ));
     }
 
     #[tokio::test]

@@ -50,6 +50,7 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
     ("pinterest", &["sections", "stories", "videos", "domain"]),
     ("flickr", &["metadata", "videos"]),
     ("danbooru", &["metadata"]),
+    ("e621", &["metadata"]),
     (
         "tumblr",
         &[

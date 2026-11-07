@@ -653,9 +653,10 @@ user-id/api-key credentials, with same-origin redirects and no credentials in
 media metadata. API-reported file size, rating and signed score are exposed.
 The `[booru]` `tags` (per-type `tags_TYPE`) and `notes` options read post pages
 for the gelbooru_v02 and moebooru engines (2026-11-07). Danbooru's `metadata`
-includes (boolean, string or list) are merged per page for native tag
-listings. Remaining: other favorites, `metadata` for pool/favorite-group and
-e621 listings, and authenticated live verification.
+includes (boolean, string or list) are merged per page for tag, pool,
+favorite-group, favorites and popular listings and into single posts, on
+Danbooru and e621/e926. Remaining: other favorites and authenticated live
+verification.
 
 **Implemented experimental native Mastodon:** statuses, user timelines,
 bookmarks, favourites, list timelines and Unicode hashtags on mastodon.social,
