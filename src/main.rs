@@ -3086,6 +3086,8 @@ impl Settings {
             before: self.options.date_before,
             after: self.options.date_after,
             unordered,
+            file_unique: self.options.file_unique.unwrap_or(false),
+            child_unique: self.options.child_unique.unwrap_or(false),
         }
     }
 }
@@ -3703,6 +3705,8 @@ async fn resolved_settings(
         quoted: None,
         expand: None,
         unique: None,
+        file_unique: None,
+        child_unique: None,
         videos: None,
         previews: None,
         mp4: None,

@@ -49,6 +49,7 @@ pub struct ChildMetadata {
     target_category: Option<String>,
     source_archive: Option<Arc<crate::source_archive::ArchiveDescriptor>>,
     booru_artist: Option<Arc<BooruArtistChild>>,
+    url: Option<Arc<str>>,
 }
 
 #[derive(Clone)]
@@ -155,6 +156,7 @@ impl ChildMetadata {
         }
         Self {
             booru_artist: None,
+            url: None,
             keyword_updates: None,
             source_archive: None,
             target_category: None,
@@ -181,6 +183,7 @@ impl ChildMetadata {
         };
         Self {
             booru_artist: None,
+            url: None,
             keyword_updates: None,
             source_archive: None,
             target_category: Some("pixiv".into()),
@@ -275,7 +278,16 @@ impl ChildMetadata {
                 queue,
                 inheritance: parent,
             })),
+            url: None,
         })
+    }
+    /// The queued child URL, for upstream `child-unique`.
+    pub fn with_url(mut self, url: &str) -> Self {
+        self.url = Some(Arc::from(url));
+        self
+    }
+    pub fn url(&self) -> Option<&str> {
+        self.url.as_deref().or_else(|| self.booru_artist_url())
     }
     pub fn booru_artist_url(&self) -> Option<&str> {
         self.booru_artist.as_ref().map(|artist| artist.url.as_ref())

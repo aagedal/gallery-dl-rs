@@ -848,7 +848,8 @@ impl Flickr {
                         .ok()?;
                         let data = album.as_object().cloned().unwrap_or_default();
                         Some(crate::event::child_job(
-                            crate::event::ChildMetadata::from_raw("flickr", "album", &data),
+                            crate::event::ChildMetadata::from_raw("flickr", "album", &data)
+                                .with_url(url.as_str()),
                             move || self.events(&url),
                         ))
                     })

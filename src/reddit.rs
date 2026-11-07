@@ -1504,8 +1504,10 @@ impl Reddit {
             parts.push(stream::iter(events.into_iter().map(Ok)).boxed());
         }
         for (url, data) in out.queue {
+            let raw = url.to_string();
             if let Some(child) = (walk.queue)(url) {
-                let metadata = ChildMetadata::from_raw("reddit", &walk.context.subcategory, &data);
+                let metadata = ChildMetadata::from_raw("reddit", &walk.context.subcategory, &data)
+                    .with_url(&raw);
                 parts.push(child_job(metadata, move || child));
             }
         }

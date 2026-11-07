@@ -552,3 +552,51 @@ async fn cancelling_outer_job_propagates_before_poll_and_unwinds_open_inner_post
     );
     assert!(selected.next().await.is_none());
 }
+
+#[tokio::test]
+async fn file_unique_skips_repeated_urls_per_job_before_ranges() {
+    let root = post(&[1, 2, 1], None)
+        .chain(child(scope(9), post(&[1, 3], None), count()))
+        .chain(post(&[2, 4], None))
+        .boxed();
+    let selection = JobSelection {
+        file_unique: true,
+        file_range: Some(range("2-")),
+        ..Default::default()
+    };
+    // The child job keeps its own seen set, like upstream's per-job predicates.
+    assert_eq!(ids(selection, root).await, [2, 3, 4]);
+}
+
+#[tokio::test]
+async fn child_unique_skips_repeated_child_urls_without_starting_them() {
+    let requests = [count(), count(), count()];
+    let queued = |id: u64, url: &str| {
+        ChildScope::new(
+            ChildMetadata::from_raw("manga", "chapter", json!({"id": id}).as_object().unwrap())
+                .with_url(url),
+        )
+    };
+    let input = child(
+        queued(1, "https://fixture.test/c/1"),
+        post(&[1], None),
+        requests[0].clone(),
+    )
+    .chain(child(
+        queued(2, "https://fixture.test/c/1"),
+        post(&[2], None),
+        requests[1].clone(),
+    ))
+    .chain(child(
+        queued(3, "https://fixture.test/c/3"),
+        post(&[3], None),
+        requests[2].clone(),
+    ))
+    .boxed();
+    let selection = JobSelection {
+        child_unique: true,
+        ..Default::default()
+    };
+    assert_eq!(ids(selection, input).await, [1, 3]);
+    assert_eq!(requests[1].load(Ordering::SeqCst), 0);
+}

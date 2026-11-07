@@ -4038,3 +4038,17 @@ fn bluesky_accepts_login_credentials() {
     assert_eq!(selected.username.as_deref(), Some("alice.bsky.social"));
     assert!(selected.password.is_some());
 }
+
+#[test]
+fn unique_predicates_accept_upstream_aliases_and_truthy_values() {
+    let config = parse(
+        r#"{"extractor":{"mangadex":{"chapter-unique":"yes","file-unique":false},"imgur":{"image-unique":1}}}"#,
+    )
+    .unwrap();
+    let mangadex = config.resolve("mangadex").unwrap();
+    assert_eq!(mangadex.file_unique, Some(false));
+    assert_eq!(mangadex.child_unique, Some(true));
+    let other = config.resolve("imgur").unwrap();
+    assert_eq!(other.file_unique, Some(true));
+    assert_eq!(other.child_unique, None);
+}

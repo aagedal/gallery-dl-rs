@@ -1913,13 +1913,15 @@ impl Tumblr {
                     .map(Item::Event),
                 );
             }
-            if let Some((url, fields)) = parsed.external
-                && let Some(events) = (listing.queue)(url)
-            {
-                items.push(Item::Child(child_job(
-                    ChildMetadata::from_raw("tumblr", listing.route.subcategory, &fields),
-                    move || events,
-                )));
+            if let Some((url, fields)) = parsed.external {
+                let raw = url.to_string();
+                if let Some(events) = (listing.queue)(url) {
+                    items.push(Item::Child(child_job(
+                        ChildMetadata::from_raw("tumblr", listing.route.subcategory, &fields)
+                            .with_url(&raw),
+                        move || events,
+                    )));
+                }
             }
         }
         if listing.single.is_some() && !found {

@@ -898,7 +898,8 @@ impl Mastodon {
                         let url = instance_url(&host, &format!("/@{acct}"))?;
                         let data = account.as_object()?.clone();
                         Some(crate::event::child_job(
-                            crate::event::ChildMetadata::from_raw("mastodon", "following", &data),
+                            crate::event::ChildMetadata::from_raw("mastodon", "following", &data)
+                                .with_url(url.as_str()),
                             move || self.events(&url),
                         ))
                     })

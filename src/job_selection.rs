@@ -25,6 +25,10 @@ pub struct JobSelection {
     pub before: Option<i64>,
     pub after: Option<i64>,
     pub unordered: bool,
+    /// Upstream `file-unique` and `child-unique`: each job skips file and
+    /// queued child URLs it has already seen.
+    pub file_unique: bool,
+    pub child_unique: bool,
 }
 
 #[derive(Default)]
@@ -42,6 +46,8 @@ struct Frame {
     failed: bool,
     shown_post: bool,
     shown_child: bool,
+    seen_files: HashSet<String>,
+    seen_children: HashSet<String>,
 }
 struct State<'a> {
     input: Option<BoxStream<'a, Result<ExtractionEvent>>>,
@@ -275,6 +281,13 @@ impl JobSelection {
                         if selected && let Some(url) = scope.metadata.booru_artist_url() {
                             selected = state.visited.insert(url.to_owned());
                         }
+                        if selected
+                            && selection.child_unique
+                            && let Some(url) = scope.metadata.url()
+                        {
+                            let parent = state.frames.last_mut().expect("parent job");
+                            selected = parent.seen_children.insert(url.to_owned());
+                        }
                         if !selected {
                             scope.control.cancel();
                         }
@@ -425,7 +438,18 @@ impl JobSelection {
                                 state.fail("post selection requires explicit post boundaries");
                             return Some((Err(error), state));
                         }
-                        if !frame.stopped && (!frame.in_post || frame.active) {
+                        let unique = !selection.file_unique
+                            || frame.stopped
+                            || frame.in_post && !frame.active
+                            || media.url.as_str().starts_with("text:")
+                            || state
+                                .frames
+                                .last_mut()
+                                .expect("current job")
+                                .seen_files
+                                .insert(media.url.as_str().to_owned());
+                        let frame = state.frames.last().expect("current job");
+                        if unique && !frame.stopped && (!frame.in_post || frame.active) {
                             let date = if !frame.in_post {
                                 date(
                                     media.metadata.as_ref().and_then(|post| post.timestamp),

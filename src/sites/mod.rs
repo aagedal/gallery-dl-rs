@@ -391,7 +391,7 @@ pub(crate) fn queue<'a>(
     data: &Map<String, Value>,
 ) -> Events<'a> {
     child_job(
-        ChildMetadata::from_raw(category, subcategory, data),
+        ChildMetadata::from_raw(category, subcategory, data).with_url(url.as_str()),
         move || extract(http, url),
     )
 }
