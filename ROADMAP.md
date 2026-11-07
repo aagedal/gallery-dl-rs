@@ -1629,10 +1629,12 @@ library), and `downloader.http.consume-content` (connection reuse).
 only that child (`parent-skip` makes children count toward their input).
 Remaining: `parent-session` (native extractors keep per-site sessions).
 
+Facebook `author-followups` fetches the author's photo replies after each
+photo (2026-11-07).
 **Remaining site options (2026-11-07):** documented upstream options without
 native behavior yet: DeviantArt `auto-watch`/`auto-unwatch` (account
 actions) and `comments-avatars` avatar queueing (comments themselves are
-supported); Facebook `author-followups`; Instagram `audio`, `user-strategy`
+supported); Instagram `audio`, `user-strategy`
 (native lookups use `web_profile_info`) and `user-cache` (memory only;
 `warn-images` and `warn-videos` are supported); Pixiv `work.related`; Twitter
 `metadata-user` and `twitpic` (`retries-api`, `ads` and `locked` are supported); `ytdl.deprecations` (yt-dlp

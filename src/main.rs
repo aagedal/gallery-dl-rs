@@ -2244,6 +2244,13 @@ fn extract_input<'a>(
                             )
                             .and_then(|native| {
                                 native
+                                    .with_author_followups(
+                                        options
+                                            .site_options
+                                            .as_deref()
+                                            .and_then(|o| o.get("author-followups"))
+                                            .is_some_and(gallery_dl_rs::postprocess::truthy),
+                                    )
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)

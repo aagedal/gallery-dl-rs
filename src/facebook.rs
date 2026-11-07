@@ -39,6 +39,7 @@ pub struct Facebook {
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
+    author_followups: bool,
 }
 
 impl Facebook {
@@ -72,7 +73,15 @@ impl Facebook {
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
+            author_followups: false,
         })
+    }
+
+    /// Upstream `author-followups`: also download photos the author posted
+    /// in the comments of each photo.
+    pub fn with_author_followups(mut self, enabled: bool) -> Self {
+        self.author_followups = enabled;
+        self
     }
 
     /// Apply proxy and user-agent settings to API requests and emitted media.
@@ -113,6 +122,28 @@ impl Facebook {
     async fn extract_endpoint(&self, endpoint: &Url, code: &str) -> Result<Vec<Media>> {
         let body = self.request_body(endpoint, self.timeout).await?;
         let mut media = parse_photo(&body, code)?;
+        if self.author_followups {
+            // Like upstream, only the requested photo's own followups.
+            for id in followup_ids(&body) {
+                if id == code {
+                    continue;
+                }
+                let mut endpoint = endpoint.clone();
+                endpoint
+                    .query_pairs_mut()
+                    .clear()
+                    .append_pair("fbid", &id)
+                    .append_pair("set", "");
+                let body = self.request_body(&endpoint, self.timeout).await?;
+                let index = media.len() + 1;
+                media.extend(parse_photo(&body, &id)?.into_iter().map(|mut item| {
+                    if let Some(metadata) = &mut item.metadata {
+                        metadata.index = index;
+                    }
+                    item
+                }));
+            }
+        }
         for item in &mut media {
             self.network.apply_media(item);
         }
@@ -386,13 +417,15 @@ impl Facebook {
             budget: self.timeout,
             grid,
             truncated: false,
+            followups: VecDeque::new(),
+            followups_seen: HashSet::new(),
         };
         stream::unfold(state, move |mut state| async move {
             loop {
                 if let Some(event) = state.pending.pop_front() {
                     return Some((Ok(event), state));
                 }
-                if state.done {
+                if state.done && state.followups.is_empty() {
                     if std::mem::take(&mut state.truncated) {
                         return Some((
                             Err(error(
@@ -409,7 +442,8 @@ impl Facebook {
                 state.budget = state.budget.saturating_sub(started.elapsed());
                 match result.unwrap_or_else(|_| Err(error("native Facebook extraction timed out")))
                 {
-                    Ok(media) => state.pending = crate::event::group(vec![media], "facebook"),
+                    Ok(Some(media)) => state.pending = crate::event::group(vec![media], "facebook"),
+                    Ok(None) => {}
                     Err(error) => {
                         state.done = true;
                         return Some((Err(error), state));
@@ -420,7 +454,23 @@ impl Facebook {
         .boxed()
     }
 
-    async fn album_photo(&self, state: &mut AlbumState) -> Result<Media> {
+    async fn album_photo(&self, state: &mut AlbumState) -> Result<Option<Media>> {
+        while let Some(id) = state.followups.pop_front() {
+            if state.seen.contains(&id) || !state.followups_seen.insert(id.clone()) {
+                continue;
+            }
+            let mut endpoint = state.base.join("photo/")?;
+            endpoint
+                .query_pairs_mut()
+                .append_pair("fbid", &id)
+                .append_pair("set", &state.set);
+            let body = self.request_body(&endpoint, state.budget).await?;
+            state.followups.extend(followup_ids(&body));
+            return self.album_item(state, parse_photo(&body, &id)?).map(Some);
+        }
+        if state.done {
+            return Ok(None);
+        }
         if state.next.is_none() {
             let mut endpoint = state.base.join("media/set/")?;
             endpoint.query_pairs_mut().append_pair("set", &state.set);
@@ -441,7 +491,10 @@ impl Facebook {
             .append_pair("fbid", id)
             .append_pair("set", &state.set);
         let body = self.request_body(&endpoint, state.budget).await?;
-        let mut media = parse_photo(&body, id)?;
+        let media = parse_photo(&body, id)?;
+        if self.author_followups {
+            state.followups.extend(followup_ids(&body));
+        }
         let next = match parse_navigation(&body, id, &state.set) {
             Ok(next) => next,
             // Without navigation (anonymous sessions), follow the grid.
@@ -466,6 +519,10 @@ impl Facebook {
             Some(_) => {}
         }
         state.next = next;
+        self.album_item(state, media).map(Some)
+    }
+
+    fn album_item(&self, state: &mut AlbumState, mut media: Vec<Media>) -> Result<Media> {
         state.index = state
             .index
             .checked_add(1)
@@ -746,6 +803,10 @@ struct AlbumState {
     grid: Grid,
     /// The grid ended before the album did.
     truncated: bool,
+    /// `author-followups` photos found in comments, fetched before the next
+    /// album photo.
+    followups: VecDeque<String>,
+    followups_seen: HashSet<String>,
 }
 
 /// `facebook.com/share/p|r|v/TOKEN` (and `/share/TOKEN`) mobile share links.
@@ -929,6 +990,36 @@ fn photo_keywords(
 
 /// Parse JSON script payloads, never a page-wide image/OG preview match.
 /// A photo must identify the exact requested ID and own its `image.uri`.
+/// Upstream `followups_ids`: photos in comment nodes written by the
+/// original poster.
+fn followup_ids(bytes: &[u8]) -> Vec<String> {
+    let page = String::from_utf8_lossy(bytes);
+    let mut ids = Vec::new();
+    let mut rest = page.as_ref();
+    while let Some(start) = rest.find(r#"{"node":{"id""#) {
+        rest = &rest[start + 13..];
+        let Some(end) = rest.find(r#""cursor":null}"#) else {
+            break;
+        };
+        let comment = &rest[..end];
+        rest = &rest[end..];
+        const PHOTO: &str = r#"{"__typename":"Photo","id":""#;
+        if comment.contains(r#""is_author_original_poster":true"#)
+            && let Some(at) = comment.find(PHOTO)
+        {
+            let id = &comment[at + PHOTO.len()..];
+            let id = &id[..id.find('"').unwrap_or(id.len())];
+            if !id.is_empty()
+                && id.bytes().all(|b| b.is_ascii_digit())
+                && !ids.iter().any(|i| i == id)
+            {
+                ids.push(id.to_owned());
+            }
+        }
+    }
+    ids
+}
+
 pub fn parse_photo(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
     validate_id(requested_id)?;
     let payloads = embedded_payloads(bytes)?;
