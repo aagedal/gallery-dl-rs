@@ -801,9 +801,10 @@ lists (including zero-based Pixeldrain `#item=N` selection), albums, galleries
 and image pages. Catbox album dates accept upstream's `Created Month DD YYYY`
 and the previously accepted `Uploaded DD Month YYYY` format; invalid optional dates do not
 change media selection. Pixeldrain API keys authenticate API requests and file downloads.
-Remaining: Pixeldrain filesystem (`/d/`) links and other domains; Catbox file
-`/c/` descriptions; imgbox per-image metadata (width/height); Postimg
-JS-paginated gallery pages beyond the server-rendered listing.
+Pixeldrain filesystem (`/d/`) folders (with `recursive`) followed, and since
+2026-11-07 Postimg galleries list every image through `json?action=list`.
+Remaining: other Pixeldrain domains; Catbox file `/c/` descriptions; imgbox
+per-image metadata (width/height).
 
 **Implemented experimental native Tumblr:** blog listings, single posts and
 tagged listings via API v2 with an overridable `api-key`, original-image token
@@ -814,9 +815,10 @@ settings. Single-post URLs bypass the `posts` filter, matching upstream.
 Failed token lookups fall back to the
 API rendition; upstream's delayed token refresh retries remain unimplemented.
 Since 2026-10-29 `access-token`/`access-token-secret` (and `api-secret`) sign
-requests with OAuth 1.0a. Remaining: likes/search/day views, NPF posts,
-external audio/video, `external`/`fallback-delay`/`fallback-retries` options,
-and custom-domain blogs.
+requests with OAuth 1.0a. Likes, search and day views, the `external`,
+`avatar`, `offset`, `pagination` and `fallback-*` options followed, and since
+2026-11-07 `tumblr:DOMAIN` custom-domain blogs. Remaining: native NPF posts
+(they are converted to the legacy format) and external audio/video.
 
 **Implemented experimental native Pixiv:** artworks and user illustration/manga
 works via the App API with a `refresh-token`, including lazy ugoira frame ZIPs

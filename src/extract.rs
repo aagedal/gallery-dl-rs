@@ -821,7 +821,8 @@ fn parse_input_url(value: &str, instances: bool) -> Result<Url> {
     // site matches them; embedded HTTP(S) URLs are still validated.
     if !matches!(url.scheme(), "http" | "https")
         && (crate::sites::find(&url).is_some()
-            || url.scheme() == "mastodon" && crate::mastodon::target(&url).is_ok())
+            || url.scheme() == "mastodon" && crate::mastodon::target(&url).is_ok()
+            || url.scheme() == "tumblr" && crate::tumblr::is_blog_url(&url))
     {
         if let Some((_, inner)) = value.split_once(':')
             && Url::parse(inner).is_ok_and(|inner| matches!(inner.scheme(), "http" | "https"))
