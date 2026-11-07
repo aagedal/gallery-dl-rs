@@ -681,9 +681,14 @@ no files were downloaded. Subsequent gzip-aware inspection emitted a Kemono
 thumbnail job and a Coomer MP4 original job with creator display names; no media
 was downloaded in those inspections. Authenticated verification, wider service
 captures and successful original transfers remain required.
-Remaining: popular views, comments/DMs, archive/link
-extraction from post text, username/password login, additional endpoint behavior
-and full upstream metadata/default naming.
+Since 2026-11-07 files carry upstream's keyword dictionaries (the post
+object merged with each file's `type`/`path`/`hash`/`url`/`filename`, plus
+`date`, `count`, `num`, `archives`, `user_profile`, `username` and revision
+fields) with upstream's default filename/directory, and the `comments`,
+`dms`, `announcements`, `archives` and `archives-format` options.
+`user_profile` uses the native typed profile (dates as Unix seconds).
+Remaining: popular views, link extraction from post text,
+username/password login and additional endpoint behavior.
 
 **Implemented Kemono/Coomer creator metadata:** default-enabled, lazy profile
 lookups attach typed immutable IDs and optional display names, public IDs, dates,

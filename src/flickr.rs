@@ -760,6 +760,7 @@ pub fn media(photo: &Photo, size: Size, index: usize) -> Media {
         fields.insert("width".into(), size.width.unwrap_or(0).into());
         fields.insert("height".into(), size.height.unwrap_or(0).into());
         let (filename, extension) = crate::sites::nameext(&url);
+        let extension = crate::path_options::map_extension(&extension).unwrap_or(extension);
         fields.insert("filename".into(), filename.into());
         fields.insert("extension".into(), extension.into());
         Arc::new(SiteKeywords { route, fields })

@@ -2353,6 +2353,10 @@ fn extract_input<'a>(
                                     .with_favorites(options.favorites.unwrap_or_default())
                                     .with_max_posts(options.max_posts)
                                     .with_metadata(options.metadata.unwrap_or(true))
+                                    .with_extras(gallery_dl_rs::kemono::Extras::from_options(
+                                        options.site_options.as_deref(),
+                                        options.comments,
+                                    ))
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
