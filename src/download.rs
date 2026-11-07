@@ -695,6 +695,10 @@ pub struct DownloadOptions<'a> {
     pub write_metadata: bool,
     /// Inclusive limits on the complete HTTP representation size.
     pub limits: SizeLimits,
+    /// Upstream `archive-prefix` and `archive-format` for keys of upstream
+    /// download archives.
+    pub archive_prefix: Option<&'a str>,
+    pub archive_format: Option<&'a str>,
 }
 
 pub async fn download(

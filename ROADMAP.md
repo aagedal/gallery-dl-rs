@@ -1793,8 +1793,9 @@ extraction failures, exec warnings) with `print`, `status`, `level`, `exec`,
 `exit`; `status` and `exit` set the exit status. `flag` and signal actions
 are not supported. `keywords-default` fills missing path keywords.
 Existing Python gallery-dl archives (an `archive` table of `entry` keys)
-are read and updated with upstream keys (category + `archive_fmt`); new
-archives keep the native schema. `archive-event` (`file`, `skip`, `after`;
+are read and updated with upstream keys (category + `archive_fmt`, or the
+configured `archive-prefix` + `archive-format`; `archive-table` is not
+supported); new archives keep the native schema. `archive-event` (`file`, `skip`, `after`;
 upstream archives default to `file`, native ones also record existing
 files), `archive-mode: memory` (written after a run without errors) and
 `skip-filter` are supported. Downloader `adjust-extensions` (file signature

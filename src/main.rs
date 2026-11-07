@@ -1621,6 +1621,18 @@ async fn run(args: Args) -> Result<()> {
                     limits: settings.limits,
                     write_metadata: args.write_metadata,
                     directory: settings.directory.as_ref(),
+                    archive_prefix: settings
+                        .options
+                        .site_options
+                        .as_deref()
+                        .and_then(|o| o.get("archive-prefix"))
+                        .and_then(serde_json::Value::as_str),
+                    archive_format: settings
+                        .options
+                        .site_options
+                        .as_deref()
+                        .and_then(|o| o.get("archive-format"))
+                        .and_then(serde_json::Value::as_str),
                 };
                 // Upstream `parent-skip`: a child job's skips count toward
                 // its parent's limit instead of its own.
