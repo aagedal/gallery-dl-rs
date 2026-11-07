@@ -548,6 +548,9 @@ impl Evaluator<'_> {
                 _ => {}
             }
         }
+        if let (BinaryOp::Mod, Value::String(format)) = (op, left) {
+            return self.printf(format, right);
+        }
         if matches!(op, BinaryOp::Mul) {
             match (left, right) {
                 (Value::String(_) | Value::List(_) | Value::Tuple(_), value) if numeric(value) => {
@@ -1188,6 +1191,197 @@ impl Evaluator<'_> {
             _ => unreachable!(),
         }
     }
+    /// Python's printf-style `format % values`: `%s %r %d %i %f %F %e %E %g
+    /// %G %x %X %o %c %%` with flags, width, precision and `%(key)s`.
+    fn printf(&mut self, format: &str, values: &Value) -> Result<Value> {
+        let positional: Vec<Value> = match values {
+            Value::Tuple(items) => items.to_vec(),
+            Value::Map(_) => Vec::new(),
+            value => vec![value.clone()],
+        };
+        let mut next = positional.into_iter();
+        let mut output = String::new();
+        let mut chars = format.chars().peekable();
+        while let Some(c) = chars.next() {
+            self.step()?;
+            if c != '%' {
+                output.push(c);
+                continue;
+            }
+            let mut key = None;
+            if chars.peek() == Some(&'(') {
+                chars.next();
+                let name: String = chars.by_ref().take_while(|c| *c != ')').collect();
+                key = Some(name);
+            }
+            let mut flags = String::new();
+            while let Some(flag) = chars.peek().copied().filter(|c| "-+ #0".contains(*c)) {
+                flags.push(flag);
+                chars.next();
+            }
+            let digits = |chars: &mut std::iter::Peekable<std::str::Chars<'_>>| {
+                let mut text = String::new();
+                while let Some(d) = chars.peek().copied().filter(char::is_ascii_digit) {
+                    text.push(d);
+                    chars.next();
+                }
+                text.parse::<usize>().ok()
+            };
+            let width = digits(&mut chars);
+            let precision = if chars.peek() == Some(&'.') {
+                chars.next();
+                Some(digits(&mut chars).unwrap_or(0))
+            } else {
+                None
+            };
+            let kind = chars.next().ok_or_else(invalid)?;
+            if kind == '%' {
+                output.push('%');
+                continue;
+            }
+            let value = match &key {
+                Some(key) => match values {
+                    Value::Map(map) => map.get(key.as_str()).cloned().ok_or_else(invalid)?,
+                    _ => return Err(invalid()),
+                },
+                None => next.next().ok_or_else(invalid)?,
+            };
+            let (sign, body) = match kind {
+                's' | 'r' | 'a' => {
+                    let text = match (&value, kind) {
+                        (Value::String(text), 's') => text.to_string(),
+                        (value, 's') => self.display(value, false, 0)?,
+                        (value, _) => self.display(value, true, 0)?,
+                    };
+                    let text = match precision {
+                        Some(precision) => text.chars().take(precision).collect(),
+                        None => text,
+                    };
+                    (String::new(), text)
+                }
+                'c' => (
+                    String::new(),
+                    match &value {
+                        Value::String(text) if text.chars().count() == 1 => text.to_string(),
+                        value => {
+                            char::from_u32(u32::try_from(integer(value)?).map_err(|_| invalid())?)
+                                .ok_or_else(invalid)?
+                                .to_string()
+                        }
+                    },
+                ),
+                'd' | 'i' | 'u' | 'x' | 'X' | 'o' => {
+                    let number = match number_value(&value)? {
+                        Value::Int(number) => number,
+                        Value::Float(number) => trunc_int(number)?,
+                        _ => unreachable!(),
+                    };
+                    let magnitude = number.unsigned_abs();
+                    let mut digits = match kind {
+                        'x' => format!("{magnitude:x}"),
+                        'X' => format!("{magnitude:X}"),
+                        'o' => format!("{magnitude:o}"),
+                        _ => magnitude.to_string(),
+                    };
+                    if flags.contains('#') {
+                        digits = match kind {
+                            'x' => format!("0x{digits}"),
+                            'X' => format!("0X{digits}"),
+                            'o' => format!("0o{digits}"),
+                            _ => digits,
+                        };
+                    }
+                    if let Some(precision) = precision
+                        && digits.len() < precision
+                    {
+                        digits = format!("{}{digits}", "0".repeat(precision - digits.len()));
+                    }
+                    let sign = if number < 0 {
+                        "-"
+                    } else if flags.contains('+') {
+                        "+"
+                    } else if flags.contains(' ') {
+                        " "
+                    } else {
+                        ""
+                    };
+                    (sign.to_owned(), digits)
+                }
+                'f' | 'F' | 'e' | 'E' | 'g' | 'G' => {
+                    let number = float(&value)?;
+                    let precision = precision.unwrap_or(6);
+                    let magnitude = number.abs();
+                    let body = match kind {
+                        'f' | 'F' => format!("{magnitude:.precision$}"),
+                        'e' | 'E' => {
+                            let text = format!("{magnitude:.precision$e}");
+                            let (mantissa, exponent) = text.split_once('e').unwrap_or((&text, "0"));
+                            let exponent: i32 = exponent.parse().unwrap_or(0);
+                            let text = format!(
+                                "{mantissa}e{}{:02}",
+                                if exponent < 0 { '-' } else { '+' },
+                                exponent.unsigned_abs()
+                            );
+                            if kind == 'E' {
+                                text.to_uppercase()
+                            } else {
+                                text
+                            }
+                        }
+                        _ => {
+                            // `%g` via the same rules as `format(x, "g")`.
+                            let text = crate::naming::format::general_float(magnitude, precision);
+                            if kind == 'G' {
+                                text.to_uppercase()
+                            } else {
+                                text
+                            }
+                        }
+                    };
+                    let sign = if number.is_sign_negative() && number != 0.0 {
+                        "-"
+                    } else if flags.contains('+') {
+                        "+"
+                    } else if flags.contains(' ') {
+                        " "
+                    } else {
+                        ""
+                    };
+                    (sign.to_owned(), body)
+                }
+                _ => return Err(invalid()),
+            };
+            let length = sign.chars().count() + body.chars().count();
+            let pad = width.unwrap_or(0).saturating_sub(length);
+            if pad > BYTES {
+                return Err(invalid());
+            }
+            let numeric = !matches!(kind, 's' | 'r' | 'a' | 'c');
+            if flags.contains('-') {
+                output.push_str(&sign);
+                output.push_str(&body);
+                output.push_str(&" ".repeat(pad));
+            } else if flags.contains('0') && numeric {
+                output.push_str(&sign);
+                output.push_str(&"0".repeat(pad));
+                output.push_str(&body);
+            } else {
+                output.push_str(&" ".repeat(pad));
+                output.push_str(&sign);
+                output.push_str(&body);
+            }
+            if output.len() > BYTES {
+                return Err(invalid());
+            }
+        }
+        // Like Python, unused positional arguments are an error.
+        if next.next().is_some() {
+            return Err(invalid());
+        }
+        self.allocate(output.len())?;
+        bounded_string(output)
+    }
+
     fn display(&mut self, value: &Value, nested: bool, depth: usize) -> Result<String> {
         self.step()?;
         if depth >= DEPTH {
@@ -2161,6 +2355,38 @@ mod tests {
         assert_eq!(run("{'a': 1}.keys()"), run("['a']"));
         assert_eq!(run("{'a': 1}.items()"), run("[('a', 1)]"));
         assert_eq!(int("['a', 'b'].index('b')"), 1);
+        // printf-style formatting (expected values from CPython).
+        for (source, expected) in [
+            ("'%s-%d' % ('a', 5)", "a-5"),
+            ("'%05.1f' % 2.5", "002.5"),
+            ("'%x' % 255", "ff"),
+            ("'%#X' % 255", "0XFF"),
+            ("'%-5s|' % 'ab'", "ab   |"),
+            ("'%5s|' % 'ab'", "   ab|"),
+            ("'%+d' % 3", "+3"),
+            ("'% d' % 3", " 3"),
+            ("'%03d' % -7", "-07"),
+            ("'%.2s' % 'abcdef'", "ab"),
+            ("'%r' % 'x'", "'x'"),
+            ("'%c' % 65", "A"),
+            ("'%c' % 'z'", "z"),
+            ("'%e' % 12345.678", "1.234568e+04"),
+            ("'%.2E' % 0.000123", "1.23E-04"),
+            ("'%g' % 0.0001234", "0.0001234"),
+            ("'%g' % 123456789.0", "1.23457e+08"),
+            ("'%(a)s=%(b)d' % {'a': 'k', 'b': 2}", "k=2"),
+            ("'%%%d%%' % 5", "%5%"),
+            ("'%s' % [1, 2]", "[1, 2]"),
+            ("'%i' % 3.9", "3"),
+            ("'%o' % 8", "10"),
+            ("'%10.3f|' % 3.14159", "     3.142|"),
+            ("'%-8.2f|' % 2.0", "2.00    |"),
+            ("'%s %s' % (1, None)", "1 None"),
+            ("'%s' % True", "True"),
+        ] {
+            assert_eq!(text(source), expected, "{source}");
+        }
+        assert!(super::super::parser::parse("'%s %s' % ('a',)").is_ok());
         // Comprehensions and generator expressions.
         assert_eq!(run("[t.upper() for t in ['a', 'b']]"), run("['A', 'B']"));
         assert_eq!(run("[x for x in [1, 2, 3] if x > 1 if x < 3]"), run("[2]"));

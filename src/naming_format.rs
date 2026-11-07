@@ -2004,6 +2004,11 @@ fn group(digits: &str, separator: char, size: usize) -> String {
     grouped
 }
 
+/// Python's general (`g`) float formatting of a non-negative value.
+pub(crate) fn general_float(value: f64, precision: usize) -> String {
+    format_float(value, 'g', precision)
+}
+
 fn format_float(value: f64, kind: char, precision: usize) -> String {
     if value.is_nan() {
         return if kind.is_uppercase() { "NAN" } else { "nan" }.into();
