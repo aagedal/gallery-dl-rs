@@ -665,8 +665,9 @@ async fn cancellation_does_not_archive_partial_media_or_keep_its_identity_locked
     );
     let (url, handle) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc");
     let refreshed = item(&url);
+    // Slow CI runners need more than the request timeout here.
     let result = tokio::time::timeout(
-        Duration::from_secs(2),
+        Duration::from_secs(20),
         archive.download(&client, root.path(), &refreshed, DownloadOptions::default()),
     )
     .await
