@@ -22,6 +22,12 @@ fn parses_identity_bound_photo_and_archive_metadata() {
     assert_eq!(post.timestamp, Some(1622152519));
     assert!(media.archive_key().unwrap().starts_with("facebook:v1:"));
     assert!(!media.headers.contains_key("Cookie"));
+    let keywords = post.site_keywords.as_ref().unwrap();
+    assert_eq!(keywords.route.filename, "{id}.{extension}");
+    assert_eq!(keywords.fields["id"], ID);
+    assert_eq!(keywords.fields["caption"], "Photo 📸 caption");
+    assert_eq!(keywords.fields["date"], "2021-05-27 21:55:19");
+    assert_eq!(keywords.fields["extension"], "jpg");
 }
 
 #[test]
