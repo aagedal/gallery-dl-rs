@@ -2794,6 +2794,13 @@ fn extract_input<'a>(
                                 |native| {
                                     native
                                         .with_pixeldrain_api_key(options.api_key.as_deref())?
+                                        .with_pixeldrain_recursive(
+                                            options
+                                                .site_options
+                                                .as_deref()
+                                                .and_then(|o| o.get("recursive"))
+                                                .is_none_or(gallery_dl_rs::postprocess::truthy),
+                                        )
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)

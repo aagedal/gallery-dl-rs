@@ -749,6 +749,8 @@ pub struct ImageHosts {
     retries: u8,
     rate_limits: RateLimits,
     pixeldrain_authorization: Option<HeaderValue>,
+    /// Upstream Pixeldrain `recursive`: queue subdirectories.
+    pixeldrain_recursive: bool,
 }
 
 impl ImageHosts {
@@ -762,6 +764,7 @@ impl ImageHosts {
             retries: 0,
             rate_limits: RateLimits::default(),
             pixeldrain_authorization: None,
+            pixeldrain_recursive: true,
         })
     }
 
@@ -805,6 +808,12 @@ impl ImageHosts {
     }
 
     /// Additional attempts for HTTP 429/5xx and transport failures.
+    /// Upstream Pixeldrain `recursive` (default true).
+    pub fn with_pixeldrain_recursive(mut self, recursive: bool) -> Self {
+        self.pixeldrain_recursive = recursive;
+        self
+    }
+
     pub fn with_retries(mut self, retries: u8) -> Self {
         self.retries = retries;
         self
@@ -965,7 +974,7 @@ impl ImageHosts {
                             handoff: BTreeMap::new(),
                         });
                     }
-                    Some("dir") => {
+                    Some("dir") if self.pixeldrain_recursive => {
                         folders.push((child_path.trim_start_matches('/').to_owned(), child))
                     }
                     _ => {}
@@ -1732,5 +1741,30 @@ mod tests {
         assert!(error.to_string().contains("not found"));
         assert!(!error.to_string().contains("127.0.0.1"));
         assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn pixeldrain_folders_queue_subdirectories_unless_not_recursive() {
+        let sha = "a".repeat(64);
+        let stat = json!({"path": [{"id": "root", "name": "Root", "type": "dir", "path": "/root"}],
+            "base_index": 0, "children": [
+                {"type": "file", "name": "x.png", "path": "/root/x.png", "sha256_sum": sha},
+                {"type": "dir", "name": "sub", "path": "/root/sub"}]})
+        .to_string();
+        for (recursive, children) in [(true, 1), (false, 0)] {
+            let (root, server) = serve(vec![response("200 OK", stat.as_bytes())]);
+            // Stop at the first queued child so it is never started.
+            let queued = hosts(root)
+                .with_pixeldrain_recursive(recursive)
+                .events(&Url::parse("https://pixeldrain.com/d/root").unwrap())
+                .filter(|event| {
+                    std::future::ready(matches!(event, Ok(ExtractionEvent::BeginChild(_))))
+                })
+                .take(1)
+                .count()
+                .await;
+            assert_eq!(queued, children);
+            server.join().unwrap();
+        }
     }
 }
