@@ -1005,26 +1005,16 @@ search, popular, avatars/backgrounds, upstream's `original`/`quality` rewriting
 and metadata options, and upstream's `{title}_{index}` filenames.
 
 **Implemented experimental native Wallhaven:** wallpapers, searches, user
-uploads and collections via the API (optional `api-key`). Remaining: per-item
-`w/ID` metadata (tags/uploader) for listings, collection lists, upstream's
-`{category}_{id}_{resolution}` filenames and `metadata` option.
+uploads and collections via the API (optional `api-key`). Later additions (more views, keyword dictionaries and options) are described in the URL coverage, keyword dictionary and site option sections below.
 
 **Implemented experimental native Pinterest:** pins, boards, user pins and
-`pin.it` links via the resource API. Remaining: login/cookies and CSRF token,
-board sections, secret boards, search, related pins, created/saved/all-pins
-listings, embedded/external (ytdl) and HLS-only videos, upstream's `sections`,
-`videos` and `domain` options.
+`pin.it` links via the resource API. Later additions (more views, keyword dictionaries and options) are described in the URL coverage, keyword dictionary and site option sections below.
 
 **Implemented experimental native VSCO:** single media and user galleries via
-the page preloaded state and `medias/profile` API. Remaining: HLS videos
-(upstream ytdl), collections, journals, spaces, avatars, and upstream's
-`videos` option.
+the page preloaded state and `medias/profile` API. Later additions (more views, keyword dictionaries and options) are described in the URL coverage, keyword dictionary and site option sections below.
 
 **Implemented experimental native Newgrounds:** art posts and user art
-listings via page scraping and XHR listing pages. Remaining: login/cookies
-(adult posts), audio, movies/games, favorites, following, search, user
-overview, upstream's `flash`, `format` and `include` options, and tags/rating/
-score metadata.
+listings via page scraping and XHR listing pages. Later additions (more views, keyword dictionaries and options) are described in the URL coverage, keyword dictionary and site option sections below.
 
 **Implemented experimental native Fur Affinity:** submissions, galleries and
 scraps via page scraping with optional `a`/`b` session cookies; favorites,
