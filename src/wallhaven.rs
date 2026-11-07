@@ -6,6 +6,7 @@
 //! (`q=@USER`) and collections page through `meta.last_page`, capped at 200
 //! pages. An optional `api-key` is sent as the `X-API-Key` header and is
 //! required for NSFW content. Media must be HTTPS on `w.wallhaven.cc`.
+use crate::sites::{Route, SiteKeywords};
 use crate::{
     Result, error,
     event::{ExtractionEvent, KeywordPolicy, group_with_keywords},
@@ -19,7 +20,7 @@ use futures_util::{
     stream::{self, BoxStream},
 };
 use reqwest::{Client, StatusCode};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::Arc,
@@ -162,8 +163,71 @@ fn extension(url: &Url, file_type: Option<&str>) -> String {
         .unwrap_or_else(|| "jpg".into())
 }
 
+const FILENAME: &str = "{category}_{id}_{resolution}.{extension}";
+static IMAGE: Route = Route::new("image", FILENAME, &["{category}"], "{id}");
+static SEARCH: Route = Route::new(
+    "search",
+    FILENAME,
+    &["{category}", "{search[tags]}"],
+    "s_{search[q]}_{id}",
+);
+static COLLECTION: Route = Route::new(
+    "collection",
+    FILENAME,
+    &["{category}", "{username}", "{collection_id}"],
+    "{id}",
+);
+static UPLOADS: Route = Route::new(
+    "uploads",
+    FILENAME,
+    &["{category}", "{username}"],
+    "u_{username}_{id}",
+);
+
+/// Upstream `_transform` plus `wp.update(metadata)` and `nameext_from_url`.
+fn keywords(data: &Value, url: &Url, extra: &Map<String, Value>) -> Map<String, Value> {
+    let mut wp = data.as_object().cloned().unwrap_or_default();
+    if let Some(path) = wp.remove("path") {
+        wp.insert("url".into(), path);
+    }
+    if let Some(Value::Array(tags)) = wp.get("tags") {
+        let names: Vec<Value> = tags.iter().filter_map(|t| t.get("name").cloned()).collect();
+        wp.insert("tags".into(), names.into());
+    }
+    let created = wp.remove("created_at");
+    let created = created.as_ref().and_then(Value::as_str);
+    let timestamp = created.and_then(|d| crate::date::parse_date(d).ok());
+    wp.insert(
+        "date".into(),
+        crate::filter::source_date_text(timestamp).into(),
+    );
+    let width = wp.remove("dimension_x").unwrap_or(Value::Null);
+    let height = wp.remove("dimension_y").unwrap_or(Value::Null);
+    wp.insert("width".into(), width);
+    wp.insert("height".into(), height);
+    let category = wp.get("category").cloned().unwrap_or(Value::Null);
+    wp.insert("wh_category".into(), category);
+    wp.extend(extra.clone());
+    let (filename, extension) = crate::sites::nameext(url);
+    let extension = crate::path_options::map_extension(&extension).unwrap_or(extension);
+    wp.insert("filename".into(), filename.into());
+    wp.insert("extension".into(), extension.into());
+    // The job's category replaces the wallpaper's (kept as `wh_category`).
+    wp.insert("category".into(), "wallhaven".into());
+    wp
+}
+
 /// Build the media item for one wallpaper object (from `w/ID` or a listing).
 pub fn wallpaper(data: &Value, index: usize) -> Option<Media> {
+    wallpaper_with(data, index, &IMAGE, &Map::new())
+}
+
+fn wallpaper_with(
+    data: &Value,
+    index: usize,
+    route: &'static Route,
+    extra: &Map<String, Value>,
+) -> Option<Media> {
     let id = text(data, "id").filter(|id| valid_id(id))?;
     let url = media_url(&text(data, "path")?)?;
     let file_type = text(data, "file_type");
@@ -204,6 +268,10 @@ pub fn wallpaper(data: &Value, index: usize) -> Option<Media> {
             caption: (!tags.is_empty()).then(|| Arc::from(tags.join(" "))),
             timestamp: text(data, "created_at").and_then(|d| crate::date::parse_date(&d).ok()),
             index,
+            site_keywords: Some(Arc::new(SiteKeywords {
+                route,
+                fields: keywords(data, &url, extra),
+            })),
             ..PostMetadata::default()
         }),
         url,
@@ -253,10 +321,14 @@ pub struct Wallhaven {
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
+    metadata: bool,
 }
 
 struct ListingState {
     endpoint: Url,
+    route: &'static Route,
+    /// Upstream `metadata()`: `search`, or `username` and `collection_id`.
+    data: Map<String, Value>,
     page: u64,
     index: usize,
     done: bool,
@@ -274,7 +346,14 @@ impl Wallhaven {
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
+            metadata: false,
         })
+    }
+
+    /// Upstream `metadata`: fetch each listed wallpaper's full info.
+    pub fn with_metadata(mut self, metadata: bool) -> Self {
+        self.metadata = metadata;
+        self
     }
 
     /// Apply proxy and user-agent settings to API requests and emitted media.
@@ -340,11 +419,35 @@ impl Wallhaven {
             .query_pairs_mut()
             .append_pair("page", &(state.page + 1).to_string());
         let body = self.call(&endpoint).await?;
+        if state.page == 0
+            && let Some(Value::Object(search)) = state.data.get_mut("search")
+            && let Ok(body) = serde_json::from_slice::<Value>(&body)
+            && let Some(query) = body.pointer("/meta/query")
+        {
+            // Upstream records the resolved tag of the first page.
+            let (tags, id) = match query {
+                Value::Object(query) => (
+                    query.get("tag").cloned().unwrap_or(Value::Null),
+                    query.get("id").cloned().unwrap_or(Value::Null),
+                ),
+                query => (query.clone(), 0.into()),
+            };
+            search.insert("tags".into(), tags);
+            search.insert("tag_id".into(), id);
+        }
         let (items, last) = parse_page(&body)?;
         state.page += 1;
         state.done = items.is_empty() || state.page >= last || state.page >= MAX_PAGES;
-        for item in items {
-            if let Some(media) = wallpaper(&item, state.index + 1) {
+        for mut item in items {
+            if self.metadata
+                && let Some(id) = text(&item, "id").filter(|id| valid_id(id))
+            {
+                let body = self.call(&self.endpoint(&format!("api/v1/w/{id}"))).await?;
+                if let Some(data) = parse(&body)?.get_mut("data").map(Value::take) {
+                    item = data;
+                }
+            }
+            if let Some(media) = wallpaper_with(&item, state.index + 1, state.route, &state.data) {
                 state.index += 1;
                 let events = self.finish(vec![media]);
                 state.pending.extend(events);
@@ -407,7 +510,13 @@ impl Wallhaven {
             Ok(target) => target,
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
         };
-        let endpoint = match target {
+        let user_path = url
+            .path_segments()
+            .and_then(|mut parts| (parts.next() == Some("user")).then(|| parts.nth(0)))
+            .flatten()
+            .map(str::to_owned);
+        let mut data = Map::new();
+        let (endpoint, route) = match target {
             Target::Wallpaper { id } => {
                 return stream::once(async move { self.single(&id).await })
                     .map(|result| match result {
@@ -422,15 +531,34 @@ impl Wallhaven {
                 if !query.is_empty() {
                     endpoint.query_pairs_mut().extend_pairs(&query);
                 }
-                endpoint
+                let route = match user_path {
+                    Some(user) => {
+                        data.insert("username".into(), user.into());
+                        &UPLOADS
+                    }
+                    None => {
+                        let search: Map<String, Value> = query
+                            .iter()
+                            .map(|(key, value)| (key.clone(), value.clone().into()))
+                            .collect();
+                        data.insert("search".into(), search.into());
+                        &SEARCH
+                    }
+                };
+                (endpoint, route)
             }
             Target::Collection { user, id } => {
-                self.endpoint(&format!("api/v1/collections/{user}/{id}"))
+                let endpoint = self.endpoint(&format!("api/v1/collections/{user}/{id}"));
+                data.insert("username".into(), user.into());
+                data.insert("collection_id".into(), id.into());
+                (endpoint, &COLLECTION)
             }
             Target::Collections { user } => return self.collections(user),
         };
         let state = ListingState {
             endpoint,
+            route,
+            data,
             page: 0,
             index: 0,
             done: false,
@@ -782,5 +910,53 @@ mod tests {
         assert!(!error.contains("secretkey") && !error.contains("127.0.0.1"));
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /api/v1/collections/alice/7?page=1 "));
+    }
+
+    #[tokio::test]
+    async fn search_keywords_follow_upstream_transform_and_metadata_option() {
+        let listed =
+            json!({"id": "abc123", "path": "https://w.wallhaven.cc/full/ab/wallhaven-abc123.jpeg"});
+        let full = json!({"data": {"id": "abc123", "category": "anime", "purity": "sfw",
+            "resolution": "1920x1080", "dimension_x": 1920, "dimension_y": 1080,
+            "created_at": "2024-01-02 03:04:05", "tags": [{"id": 1, "name": "cat"}],
+            "path": "https://w.wallhaven.cc/full/ab/wallhaven-abc123.jpeg"}});
+        let (root, server) = serve(vec![
+            ok(
+                json!({"data": [listed], "meta": {"last_page": 1, "query": {"id": 5, "tag": "cats"}}}),
+            ),
+            ok(full),
+        ]);
+        let media: Vec<_> = wallhaven(root)
+            .with_metadata(true)
+            .stream(&Url::parse("https://wallhaven.cc/search?q=id%3A5").unwrap())
+            .collect()
+            .await;
+        let media = media.into_iter().next().unwrap().unwrap();
+        let keywords = media.metadata.unwrap().site_keywords.unwrap();
+        let fields = &keywords.fields;
+        assert_eq!(keywords.route.subcategory, "search");
+        assert_eq!(fields["category"], "wallhaven");
+        assert_eq!(fields["wh_category"], "anime");
+        assert_eq!(fields["tags"], json!(["cat"]));
+        assert_eq!(
+            (fields["width"].clone(), fields["height"].clone()),
+            (json!(1920), json!(1080))
+        );
+        assert_eq!(fields["date"], "2024-01-02 03:04:05");
+        assert_eq!(
+            fields["url"],
+            "https://w.wallhaven.cc/full/ab/wallhaven-abc123.jpeg"
+        );
+        assert_eq!(
+            (fields["filename"].clone(), fields["extension"].clone()),
+            (json!("wallhaven-abc123"), json!("jpg"))
+        );
+        assert_eq!(
+            fields["search"],
+            json!({"q": "id:5", "tags": "cats", "tag_id": 5})
+        );
+        assert!(!fields.contains_key("path") && !fields.contains_key("created_at"));
+        let requests = server.join().unwrap();
+        assert!(requests[1].starts_with("GET /api/v1/w/abc123 "));
     }
 }
