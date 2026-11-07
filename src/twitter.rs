@@ -275,9 +275,8 @@ impl Twitter {
     /// temporarily locked (only on an interactive terminal); otherwise the
     /// lock is an authorization error.
     pub fn with_locked(mut self, value: Option<&Value>) -> Self {
-        use std::io::IsTerminal;
         self.locked_wait =
-            value.and_then(Value::as_str) == Some("wait") && std::io::stdin().is_terminal();
+            value.and_then(Value::as_str) == Some("wait") && crate::actions::input_allowed();
         self
     }
 

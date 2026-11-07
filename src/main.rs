@@ -370,8 +370,8 @@ struct Args {
     /// Accepted for compatibility: output is never colored
     #[arg(long, hide = true)]
     no_colors: bool,
-    /// Accepted for compatibility: gallery-dl-rs never prompts for input
-    #[arg(long, hide = true)]
+    /// Do not prompt for input (e.g. Twitter `locked: wait`)
+    #[arg(long)]
     no_input: bool,
     /// Additional native setting KEY=VALUE (VALUE is JSON or text), e.g.
     /// extractor.4chan.retries=3; `extractor.*` keys also reach the
@@ -767,6 +767,7 @@ async fn async_main(args: Args) {
 }
 
 async fn run(args: Args) -> Result<()> {
+    gallery_dl_rs::actions::set_no_input(args.no_input);
     if args.list_modules {
         // `lines` also drops carriage returns of CRLF checkouts.
         for module in include_str!("upstream_modules.txt").lines() {
