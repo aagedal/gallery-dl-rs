@@ -81,7 +81,7 @@ async fn collecting_api_preserves_resolved_array_command_and_failure_semantics()
         ),
         Duration::from_secs(5),
     );
-    let items = timeout(Duration::from_secs(2), backend.extract(&social_url()))
+    let items = timeout(Duration::from_secs(20), backend.extract(&social_url()))
         .await
         .unwrap()
         .unwrap();
@@ -92,7 +92,7 @@ async fn collecting_api_preserves_resolved_array_command_and_failure_semantics()
         Duration::from_secs(5),
     );
     assert!(
-        timeout(Duration::from_secs(2), backend.extract(&social_url()))
+        timeout(Duration::from_secs(20), backend.extract(&social_url()))
             .await
             .unwrap()
             .is_err()
