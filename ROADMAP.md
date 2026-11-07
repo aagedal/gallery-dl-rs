@@ -1618,6 +1618,15 @@ library), and `downloader.http.consume-content` (connection reuse).
 only that child (`parent-skip` makes children count toward their input).
 Remaining: `parent-session` (native extractors keep per-site sessions).
 
+**Remaining site options (2026-11-07):** documented upstream options without
+native behavior yet: DeviantArt `auto-watch`/`auto-unwatch` (account
+actions) and `comments-avatars` avatar queueing (comments themselves are
+supported); Facebook `author-followups`; Instagram `audio`, `user-strategy`
+(native lookups use `web_profile_info`), `user-cache` (memory only) and the
+`warn-images`/`warn-videos` warnings; Pixiv `work.related`; Twitter `locked`,
+`metadata-user`, `retries-api` and `twitpic`; `ytdl.deprecations` (yt-dlp
+diagnostics are never shown). Most need an account to verify.
+
 **Implemented input, auth and pacing options, 2026-10-28:** input files accept
 upstream's `-KEY=VALUE` (next URL) and `-G KEY=VALUE` (all following URLs)
 option lines; such inputs re-resolve their settings. `-I/--input-file-comment`
