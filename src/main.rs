@@ -2179,6 +2179,9 @@ fn extract_input<'a>(
                                             .and_then(serde_json::Value::as_i64)
                                             .unwrap_or(9),
                                     )
+                                    .with_locked(
+                                        options.site_options.as_deref().and_then(|o| o.get("locked")),
+                                    )
                                     .with_include(options.include.clone())
                                     .with_expansion(ExpansionOptions {
                                         retweets: options.retweets.unwrap_or_default(),

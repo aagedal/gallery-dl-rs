@@ -127,6 +127,7 @@ pub struct Twitter {
     /// Upstream `retries-api`: retries of API responses whose errors came
     /// from the server (`None` retries without limit).
     retries_api: Option<u32>,
+    locked_wait: bool,
     rate_limits: RateLimits,
     transaction: Mutex<Option<Transaction>>,
     initialize: tokio::sync::Mutex<()>,
@@ -179,6 +180,7 @@ impl Twitter {
             request_timeout: timeout,
             retries: 0,
             retries_api: Some(9),
+            locked_wait: false,
             rate_limits: RateLimits::default(),
             transaction: Mutex::new(None),
             initialize: tokio::sync::Mutex::new(()),
@@ -266,6 +268,16 @@ impl Twitter {
     /// Upstream `retries-api` (negative values retry without limit).
     pub fn with_retries_api(mut self, retries: i64) -> Self {
         self.retries_api = u32::try_from(retries).ok();
+        self
+    }
+
+    /// Upstream `locked`: `"wait"` prompts to retry while the account is
+    /// temporarily locked (only on an interactive terminal); otherwise the
+    /// lock is an authorization error.
+    pub fn with_locked(mut self, value: Option<&Value>) -> Self {
+        use std::io::IsTerminal;
+        self.locked_wait =
+            value.and_then(Value::as_str) == Some("wait") && std::io::stdin().is_terminal();
         self
     }
 
@@ -416,6 +428,28 @@ impl Twitter {
     }
 
     async fn fetch(&self, endpoint: &Url, code: &str, api: bool) -> Result<Vec<u8>> {
+        loop {
+            let body = self.fetch_timed(endpoint, code, api).await?;
+            if !(api && account_locked(&body)) {
+                return Ok(body);
+            }
+            if !self.locked_wait {
+                return Err(error("Account temporarily locked"));
+            }
+            eprintln!("[twitter][warning] Account temporarily locked");
+            eprint!("Press ENTER to retry.");
+            let read = tokio::task::spawn_blocking(|| {
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line)
+            })
+            .await;
+            if !matches!(read, Ok(Ok(count)) if count > 0) {
+                return Err(error("Account temporarily locked"));
+            }
+        }
+    }
+
+    async fn fetch_timed(&self, endpoint: &Url, code: &str, api: bool) -> Result<Vec<u8>> {
         tokio::time::timeout(self.timeout, async {
             let mut api_tries = 0u32;
             loop {
@@ -641,6 +675,20 @@ fn server_errors(body: &[u8]) -> bool {
                     .iter()
                     .any(|e| e.get("source").and_then(Value::as_str) == Some("Server"))
             })
+}
+
+/// Upstream's "this account is temporarily locked" API error.
+fn account_locked(body: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(body)
+        .ok()
+        .and_then(|value| value.get("errors").and_then(Value::as_array).cloned())
+        .is_some_and(|errors| {
+            errors.iter().any(|e| {
+                e.get("message")
+                    .and_then(Value::as_str)
+                    .is_some_and(|m| m.contains("this account is temporarily locked"))
+            })
+        })
 }
 
 fn backoff(attempt: u8) -> Duration {
@@ -1132,6 +1180,14 @@ mod tests {
         let client = br#"{"errors":[{"code":89,"source":"Client"}]}"#;
         assert!(!server_errors(client));
         assert!(!server_errors(b"not json"));
+    }
+
+    #[test]
+    fn locked_account_errors_are_recognized() {
+        let locked = br#"{"errors":[{"message":"Denied by access control: To protect our users from spam and other malicious activity, this account is temporarily locked."}]}"#;
+        assert!(account_locked(locked));
+        assert!(!account_locked(br#"{"errors":[{"message":"Timeout"}]}"#));
+        assert!(!account_locked(b"not json"));
     }
 
     #[test]

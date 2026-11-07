@@ -1634,8 +1634,8 @@ native behavior yet: DeviantArt `auto-watch`/`auto-unwatch` (account
 actions) and `comments-avatars` avatar queueing (comments themselves are
 supported); Facebook `author-followups`; Instagram `audio`, `user-strategy`
 (native lookups use `web_profile_info`) and `user-cache` (memory only;
-`warn-images` and `warn-videos` are supported); Pixiv `work.related`; Twitter `locked`,
-`metadata-user` and `twitpic` (`retries-api` and `ads` are supported); `ytdl.deprecations` (yt-dlp
+`warn-images` and `warn-videos` are supported); Pixiv `work.related`; Twitter
+`metadata-user` and `twitpic` (`retries-api`, `ads` and `locked` are supported); `ytdl.deprecations` (yt-dlp
 diagnostics are never shown). Most need an account to verify.
 
 **Implemented input, auth and pacing options, 2026-10-28:** input files accept
