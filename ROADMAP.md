@@ -1624,7 +1624,7 @@ actions) and `comments-avatars` avatar queueing (comments themselves are
 supported); Facebook `author-followups`; Instagram `audio`, `user-strategy`
 (native lookups use `web_profile_info`), `user-cache` (memory only) and
 `warn-videos` (`warn-images` is supported); Pixiv `work.related`; Twitter `locked`,
-`metadata-user`, `retries-api` and `twitpic`; `ytdl.deprecations` (yt-dlp
+`metadata-user` and `twitpic` (`retries-api` and `ads` are supported); `ytdl.deprecations` (yt-dlp
 diagnostics are never shown). Most need an account to verify.
 
 **Implemented input, auth and pacing options, 2026-10-28:** input files accept
