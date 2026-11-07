@@ -1638,7 +1638,7 @@ supported); Instagram `user-strategy` (native lookups use
 `web_profile_info`), `user-cache` (memory only) and story-sticker audio
 (post `audio`, `warn-images` and `warn-videos` are supported; Pixiv
 `work.related` is too); Twitter
-`metadata-user` and `twitpic` (`retries-api`, `ads` and `locked` are supported); `ytdl.deprecations` (yt-dlp
+`metadata-user` (`retries-api`, `ads`, `locked` and `twitpic` are supported); `ytdl.deprecations` (yt-dlp
 diagnostics are never shown). Most need an account to verify.
 
 **Implemented input, auth and pacing options, 2026-10-28:** input files accept

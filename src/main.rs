@@ -2204,6 +2204,11 @@ fn extract_input<'a>(
                                         videos: options.videos.unwrap_or_default(),
                                         previews: options.previews.unwrap_or(false),
                                         unavailable: options.unavailable.unwrap_or(false),
+                                        twitpic: options
+                                            .site_options
+                                            .as_deref()
+                                            .and_then(|o| o.get("twitpic"))
+                                            .is_some_and(gallery_dl_rs::postprocess::truthy),
                                     })
                                     .with_thread_options(ThreadOptions {
                                         expand: options.expand.unwrap_or(false),
