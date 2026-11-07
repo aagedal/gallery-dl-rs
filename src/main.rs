@@ -2128,6 +2128,9 @@ fn extract_input<'a>(
                     let native = extractors
                         .instagram
                         .get_or_init(|| async {
+                            gallery_dl_rs::instagram::set_warn_images(
+                                options.site_options.as_deref().and_then(|o| o.get("warn-images")),
+                            );
                             Instagram::from_cookie_jar(
                                 extractors.cookie_jar(configured, "instagram.com").await?,
                                 backend.timeout,

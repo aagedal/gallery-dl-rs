@@ -1622,8 +1622,8 @@ Remaining: `parent-session` (native extractors keep per-site sessions).
 native behavior yet: DeviantArt `auto-watch`/`auto-unwatch` (account
 actions) and `comments-avatars` avatar queueing (comments themselves are
 supported); Facebook `author-followups`; Instagram `audio`, `user-strategy`
-(native lookups use `web_profile_info`), `user-cache` (memory only) and the
-`warn-images`/`warn-videos` warnings; Pixiv `work.related`; Twitter `locked`,
+(native lookups use `web_profile_info`), `user-cache` (memory only) and
+`warn-videos` (`warn-images` is supported); Pixiv `work.related`; Twitter `locked`,
 `metadata-user`, `retries-api` and `twitpic`; `ytdl.deprecations` (yt-dlp
 diagnostics are never shown). Most need an account to verify.
 

@@ -1356,6 +1356,19 @@ fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
                 ));
             }
             let media_id = identifier(item.get("pk"))?;
+            if kind == Some(1) {
+                let size = |value: &Value, key: &str| value.get(key).and_then(Value::as_u64).unwrap_or(0);
+                let (width, height) = (size(variant, "width"), size(variant, "height"));
+                let original = (size(item, "original_width"), size(item, "original_height"));
+                if WARN_IMAGES.load(std::sync::atomic::Ordering::Relaxed)
+                    < lowered_dimensions(width, height, original)
+                {
+                    eprintln!(
+                        "[instagram][warning] {code}: Available image resolutions lower than the original ({width}x{height} < {}x{}). Consider refreshing your cookies.",
+                        original.0, original.1
+                    );
+                }
+            }
             let extension = if kind == Some(2) {
                 "mp4"
             } else {
@@ -1463,6 +1476,25 @@ fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
         .collect()
 }
 
+/// Upstream `warn-images`: 0 warns when either dimension is below the
+/// original, 1 (`"all"`/`"both"`) when both are, 9 never.
+static WARN_IMAGES: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+pub fn set_warn_images(value: Option<&Value>) {
+    let level = match value {
+        Some(Value::String(mode)) if matches!(mode.as_str(), "all" | "both") => 1,
+        Some(value) if !crate::postprocess::truthy(value) => 9,
+        _ => 0,
+    };
+    WARN_IMAGES.store(level, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// How many of an image's dimensions are noticeably below the original.
+fn lowered_dimensions(width: u64, height: u64, original: (u64, u64)) -> u8 {
+    u8::from(width as f64 * 1.1 < original.0 as f64)
+        + u8::from(height as f64 * 1.1 < original.1 as f64)
+}
+
 /// Metadata follows the selected carousel child and representation, never its
 /// parent post or a video's image preview.
 fn file_metadata(item: &Value, variant: &Value, video: bool) -> crate::file_metadata::FileMetadata {
@@ -1504,6 +1536,14 @@ fn identifier(value: Option<&Value>) -> Result<String> {
 #[cfg(test)]
 mod file_option_tests {
     use super::*;
+
+    #[test]
+    fn warn_images_counts_lowered_dimensions() {
+        assert_eq!(lowered_dimensions(1080, 1080, (1080, 1080)), 0);
+        assert_eq!(lowered_dimensions(640, 1080, (1080, 1080)), 1);
+        assert_eq!(lowered_dimensions(640, 640, (1080, 1080)), 2);
+        assert_eq!(lowered_dimensions(1000, 1000, (1080, 1080)), 0);
+    }
 
     #[test]
     fn carousel_files_carry_upstream_keywords() {
