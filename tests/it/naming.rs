@@ -615,7 +615,9 @@ fn format_string_dialects_follow_upstream() {
         render("\u{c}F {id}_{title.upper()[:5]}_{num:>03}.{extension!u}"),
         "7_HELLO_001.JPG"
     );
-    assert_eq!(render("\u{c}F {'a:b' if num == 1 else 'c'}x"), "a:bx");
+    // `path-restrict: auto` replaces `:` only on Windows.
+    let expected = if cfg!(windows) { "a_bx" } else { "a:bx" };
+    assert_eq!(render("\u{c}F {'a:b' if num == 1 else 'c'}x"), expected);
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("name.txt");
     std::fs::write(&file, "{id}-{num}.{extension}\n").unwrap();
