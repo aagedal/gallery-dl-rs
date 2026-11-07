@@ -625,14 +625,14 @@ downloads. Document compatibility differences as features land.
 **Implemented upstream keyword dictionaries (2026-11-07):** files of the
 native Pinterest, Tumblr, Reddit, Flickr, Kemono/Coomer, Wallhaven, Imgur,
 Weasyl, VSCO, ArtStation, Fur Affinity, Newgrounds, Mastodon, Bluesky,
-DeviantArt, Twitter and Instagram (regular posts) extractors carry upstream's per-file keyword dictionaries
+DeviantArt, Twitter, Instagram (posts, stories and highlights) and Facebook
+extractors carry upstream's per-file keyword dictionaries
 (`PostMetadata.site_keywords`), so upstream filename/directory templates,
 filters and postprocessor keywords work unchanged, and default paths follow
 upstream's per-subcategory formats. Fur Affinity also parses the site's
 current (2025) markup, which upstream's parsers no longer match. Twitter keywords omit raw `article` objects and community dictionaries,
-which may carry malformed or private payloads. Remaining: Facebook,
-Instagram stories/highlights and Pixiv (whose typed metadata already maps
-most upstream names) still expose native keywords.
+which may carry malformed or private payloads. Remaining: Pixiv (whose typed metadata already maps most upstream names)
+still exposes native keywords.
 
 **Implemented experimental native Imgur:** single images, albums and gallery
 posts via the public `post/v1` API, with shared retries, timeouts, network
