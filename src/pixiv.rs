@@ -1565,7 +1565,8 @@ impl Pixiv {
         })
         .map(move |result| match result {
             Ok(location) => crate::event::child_job(
-                ChildMetadata::from_raw("pixiv", "me", &serde_json::Map::new()),
+                ChildMetadata::from_raw("pixiv", "me", &serde_json::Map::new())
+                    .with_url(location.as_str()),
                 move || self.events(&location),
             ),
             Err(e) => stream::once(async move { Err(e) }).boxed(),

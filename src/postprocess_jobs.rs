@@ -29,6 +29,8 @@ pub struct JobConfiguration {
 pub struct JobMedia {
     pub media: Media,
     pub scope: Option<ScopeLease>,
+    /// The innermost child job the file belongs to, if any.
+    pub child: Option<crate::event::ChildControl>,
 }
 impl std::fmt::Debug for JobMedia {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -781,9 +783,11 @@ impl State<'_> {
                     .and_then(|frame| frame.post.as_ref())
                     .map(|post| post.lease())
                     .transpose()?;
+                let child = self.frames.last().and_then(|frame| frame.control.clone());
                 return Ok(Some(JobMedia {
                     media: *media,
                     scope,
+                    child,
                 }));
             }
             ExtractionEvent::Post(post) => {

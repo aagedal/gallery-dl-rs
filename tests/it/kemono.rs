@@ -14,8 +14,16 @@ fn native_and_compatibility_kemono_metadata_share_filters_templates_and_archive_
         .unwrap()
         .remove(0);
         assert_eq!(native.archive_key(), compatible.archive_key());
+        // Native files also carry upstream's keyword dictionary.
+        let mut typed = native.metadata.clone().unwrap();
+        let keywords = typed.site_keywords.take().unwrap();
+        assert_eq!(keywords.fields["title"], "Hello");
+        assert_eq!(keywords.fields["date"], "2024-01-02 03:04:05");
+        assert_eq!(keywords.fields["type"], "file");
+        assert_eq!(keywords.fields["filename"], "cover");
+        assert_eq!(keywords.fields["num"], 1);
         assert_eq!(
-            serde_json::to_value(&native.metadata).unwrap(),
+            serde_json::to_value(Some(typed)).unwrap(),
             serde_json::to_value(&compatible.metadata).unwrap()
         );
         assert!(
@@ -335,8 +343,10 @@ fn creator_profiles_reach_filters_and_templates_without_changing_archive_ownersh
     )
     .unwrap()
     .remove(0);
+    let mut typed = native.metadata.clone().unwrap();
+    typed.site_keywords = None;
     assert_eq!(
-        serde_json::to_value(&native.metadata).unwrap(),
+        serde_json::to_value(Some(typed)).unwrap(),
         serde_json::to_value(&compatible.metadata).unwrap()
     );
     assert_eq!(native.archive_key(), compatible.archive_key());

@@ -454,6 +454,42 @@ fn parse_reel_with(data: &Value, expected: &Reel, static_videos: bool) -> Result
     } else {
         items.iter().enumerate().collect()
     };
+    // Upstream `_parse_post_rest` keywords of a story or highlight reel.
+    let reel_id = expected
+        .id
+        .rsplit(':')
+        .next()
+        .unwrap_or(&expected.id)
+        .to_owned();
+    let expires = reel.get("expiring_at").and_then(Value::as_i64);
+    let username = user.get("username").and_then(Value::as_str).unwrap_or("");
+    let mut story = serde_json::Map::new();
+    story.insert("user".into(), user.clone());
+    story.insert(
+        "expires".into(),
+        crate::filter::source_date_text(expires).into(),
+    );
+    story.insert("post_id".into(), reel_id.clone().into());
+    let reel_code = reel_id
+        .parse::<u64>()
+        .map(shortcode_from_id)
+        .unwrap_or_default();
+    story.insert("post_shortcode".into(), reel_code.into());
+    let post_url = match expires {
+        Some(_) => format!("https://www.instagram.com/stories/{username}/"),
+        None => format!("https://www.instagram.com/stories/highlights/{reel_id}/"),
+    };
+    story.insert("post_url".into(), post_url.into());
+    let kind = if expires.is_some() {
+        "story"
+    } else {
+        "highlight"
+    };
+    story.insert("type".into(), kind.into());
+    if let Some(title) = reel.get("title") {
+        story.insert("highlight_title".into(), title.clone());
+    }
+    story.insert("count".into(), selected.len().into());
     let mut media = Vec::new();
     let mut seen = HashSet::new();
     for (index, item) in selected {
@@ -498,6 +534,28 @@ fn parse_reel_with(data: &Value, expected: &Reel, static_videos: bool) -> Result
         for item in &mut parsed {
             if let Some(meta) = &mut item.metadata {
                 meta.index = index + 1;
+                if let Some(keywords) = &mut meta.site_keywords {
+                    let fields = &mut std::sync::Arc::make_mut(keywords).fields;
+                    for key in [
+                        "post_id",
+                        "post_shortcode",
+                        "likes",
+                        "liked",
+                        "pinned",
+                        "description",
+                        "tags",
+                    ] {
+                        fields.remove(key);
+                    }
+                    fields.extend(story.clone());
+                    fields.insert("num".into(), (index + 1).into());
+                    if let Some(at) = post.get("expiring_at").and_then(Value::as_i64) {
+                        fields.insert(
+                            "expires".into(),
+                            crate::filter::source_date_text(Some(at)).into(),
+                        );
+                    }
+                }
             }
         }
         media.extend(parsed);
@@ -611,5 +669,18 @@ mod tests {
         assert_eq!(meta.shortcode, "Bl");
         assert_eq!(meta.timestamp, Some(100));
         assert_eq!(meta.username.as_deref(), Some("fixture"));
+        let fields = &meta.site_keywords.as_ref().unwrap().fields;
+        assert_eq!(fields["type"], "highlight");
+        assert_eq!(fields["post_id"], "123");
+        assert_eq!(
+            fields["post_url"],
+            "https://www.instagram.com/stories/highlights/123/"
+        );
+        assert_eq!(fields["media_id"], "101");
+        assert_eq!(
+            (fields["num"].clone(), fields["count"].clone()),
+            (json!(1), json!(1))
+        );
+        assert!(!fields.contains_key("likes"));
     }
 }

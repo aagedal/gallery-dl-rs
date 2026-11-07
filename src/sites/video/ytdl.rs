@@ -188,9 +188,22 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
         let route = route(&key);
         let mut entries = Vec::new();
         flatten(info, &mut entries, 0);
+        // Upstream `generic-category`: Generic results are `ytdl-generic`
+        // files filed under the input's domain.
+        let generic = (key == "Generic" && http.option_bool("generic-category", true))
+            .then(|| url.host_str().unwrap_or_default().to_owned());
         let events: Vec<_> = entries
             .into_iter()
             .filter_map(|entry| item(entry, &url, &key))
+            .map(|mut item| {
+                if let Some(domain) = &generic {
+                    item.keywords
+                        .insert("_category".into(), "ytdl-generic".into());
+                    item.keywords
+                        .insert("_subcategory".into(), domain.clone().into());
+                }
+                item
+            })
             .flat_map(|item| crate::sites::post(&SITE, http, route, vec![item]))
             .collect();
         Ok(crate::sites::events(events))
@@ -289,6 +302,17 @@ async fn run(http: &Http, url: &Url) -> Result<Value> {
     let scratch = tempfile::tempdir()?;
     if let Some(cookies) = http.ytdl_cookies() {
         command.args(cookies.arguments(scratch.path())?);
+    }
+    // Upstream `extractor.ytdl` `config-file`, `raw-options` and
+    // `cmdline-args`, given after the defaults so they can override them.
+    let mut options = Map::new();
+    for key in ["config-file", "raw-options", "cmdline-args"] {
+        if let Some(value) = http.option(key) {
+            options.insert(key.into(), value.clone());
+        }
+    }
+    if !options.is_empty() {
+        command.args(crate::download::YtdlOptions::parse(&Value::Object(options))?.args());
     }
     command
         .args(["--", url.as_str()])
@@ -487,6 +511,37 @@ mod tests {
             )));
         let media = testing::media(extract(&http, url("https://www.youtube.com/watch?v=v1"))).await;
         assert_eq!(media.len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn extractor_options_reach_the_command_and_generic_category() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("yt-dlp");
+        let json = serde_json::json!({"extractor_key": "Generic", "id": "v1",
+            "title": "One", "ext": "mp4", "webpage_url": "https://example.com/v"});
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\ncase \"$*\" in *'--config-locations /c.conf --write-subs --extra'*) ;; \
+                 *) exit 1;; esac\ncat <<'EOF'\n{json}\nEOF\n"
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let options = serde_json::json!({"config-file": "/c.conf",
+            "raw-options": {"writesubtitles": true}, "cmdline-args": "--extra"});
+        let http = testing::http("yt-dlp", url("http://127.0.0.1:1/"))
+            .with_ytdl(&script)
+            .with_options(Some(std::sync::Arc::new(
+                options.as_object().unwrap().clone(),
+            )));
+        let media = testing::media(extract(&http, url("ytdl:https://example.com/v"))).await;
+        assert_eq!(media.len(), 1);
+        let keywords = testing::keywords(&media[0]);
+        assert_eq!(keywords["category"], "ytdl-generic");
+        assert_eq!(keywords["subcategory"], "example.com");
     }
 
     #[cfg(unix)]

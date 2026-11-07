@@ -11,6 +11,7 @@
 //! when present so mature submissions work when logged in; otherwise those
 //! submissions are skipped. Media must be HTTPS on `d.furaffinity.net` or
 //! `*.facdn.net`.
+use crate::sites::{Route, SiteKeywords};
 use crate::{
     Result,
     cookies::CookieJar,
@@ -29,6 +30,7 @@ use futures_util::{
     stream::{self, BoxStream},
 };
 use reqwest::{Client, StatusCode};
+use serde_json::{Map, Value};
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     sync::Arc,
@@ -281,8 +283,360 @@ fn rating(html: &str) -> Option<String> {
     clean_text(text).map(|t| t.to_ascii_lowercase())
 }
 
+const FILENAME: &str = "{id}{title:? //}.{extension}";
+const DIRECTORY: &[&str] = &["{category}", "{user!l}"];
+static POST: Route = Route::new("post", FILENAME, DIRECTORY, "{id}");
+static GALLERY: Route = Route::new("gallery", FILENAME, DIRECTORY, "{id}");
+static FOLDER: Route = Route::new(
+    "folder",
+    FILENAME,
+    &[
+        "{category}",
+        "{user!l}",
+        "Folders",
+        "{folder_id}{folder_name:? //}",
+    ],
+    "{id}",
+);
+static SCRAPS: Route = Route::new(
+    "scraps",
+    FILENAME,
+    &["{category}", "{user!l}", "Scraps"],
+    "{id}",
+);
+static FAVORITE: Route = Route::new(
+    "favorite",
+    FILENAME,
+    &["{category}", "{user!l}", "Favorites"],
+    "{id}",
+);
+static SEARCH: Route = Route::new(
+    "search",
+    FILENAME,
+    &["{category}", "Search", "{search}"],
+    "{id}",
+);
+static SUBMISSIONS: Route = Route::new("submissions", FILENAME, DIRECTORY, "{id}");
+
+/// Upstream `descriptions` and `layout` options.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PostOptions {
+    /// `descriptions: "html"`: keep the description's HTML.
+    pub html_descriptions: bool,
+    /// `layout`: `Some(true)` new, `Some(false)` old, `None` detect.
+    pub new_layout: Option<bool>,
+}
+
+impl PostOptions {
+    pub fn from_options(options: Option<&Map<String, Value>>) -> Self {
+        let get = |key: &str| options.and_then(|o| o.get(key)).and_then(Value::as_str);
+        Self {
+            html_descriptions: get("descriptions") == Some("html"),
+            new_layout: match get("layout") {
+                None | Some("auto" | "") => None,
+                Some(layout) => Some(layout != "old"),
+            },
+        }
+    }
+}
+
+/// gallery-dl `text.remove_html(txt, "", "")`.
+fn strip_html(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('<') {
+        match rest[start + 1..].find('>') {
+            Some(end) if end > 0 => {
+                out.push_str(&rest[..start]);
+                rest = &rest[start + end + 2..];
+            }
+            _ => {
+                out.push_str(&rest[..=start]);
+                rest = &rest[start + 1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out.trim().to_owned()
+}
+
+/// Upstream `_parse_post` keywords; `None` without a download link.
+fn post_keywords(
+    html: &str,
+    id: &str,
+    user: Option<&str>,
+    options: &PostOptions,
+) -> Option<Map<String, Value>> {
+    use crate::sites::art::{Scan, parse_int};
+    use crate::sites::{remove_html as rh, unescape};
+    let pi = |text: &str| parse_int(text, 0);
+    if html.contains("class=\"submission-content-stats\"") {
+        return current_keywords(html, id, user, options);
+    }
+    let mut extr = Scan::new(html);
+    let new_layout = options
+        .new_layout
+        .unwrap_or_else(|| !extr.extr("<meta ", ">").contains("http-equiv="));
+    let path = extr.extr("href=\"//d", "\"");
+    if path.is_empty() {
+        return None;
+    }
+    let url = Url::parse(&format!("https://d{path}")).ok()?;
+    let (filename, extension) = crate::sites::nameext(&url);
+    let extension = crate::path_options::map_extension(&extension).unwrap_or(extension);
+    let mut data = Map::new();
+    data.insert("id".into(), pi(id).into());
+    data.insert("url".into(), url.as_str().into());
+    data.insert("filename".into(), filename.clone().into());
+    data.insert("extension".into(), extension.into());
+    let description;
+    if new_layout {
+        let tags = crate::sites::gdl::split_html(extr.extr("<h3>Keywords</h3>", "</section>"));
+        data.insert("tags".into(), tags.into());
+        data.insert(
+            "scraps".into(),
+            (extr.extr(" submissions\">", "<") == "Scraps").into(),
+        );
+        data.insert(
+            "title".into(),
+            unescape(extr.extr("<h2><p>", "</p></h2>")).into(),
+        );
+        let artist_url = extr.extr("title=\"", "\"").trim().to_owned();
+        data.insert("artist_url".into(), artist_url.into());
+        data.insert("artist".into(), extr.extr(">", "<").into());
+        description = extr.extr(
+            "class=\"submission-description user-submitted-links\">",
+            "                                    </div>",
+        );
+        for key in ["views", "favorites", "comments"] {
+            let value = pi(&rh(extr.extr(&format!("class=\"{key}\">"), "</span>")));
+            data.insert(key.into(), value.into());
+        }
+        data.insert(
+            "rating".into(),
+            rh(extr.extr("class=\"rating\">", "</span>")).into(),
+        );
+        let category = rh(extr.extr(">Category</strong>", "</span>"));
+        data.insert("fa_category".into(), category.into());
+        data.insert("theme".into(), rh(extr.extr(">", "<")).into());
+        data.insert(
+            "species".into(),
+            rh(extr.extr(">Species</strong>", "</div>")).into(),
+        );
+        data.insert(
+            "gender".into(),
+            rh(extr.extr(">Gender</strong>", "</div>")).into(),
+        );
+        data.insert("width".into(), pi(extr.extr("<span>", "x")).into());
+        data.insert("height".into(), pi(extr.extr("", "p")).into());
+        let folders: Vec<Value> = extr
+            .extr("<h3>Listed in Folders</h3>", "</section>")
+            .split("</a>")
+            .map(rh)
+            .filter(|folder| !folder.is_empty())
+            .map(Value::from)
+            .collect();
+        data.insert("folders".into(), folders.into());
+    } else {
+        let scraps = extr
+            .extr("class=\"minigallery-title", "</a>")
+            .contains("/scraps/");
+        data.insert("scraps".into(), scraps.into());
+        data.insert("title".into(), unescape(extr.extr("<h2>", "</h2>")).into());
+        let artist_url = extr.extr("title=\"", "\"").trim().to_owned();
+        data.insert("artist_url".into(), artist_url.into());
+        data.insert("artist".into(), extr.extr(">", "<").into());
+        for (key, label) in [
+            ("fa_category", "Category"),
+            ("theme", "Theme"),
+            ("species", "Species"),
+            ("gender", "Gender"),
+        ] {
+            let value = extr
+                .extr(&format!("<b>{label}:</b>"), "<")
+                .trim()
+                .to_owned();
+            data.insert(key.into(), value.into());
+        }
+        for (key, label) in [
+            ("favorites", "Favorites"),
+            ("comments", "Comments"),
+            ("views", "Views"),
+        ] {
+            let value = pi(extr.extr(&format!("<b>{label}:</b>"), "<"));
+            data.insert(key.into(), value.into());
+        }
+        data.insert(
+            "width".into(),
+            pi(extr.extr("<b>Resolution:</b>", "x")).into(),
+        );
+        data.insert("height".into(), pi(extr.extr("", "<")).into());
+        let tags: Vec<Value> =
+            crate::sites::gdl::split_html(extr.extr("id=\"keywords\">", "</div>"))
+                .into_iter()
+                .step_by(2)
+                .map(Value::from)
+                .collect();
+        data.insert("tags".into(), tags.into());
+        data.insert("rating".into(), extr.extr("<img alt=\"", " ").into());
+        description = extr.extr(
+            "<td valign=\"top\" align=\"left\" width=\"70%\" class=\"alt1\" style=\"padding:8px\">",
+            "                               </td>",
+        );
+        data.insert("folders".into(), Value::Array(Vec::new()));
+    }
+    finish_keywords(&mut data, path, id, user, description, options);
+    Some(data)
+}
+
+/// The 2025 site layout, which upstream's parsers no longer match; the
+/// same keywords are read from its markup.
+fn current_keywords(
+    html: &str,
+    id: &str,
+    user: Option<&str>,
+    options: &PostOptions,
+) -> Option<Map<String, Value>> {
+    use crate::sites::art::{extract_iter, parse_int};
+    use crate::sites::{extr, remove_html as rh, unescape};
+    let pi = |text: &str| parse_int(text.trim(), 0);
+    let url = download_url(html)?;
+    let path = url.as_str().strip_prefix("https://d")?.to_owned();
+    let (filename, extension) = crate::sites::nameext(&url);
+    let extension = crate::path_options::map_extension(&extension).unwrap_or(extension);
+    let mut data = Map::new();
+    data.insert("id".into(), pi(id).into());
+    data.insert("url".into(), url.as_str().into());
+    data.insert("filename".into(), filename.into());
+    data.insert("extension".into(), extension.into());
+    let tags: Vec<Value> = extract_iter(html, "href=\"/search/@keywords ", "\"")
+        .into_iter()
+        .map(|tag| Value::from(unescape(tag)))
+        .collect();
+    data.insert("tags".into(), tags.into());
+    let scraps = html.contains("minigallery-container scraps");
+    data.insert("scraps".into(), scraps.into());
+    let title = extr(html, "<div class=\"submission-title\">", "</div>").unwrap_or("");
+    data.insert("title".into(), unescape(&rh(title)).into());
+    let header = extr(html, "submission-description-artist", "popup_date").unwrap_or("");
+    let artist_url = extr(header, "href=\"/user/", "/\"")
+        .unwrap_or("")
+        .trim()
+        .to_owned();
+    let artist = extr(header, "__displayName\"", "</span>")
+        .and_then(|span| span.split_once('>'))
+        .map_or_else(|| artist_url.clone(), |(_, name)| unescape(name.trim()));
+    data.insert("artist_url".into(), artist_url.into());
+    data.insert("artist".into(), artist.into());
+    let description = extr(
+        html,
+        "submission-description-text user-submitted-links\">",
+        "</div>",
+    )
+    .unwrap_or("");
+    for (key, label) in [
+        ("views", "Views"),
+        ("favorites", "Favorites"),
+        ("comments", "Comments"),
+    ] {
+        let block = extr(html, &format!("<div title=\"{label}\">"), "</div>\n").unwrap_or("");
+        let value = pi(&rh(block));
+        data.insert(key.into(), value.into());
+    }
+    let rating = extr(
+        html,
+        "class=\"font-large inline c-contentRating--",
+        "</div>",
+    )
+    .and_then(|block| block.split_once('>'))
+    .map_or(String::new(), |(_, rating)| rating.trim().to_owned());
+    data.insert("rating".into(), rating.into());
+    let stats = extr(html, "class=\"submission-content-stats\">", "</div>").unwrap_or("");
+    let spans: Vec<String> = extract_iter(stats, "<span>", "</span>")
+        .into_iter()
+        .map(|span| unescape(span.rsplit('>').next().unwrap_or(span).trim()))
+        .collect();
+    let (labels, values) = spans.split_at(spans.len() / 2);
+    let stat = |label: &str| {
+        labels
+            .iter()
+            .position(|l| l == label)
+            .and_then(|i| values.get(i))
+            .cloned()
+            .unwrap_or_default()
+    };
+    data.insert("fa_category".into(), stat("Category").into());
+    data.insert("theme".into(), stat("Theme").into());
+    data.insert("species".into(), stat("Species").into());
+    data.insert("gender".into(), stat("Gender").into());
+    let size = stat("Resolution");
+    let (width, height) = size.split_once('x').unwrap_or(("", ""));
+    data.insert("width".into(), pi(width).into());
+    data.insert("height".into(), pi(height).into());
+    let folders: Vec<Value> = extract_iter(html, "class=\"submission-folder\">", "</div>")
+        .into_iter()
+        .map(rh)
+        .filter(|folder| !folder.is_empty())
+        .map(Value::from)
+        .collect();
+    data.insert("folders".into(), folders.into());
+    finish_keywords(&mut data, &path, id, user, description, options);
+    Some(data)
+}
+
+/// Upstream's shared `user`, `date`, `description` and `thumbnail`.
+fn finish_keywords(
+    data: &mut Map<String, Value>,
+    path: &str,
+    id: &str,
+    user: Option<&str>,
+    description: &str,
+    options: &PostOptions,
+) {
+    use crate::sites::unescape;
+    let filename = data
+        .get("filename")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let artist_url = data
+        .get("artist_url")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let user = user.map_or(artist_url, str::to_owned);
+    data.insert("user".into(), user.into());
+    let stamp = filename
+        .split('.')
+        .next()
+        .and_then(|t| t.parse::<i64>().ok());
+    data.insert("date".into(), crate::filter::source_date_text(stamp).into());
+    let description = if options.html_descriptions {
+        description.trim().to_owned()
+    } else {
+        unescape(&strip_html(description))
+    };
+    data.insert("description".into(), description.into());
+    let token = path.rsplit('/').nth(1).unwrap_or_default();
+    data.insert(
+        "thumbnail".into(),
+        format!("https://t.furaffinity.net/{id}@600-{token}.jpg").into(),
+    );
+}
+
 /// Parse a submission page.
 pub fn parse_submission(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
+    parse_submission_with(bytes, id, None, &PostOptions::default(), &POST, &Map::new())
+}
+
+fn parse_submission_with(
+    bytes: &[u8],
+    id: &str,
+    user: Option<&str>,
+    options: &PostOptions,
+    route: &'static Route,
+    extra: &Map<String, Value>,
+) -> Result<Vec<Media>> {
     let html =
         std::str::from_utf8(bytes).map_err(|_| error("Fur Affinity returned invalid HTML"))?;
     let url = download_url(html).ok_or_else(|| error(NOT_AVAILABLE))?;
@@ -314,6 +668,10 @@ pub fn parse_submission(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
             caption,
             timestamp,
             index: 1,
+            site_keywords: post_keywords(html, id, user, options).map(|mut fields| {
+                fields.extend(extra.clone());
+                Arc::new(SiteKeywords { route, fields })
+            }),
             ..PostMetadata::default()
         }),
         url,
@@ -413,11 +771,14 @@ pub struct FurAffinity {
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
+    post_options: PostOptions,
 }
 
 struct GalleryState {
     user: String,
     folder: Folder,
+    /// Upstream `folder_name`: the folder URL's optional name segment.
+    folder_name: String,
     page: u64,
     /// The next favorites page path, as linked from the current one.
     next: Option<String>,
@@ -443,7 +804,14 @@ impl FurAffinity {
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
+            post_options: PostOptions::default(),
         })
+    }
+
+    /// Upstream `descriptions` and `layout`.
+    pub fn with_post_options(mut self, options: PostOptions) -> Self {
+        self.post_options = options;
+        self
     }
 
     /// Apply proxy and user-agent settings to requests and emitted media.
@@ -544,8 +912,18 @@ impl FurAffinity {
     }
 
     async fn submission(&self, id: &str) -> Result<VecDeque<ExtractionEvent>> {
+        self.submission_with(id, None, &POST, &Map::new()).await
+    }
+
+    async fn submission_with(
+        &self,
+        id: &str,
+        user: Option<&str>,
+        route: &'static Route,
+        extra: &Map<String, Value>,
+    ) -> Result<VecDeque<ExtractionEvent>> {
         let body = self.call(&format!("view/{id}/")).await?;
-        let mut items = parse_submission(&body, id)?;
+        let mut items = parse_submission_with(&body, id, user, &self.post_options, route, extra)?;
         for item in &mut items {
             self.network.apply_media(item);
         }
@@ -590,8 +968,32 @@ impl FurAffinity {
             || state.page >= MAX_PAGES
             || (matches!(state.folder, Folder::Favorites | Folder::Submissions(_))
                 && state.next.is_none());
+        let mut extra = Map::new();
+        let route = match &state.folder {
+            Folder::Gallery => &GALLERY,
+            Folder::Scraps => &SCRAPS,
+            Folder::Favorites => &FAVORITE,
+            Folder::Submissions(_) => &SUBMISSIONS,
+            Folder::Folder(folder) => {
+                extra.insert("folder_id".into(), folder.clone().into());
+                extra.insert("folder_name".into(), state.folder_name.clone().into());
+                &FOLDER
+            }
+            Folder::Search(query) => {
+                let q = query.iter().find(|(k, _)| k == "q").map(|(_, v)| v.clone());
+                extra.insert("search".into(), q.map_or(Value::Null, Value::from));
+                &SEARCH
+            }
+        };
+        let user = match state.folder {
+            Folder::Search(_) | Folder::Submissions(_) => None,
+            _ => Some(state.user.clone()),
+        };
         for id in ids {
-            match self.submission(&id).await {
+            match self
+                .submission_with(&id, user.as_deref(), route, &extra)
+                .await
+            {
                 Ok(events) => state.pending.extend(events),
                 // Mature or removed submissions do not abort the gallery.
                 Err(e) if e.to_string() == NOT_AVAILABLE => {}
@@ -621,9 +1023,20 @@ impl FurAffinity {
             }
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
         };
+        let folder_name = match &folder {
+            Folder::Folder(id) => url
+                .path_segments()
+                .and_then(|mut parts| {
+                    parts.position(|part| part == id.as_str())?;
+                    parts.next().map(str::to_owned)
+                })
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
         let state = GalleryState {
             user,
             folder,
+            folder_name,
             page: 0,
             next: None,
             done: false,
@@ -1013,5 +1426,61 @@ by <a href="/user/alice/"><strong>Alice</strong></a>
         assert!(!requests[0].to_ascii_lowercase().contains("cookie:"));
         assert!(requests[2].starts_with("GET /view/7/ "));
         assert!(requests[3].starts_with("GET /gallery/alice/2/ "));
+    }
+
+    #[test]
+    fn current_layout_keywords_use_upstream_names() {
+        use serde_json::json;
+        let html = r#"<link href="//d.furaffinity.net/media/static/x.css" rel="stylesheet">
+<section class="minigallery-container gallery"></section>
+<div class="submission-description-artist"><a href="/user/alice/"></a>
+<div class="submission-title"><h2> Big &amp; Bold </h2></div>
+by <span class="c-usernameBlockSimple__displayName" title=" Alice ">Alice</span>
+Posted <span class="popup_date" title="x">x</span></div>
+<div class="submission-description-text user-submitted-links"> Hi <b>there</b> </div>
+<div title="Views">
+<div>12</div>
+<div class="highlight">Views</div>
+</div>
+<div title="Favorites">
+<div>
+ 3 </div>
+<div class="highlight">Favorites</div>
+</div>
+<div class="font-large inline c-contentRating--mature">Mature</div>
+<a class="button standard mobile-fix" href="//d.furaffinity.net/download/art/alice/1695300000/1695300000.alice_big.png">Download</a>
+<div class="submission-content-stats">
+<span class="highlight"><span>Category</span><span>Resolution</span></span>
+<span><span>Artwork</span><span>1280 x 768</span></span>
+</div>
+<a href="/search/@keywords dragon">dragon</a>
+<div class="submission-folder"><a href="/gallery/alice/folder/1/x/"><span>Sketches</span></a></div>"#;
+        let fields = post_keywords(html, "42", None, &PostOptions::default()).unwrap();
+        assert_eq!(fields["id"], 42);
+        assert_eq!(fields["title"], "Big & Bold");
+        assert_eq!(
+            (fields["artist"].clone(), fields["user"].clone()),
+            (json!("Alice"), json!("alice"))
+        );
+        assert_eq!(fields["description"], "Hi there");
+        assert_eq!(
+            (fields["views"].clone(), fields["favorites"].clone()),
+            (json!(12), json!(3))
+        );
+        assert_eq!(fields["rating"], "Mature");
+        assert_eq!(fields["fa_category"], "Artwork");
+        assert_eq!(
+            (fields["width"].clone(), fields["height"].clone()),
+            (json!(1280), json!(768))
+        );
+        assert_eq!(fields["tags"], json!(["dragon"]));
+        assert_eq!(fields["folders"], json!(["Sketches"]));
+        assert_eq!(fields["scraps"], false);
+        assert_eq!(fields["date"], "2023-09-21 12:40:00");
+        assert_eq!(fields["filename"], "1695300000.alice_big");
+        assert_eq!(
+            fields["thumbnail"],
+            "https://t.furaffinity.net/42@600-1695300000.jpg"
+        );
     }
 }

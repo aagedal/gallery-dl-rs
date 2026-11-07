@@ -65,6 +65,8 @@ pub(super) enum Expr {
     Tuple(Vec<Expr>),
     Map(Vec<(String, Expr)>),
     Index(Box<Expr>, Box<Expr>),
+    /// `value[start:stop:step]`; absent bounds are `None` literals.
+    Slice(Box<Expr>, Box<[Expr; 3]>),
     Unary(UnaryOp, Box<Expr>),
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
     Compare(Box<Expr>, Vec<(CompareOp, Expr)>),
@@ -106,6 +108,25 @@ pub(super) enum CompareOp {
     NotIn,
     Is,
     IsNot,
+}
+
+/// One Python expression, for `\fE`/`\fF` format strings.
+#[derive(Clone, PartialEq)]
+pub(crate) struct Expression(Expr);
+impl std::fmt::Debug for Expression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Expression { expression: [redacted] }")
+    }
+}
+impl Expression {
+    pub(crate) fn parse(source: &str) -> Result<Self> {
+        let expression = parser::parse(source)?;
+        validate_tree(&expression, 0, &mut 4096)?;
+        Ok(Self(expression))
+    }
+    pub(crate) fn evaluate(&self, context: &BTreeMap<String, Value>) -> Result<Value> {
+        eval::evaluate(&self.0, context)
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -356,6 +377,12 @@ fn validate_tree(expr: &Expr, depth: usize, budget: &mut usize) -> Result<()> {
             next(right)?;
         }
         Expr::Unary(_, value) => next(value)?,
+        Expr::Slice(value, bounds) => {
+            next(value)?;
+            for bound in bounds.iter() {
+                next(bound)?;
+            }
+        }
         Expr::Compare(left, comparisons) => {
             next(left)?;
             for (_, value) in comparisons {
@@ -383,6 +410,34 @@ fn map(values: BTreeMap<String, Value>) -> Value {
     Value::Map(Arc::new(values.into()))
 }
 // Structured public metadata is validated before reaching this context.
+/// A JSON rendering of a value for external interpreters; dates become
+/// ISO 8601 strings.
+pub(crate) fn value_json(value: &Value) -> serde_json::Value {
+    use serde_json::Value as Json;
+    match value {
+        Value::None => Json::Null,
+        Value::SourceDate(date) => Json::String(source_date_text(*date)),
+        Value::SourceNullDate(seconds) => Json::String(source_date_text(Some(*seconds))),
+        Value::SourcePrimitive(value) => value_json(value),
+        Value::Bool(value) => Json::Bool(*value),
+        Value::Int(value) => serde_json::Number::from_i128(*value)
+            .map_or_else(|| Json::String(value.to_string()), Json::Number),
+        Value::Float(value) => {
+            serde_json::Number::from_f64(*value).map_or(Json::Null, Json::Number)
+        }
+        Value::String(value) => Json::String(value.to_string()),
+        Value::List(values) | Value::Tuple(values) => {
+            Json::Array(values.iter().map(value_json).collect())
+        }
+        Value::Map(values) => Json::Object(
+            values
+                .iter()
+                .map(|(key, value)| (key.clone(), value_json(value)))
+                .collect(),
+        ),
+    }
+}
+
 pub(crate) fn json_value(value: &serde_json::Value) -> Value {
     if let Some(value) = source_primitive_from_json(value) {
         return Value::SourcePrimitive(Arc::new(json_value(value)));

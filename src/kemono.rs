@@ -7,6 +7,7 @@
 //! `https://HOST/data{path}`; the root host redirects to an `nN.HOST` CDN
 //! subdomain, which the downloader allows for these categories only. The
 //! service name is kept in the `instance` metadata field and the archive key.
+use crate::sites::{Route, SiteKeywords};
 use crate::{
     Result, error,
     event::{ExtractionEvent, KeywordPolicy, Post, group_with_keywords},
@@ -20,7 +21,7 @@ use futures_util::{
     stream::{self, BoxStream},
 };
 use reqwest::{Client, StatusCode, header};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashMap, HashSet, VecDeque},
@@ -54,6 +55,13 @@ const USER_AGENT: &str = concat!(
 );
 const MAX_RESPONSE: usize = 32 * 1024 * 1024;
 const PAGE_SIZE: usize = 50;
+/// Upstream `KemonoExtractor` formats.
+static POST: Route = Route::new(
+    "post",
+    "{id}_{title[:180]}_{num:>02}_{filename[:180]}.{extension}",
+    &["{category}", "{service}", "{user}"],
+    "{service}_{user}_{id}_{num}",
+);
 const MAX_PAGES: usize = 200;
 /// Site domains (without optional `www.`/`beta.` prefixes) and categories.
 pub const HOSTS: [(&str, &str); 6] = [
@@ -574,6 +582,8 @@ struct SelectedFile {
     path: String,
     name: Option<Arc<str>>,
     kind: FileKind,
+    /// The source file object (upstream merges it into the keywords).
+    fields: Option<Arc<Map<String, Value>>>,
 }
 
 fn source_file<'a>(
@@ -592,6 +602,7 @@ fn source_file<'a>(
         path: path.trim().replace('\\', "/"),
         name,
         kind,
+        fields: file.as_object().cloned().map(Arc::new),
     })
 }
 
@@ -635,6 +646,7 @@ fn selected_files(post: &Value, category: &str, selection: &Selection) -> Vec<Se
                             name: Some(Arc::from(path.as_str())),
                             path,
                             kind: FileKind::Inline,
+                            fields: None,
                         })
                         .collect::<Vec<_>>()
                 });
@@ -685,6 +697,8 @@ fn selected_post(
     let mut hashes = HashSet::new();
     let mut count = 0;
     let mut media = Vec::new();
+    let mut files: Vec<Map<String, Value>> = Vec::new();
+    let mut archives = Vec::new();
     for file in selected_files(post, category, selection) {
         if !safe_file_path(&file.path) {
             continue;
@@ -717,6 +731,13 @@ fn selected_post(
             .or_else(|| path_ext.clone())
             .unwrap_or_else(|| "bin".into());
         count += 1;
+        let archive_kind = path_ext.as_deref().is_some_and(archive_extension)
+            || path_ext.as_deref() == Some("bin") && archive_extension(&output_ext);
+        let file_fields = file_keywords(&file, host, hash, archive_kind);
+        if archive_kind {
+            archives.push(file_fields.clone());
+        }
+        files.push(file_fields);
         if !selection.original && !path_ext.as_deref().is_some_and(image_extension) {
             continue;
         }
@@ -777,7 +798,79 @@ fn selected_post(
             handoff: BTreeMap::new(),
         });
     }
+    // Upstream merges the post object, `date`, `archives` and `count` with
+    // each file's object.
+    let mut keywords = post.as_object().cloned().unwrap_or_default();
+    let date = base.timestamp;
+    keywords.insert("date".into(), crate::filter::source_date_text(date).into());
+    keywords.insert("archives".into(), archives.into());
+    keywords.insert("count".into(), count.into());
+    for item in &mut media {
+        let Some(metadata) = item.metadata.as_mut() else {
+            continue;
+        };
+        let mut fields = keywords.clone();
+        if let Some(file) = files.get(metadata.index.wrapping_sub(1)) {
+            fields.extend(file.clone());
+        }
+        fields.insert("num".into(), metadata.index.into());
+        metadata.site_keywords = Some(Arc::new(SiteKeywords {
+            route: &POST,
+            fields,
+        }));
+    }
     (media, count)
+}
+
+/// Upstream's per-file keywords: the source object without `id`, plus
+/// `type`, `path`, `hash`, `url`, `filename` and `extension`.
+fn file_keywords(
+    file: &SelectedFile,
+    host: &str,
+    hash: Option<&str>,
+    archive: bool,
+) -> Map<String, Value> {
+    let mut fields = file.fields.as_deref().cloned().unwrap_or_default();
+    fields.remove("id");
+    let kind = match (archive, file.kind) {
+        (true, _) => "archive",
+        (_, FileKind::File) => "file",
+        (_, FileKind::Attachments) => "attachment",
+        (_, FileKind::Inline) => "inline",
+    };
+    let url = format!("https://{host}/data{}", file.path);
+    if file.kind == FileKind::Inline {
+        fields.insert("name".into(), file.path.clone().into());
+    }
+    fields.insert("type".into(), kind.into());
+    fields.insert("path".into(), file.path.clone().into());
+    fields.insert("hash".into(), hash.unwrap_or("").into());
+    let (filename, extension) = match file.name.as_deref() {
+        Some(name) => {
+            let (stem, ext) = match name.rsplit_once('.') {
+                Some((stem, ext)) if !stem.is_empty() && ext.chars().count() <= 16 => {
+                    (stem.to_owned(), ext.to_lowercase())
+                }
+                _ => (name.to_owned(), String::new()),
+            };
+            if ext.is_empty() {
+                let from_url = Url::parse(&url)
+                    .map(|url| crate::sites::nameext(&url).1)
+                    .unwrap_or_default();
+                (stem, from_url)
+            } else {
+                (stem, ext)
+            }
+        }
+        None => Url::parse(&url)
+            .map(|url| crate::sites::nameext(&url))
+            .unwrap_or_default(),
+    };
+    let extension = crate::path_options::map_extension(&extension).unwrap_or(extension);
+    fields.insert("url".into(), url.into());
+    fields.insert("filename".into(), filename.into());
+    fields.insert("extension".into(), extension.into());
+    fields
 }
 
 fn json(bytes: &[u8]) -> Result<Value> {
@@ -877,6 +970,41 @@ pub struct Kemono {
     post_order: PostOrder,
     endpoint: Endpoint,
     favorites: Favorites,
+    extras: Extras,
+    /// Upstream `username`/`password`: log in once per host before API calls.
+    login: Option<(String, String)>,
+    logged_in: tokio::sync::Mutex<HashSet<String>>,
+    /// Upstream fetches `dms` and `announcements` once per run.
+    creator_lists: tokio::sync::Mutex<HashMap<(String, &'static str), Value>>,
+}
+
+/// Upstream `comments`, `dms`, `announcements`, `archives` and
+/// `archives-format`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Extras {
+    pub comments: bool,
+    pub dms: bool,
+    pub announcements: bool,
+    pub archives: bool,
+    /// `archives-format: "dict"`: archives keyed by their hash.
+    pub archives_dict: bool,
+}
+
+impl Extras {
+    pub fn from_options(options: Option<&Map<String, Value>>, comments: Option<bool>) -> Self {
+        let get = |key: &str| options.and_then(|o| o.get(key));
+        let flag = |key: &str| get(key).is_some_and(crate::postprocess::truthy);
+        Self {
+            comments: comments.unwrap_or(false) || flag("comments"),
+            dms: flag("dms"),
+            announcements: flag("announcements"),
+            archives: flag("archives"),
+            archives_dict: matches!(
+                get("archives-format").and_then(Value::as_str),
+                Some("dict" | "object")
+            ),
+        }
+    }
 }
 
 struct ListingState {
@@ -916,7 +1044,57 @@ impl Kemono {
             post_order: PostOrder::Forward,
             endpoint: Endpoint::Posts,
             favorites: Favorites::Artist,
+            extras: Extras::default(),
+            login: None,
+            logged_in: tokio::sync::Mutex::new(HashSet::new()),
+            creator_lists: tokio::sync::Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Upstream `login`: credentials for `/api/v1/authentication/login`.
+    pub fn with_login(mut self, username: Option<&str>, password: Option<&str>) -> Self {
+        self.login = username
+            .filter(|name| !name.is_empty())
+            .map(|name| (name.to_owned(), password.unwrap_or_default().to_owned()));
+        self
+    }
+
+    /// Log in once per host; the session cookies then authenticate API calls.
+    async fn ensure_login(&self, host: &str, root: &Url) -> Result<()> {
+        let Some((username, password)) = &self.login else {
+            return Ok(());
+        };
+        let mut logged_in = self.logged_in.lock().await;
+        if logged_in.contains(host) {
+            return Ok(());
+        }
+        let endpoint = root
+            .join("api/v1/authentication/login")
+            .expect("static login path");
+        let response = self
+            .client
+            .post(endpoint.clone())
+            .headers(self.session.request_headers(&endpoint)?)
+            .timeout(self.request_timeout)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(serde_json::json!({"username": username, "password": password}).to_string())
+            .send()
+            .await
+            .map_err(|_| error("Kemono login failed; check network access"))?;
+        self.session
+            .store_response(response.url(), response.headers());
+        if response.status().as_u16() >= 400 {
+            return Err(error(
+                "Kemono login failed: username or password is incorrect",
+            ));
+        }
+        logged_in.insert(host.to_owned());
+        Ok(())
+    }
+
+    pub fn with_extras(mut self, extras: Extras) -> Self {
+        self.extras = extras;
+        self
     }
 
     pub fn with_favorites(mut self, favorites: Favorites) -> Self {
@@ -1032,6 +1210,9 @@ impl Kemono {
         if !query.is_empty() {
             endpoint.query_pairs_mut().extend_pairs(query);
         }
+        tokio::time::timeout(self.timeout, self.ensure_login(host, &root))
+            .await
+            .map_err(|_| error("native Kemono extraction timed out"))??;
         tokio::time::timeout(self.timeout, self.request(&endpoint))
             .await
             .map_err(|_| error("native Kemono extraction timed out"))?
@@ -1068,7 +1249,7 @@ impl Kemono {
         }
     }
 
-    fn finish_revision(
+    async fn finish_revision(
         &self,
         host: &str,
         post: RevisionPost,
@@ -1076,6 +1257,8 @@ impl Kemono {
         creator: &CreatorMetadata,
     ) -> VecDeque<ExtractionEvent> {
         let mut events = self.finish(host, &post.post, identity);
+        let extra = self.post_extras(host, identity, creator, &post).await;
+        let fetched_archives = self.archive_metadata(host, &events).await;
         for event in &mut events {
             match event {
                 ExtractionEvent::Post(boundary) => {
@@ -1083,6 +1266,11 @@ impl Kemono {
                         metadata.creator = Some(creator.clone());
                         metadata.username = creator.name.clone();
                         metadata.revision = post.metadata.clone();
+                        if let Some(keywords) = &mut metadata.site_keywords {
+                            let fields = &mut Arc::make_mut(keywords).fields;
+                            fields.extend(extra.clone());
+                            self.format_archives(fields, &fetched_archives);
+                        }
                     }
                 }
                 ExtractionEvent::Media(media) => {
@@ -1090,6 +1278,11 @@ impl Kemono {
                         metadata.creator = Some(creator.clone());
                         metadata.username = creator.name.clone();
                         metadata.revision = post.metadata.clone();
+                        if let Some(keywords) = &mut metadata.site_keywords {
+                            let fields = &mut Arc::make_mut(keywords).fields;
+                            fields.extend(extra.clone());
+                            self.format_archives(fields, &fetched_archives);
+                        }
                     }
                     if let Some(id) = post
                         .metadata
@@ -1107,6 +1300,158 @@ impl Kemono {
             }
         }
         events
+    }
+
+    /// Upstream post-level keywords added after the post object: profile,
+    /// revision fields and optional `comments`, `dms` and `announcements`.
+    async fn post_extras(
+        &self,
+        host: &str,
+        identity: &Identity,
+        creator: &CreatorMetadata,
+        post: &RevisionPost,
+    ) -> Map<String, Value> {
+        let mut extra = Map::new();
+        if self.metadata {
+            let profile = serde_json::to_value(creator).unwrap_or(Value::Null);
+            extra.insert("user_profile".into(), profile);
+            let name = creator.name.as_deref().map_or(Value::Null, Value::from);
+            extra.insert("username".into(), name);
+        }
+        if let Some(revision) = &post.metadata {
+            if let Some(id) = revision.id {
+                extra.insert("revision_id".into(), id.into());
+            }
+            if let Some(hash) = &revision.hash {
+                extra.insert("revision_hash".into(), hash.as_ref().into());
+            }
+            if let Some(index) = revision.index {
+                extra.insert("revision_index".into(), index.into());
+            }
+            if let Some(count) = revision.count {
+                extra.insert("revision_count".into(), count.into());
+            }
+        }
+        let base = format!("api/v1/{}/user/{}", identity.service, identity.user);
+        if self.extras.comments {
+            let path = format!("{base}/post/{}/comments", identity.id);
+            let comments = match self.call(host, &path, &[]).await.and_then(|b| json(&b)) {
+                Ok(comments @ Value::Array(_)) => comments,
+                _ => Value::Array(Vec::new()),
+            };
+            extra.insert("comments".into(), comments);
+        }
+        for (enabled, key) in [
+            (self.extras.dms, "dms"),
+            (self.extras.announcements, "announcements"),
+        ] {
+            if !enabled {
+                continue;
+            }
+            let cache_key = (format!("{host}/{base}"), key);
+            let mut cache = self.creator_lists.lock().await;
+            let value = match cache.get(&cache_key) {
+                Some(value) => value.clone(),
+                None => {
+                    let path = format!("{base}/{key}");
+                    let value = match self.call(host, &path, &[]).await.and_then(|b| json(&b)) {
+                        Ok(value) => value,
+                        Err(e) => {
+                            eprintln!(
+                                "[{}][warning] {}/{}: unable to retrieve {key} ({e})",
+                                category(host).unwrap_or("kemono"),
+                                identity.user,
+                                identity.id
+                            );
+                            Value::Array(Vec::new())
+                        }
+                    };
+                    cache.insert(cache_key, value.clone());
+                    value
+                }
+            };
+            extra.insert(key.into(), value);
+        }
+        extra
+    }
+
+    /// Upstream `archives: true`: `/v1/file/HASH` metadata per archive.
+    async fn archive_metadata(
+        &self,
+        host: &str,
+        events: &VecDeque<ExtractionEvent>,
+    ) -> HashMap<String, Map<String, Value>> {
+        let mut fetched = HashMap::new();
+        if !self.extras.archives {
+            return fetched;
+        }
+        let Some(archives) = events.iter().find_map(|event| match event {
+            ExtractionEvent::Media(media) => media
+                .metadata
+                .as_ref()?
+                .site_keywords
+                .as_ref()?
+                .fields
+                .get("archives")
+                .and_then(Value::as_array)
+                .cloned(),
+            _ => None,
+        }) else {
+            return fetched;
+        };
+        for archive in archives {
+            let Some(hash) = archive.get("hash").and_then(Value::as_str) else {
+                continue;
+            };
+            if !valid_hash(hash) || fetched.contains_key(hash) {
+                continue;
+            }
+            let path = format!("api/v1/file/{hash}");
+            match self.call(host, &path, &[]).await.and_then(|b| json(&b)) {
+                Ok(Value::Object(data)) => {
+                    fetched.insert(hash.to_owned(), data);
+                }
+                _ => eprintln!(
+                    "[{}][warning] Failed to retrieve archive metadata of '{}'",
+                    category(host).unwrap_or("kemono"),
+                    archive.get("name").and_then(Value::as_str).unwrap_or(hash)
+                ),
+            }
+        }
+        fetched
+    }
+
+    /// Apply fetched archive metadata and `archives-format`.
+    fn format_archives(
+        &self,
+        fields: &mut Map<String, Value>,
+        fetched: &HashMap<String, Map<String, Value>>,
+    ) {
+        let Some(Value::Array(archives)) = fields.remove("archives") else {
+            return;
+        };
+        let archives = archives.into_iter().map(|archive| {
+            let hash = archive
+                .get("hash")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned();
+            let archive = match (fetched.get(&hash), archive) {
+                (Some(data), Value::Object(file)) => {
+                    let mut data = data.clone();
+                    data.extend(file);
+                    Value::Object(data)
+                }
+                (_, archive) => archive,
+            };
+            (hash, archive)
+        });
+        let value = if self.extras.archives_dict {
+            Value::Object(archives.collect())
+        } else {
+            Value::Array(archives.map(|(_, archive)| archive).collect())
+        };
+        fields.insert("archives".into(), value);
     }
 
     async fn prepare_revisions(
@@ -1182,12 +1527,14 @@ impl Kemono {
                                     (host, identity, creator, revisions, pending),
                                 ));
                             }
-                            pending = self.finish_revision(
-                                &host,
-                                revisions.pop_front()?,
-                                &identity,
-                                creator.as_deref().expect("prepared creator"),
-                            );
+                            pending = self
+                                .finish_revision(
+                                    &host,
+                                    revisions.pop_front()?,
+                                    &identity,
+                                    creator.as_deref().expect("prepared creator"),
+                                )
+                                .await;
                         }
                     },
                 )
@@ -1317,12 +1664,14 @@ impl Kemono {
                         .revision_identity
                         .as_ref()
                         .expect("prepared source identity");
-                    state.pending = self.finish_revision(
-                        &state.host,
-                        revision,
-                        identity,
-                        state.revision_creator.as_deref().expect("prepared creator"),
-                    );
+                    state.pending = self
+                        .finish_revision(
+                            &state.host,
+                            revision,
+                            identity,
+                            state.revision_creator.as_deref().expect("prepared creator"),
+                        )
+                        .await;
                     continue;
                 }
                 if self.max_posts.is_some_and(|limit| state.emitted >= limit) {
@@ -3460,5 +3809,102 @@ mod tests {
         assert!(error.to_string().contains("not found"));
         assert!(!error.to_string().contains("127.0.0.1"));
         assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn extras_add_comments_creator_lists_and_keyed_archives() {
+        let hash = "ab".repeat(32);
+        let post = json!({"post": {"id": "7", "user": "42", "service": "patreon",
+            "title": "T", "published": "2024-01-02T03:04:05",
+            "file": {"name": "pack.zip", "path": format!("/ab/ab/{hash}.zip")},
+            "attachments": []}});
+        let (root, server) = serve(vec![
+            response("200 OK", post.to_string().as_bytes()),
+            response("200 OK", br#"[{"id":"c1","content":"nice"}]"#),
+            response("200 OK", br#"[{"content":"dm"}]"#),
+            response("200 OK", br#"{"error":"none"}"#),
+            response("200 OK", br#"{"hash":"x","file_list":["a.png"]}"#),
+        ]);
+        let events: Vec<_> = kemono(root)
+            .with_extras(Extras::from_options(
+                json!({"dms": true, "announcements": 1, "archives": true,
+                    "archives-format": "dict"})
+                .as_object(),
+                Some(true),
+            ))
+            .events(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
+            .collect()
+            .await;
+        let media = events
+            .iter()
+            .find_map(|event| match event {
+                Ok(ExtractionEvent::Media(media)) => Some(media),
+                _ => None,
+            })
+            .unwrap();
+        let keywords = media
+            .metadata
+            .as_ref()
+            .unwrap()
+            .site_keywords
+            .clone()
+            .unwrap();
+        let fields = &keywords.fields;
+        assert_eq!(
+            keywords.route.filename,
+            "{id}_{title[:180]}_{num:>02}_{filename[:180]}.{extension}"
+        );
+        assert_eq!(fields["comments"], json!([{"id": "c1", "content": "nice"}]));
+        assert_eq!(fields["dms"], json!([{"content": "dm"}]));
+        assert_eq!(fields["announcements"], json!({"error": "none"}));
+        assert_eq!(fields["type"], "archive");
+        assert_eq!(fields["hash"], hash.as_str());
+        // Fetched archive metadata is overlaid by the file object.
+        assert_eq!(fields["archives"][&hash]["file_list"], json!(["a.png"]));
+        assert_eq!(fields["archives"][&hash]["hash"], hash.as_str());
+        assert_eq!(fields["archives"][&hash]["name"], "pack.zip");
+        let requests = server.join().unwrap();
+        assert!(requests[1].starts_with("GET /api/v1/patreon/user/42/post/7/comments "));
+        assert!(requests[2].starts_with("GET /api/v1/patreon/user/42/dms "));
+        assert!(requests[3].starts_with("GET /api/v1/patreon/user/42/announcements "));
+        assert!(requests[4].starts_with(&format!("GET /api/v1/file/{hash} ")));
+    }
+
+    #[tokio::test]
+    async fn login_posts_credentials_once_and_reuses_the_session_cookie() {
+        let login = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\nSet-Cookie: session=abc; Path=/\r\n\r\n{}".to_vec();
+        let (root, server) = serve(vec![
+            login,
+            response("200 OK", json!({"post": post("7")}).to_string().as_bytes()),
+        ]);
+        let events: Vec<_> = kemono(root)
+            .with_login(Some("alice"), Some("secret"))
+            .events(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
+            .collect()
+            .await;
+        assert!(events.iter().all(Result::is_ok), "{events:?}");
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("POST /api/v1/authentication/login "));
+        assert!(requests[1].starts_with("GET /api/v1/patreon/user/42/post/7 "));
+        assert!(
+            requests[1]
+                .to_ascii_lowercase()
+                .contains("cookie: session=abc")
+        );
+
+        let (root, server) = serve(vec![response("401 Unauthorized", b"{}")]);
+        let error = kemono(root)
+            .with_login(Some("alice"), Some("wrong"))
+            .events(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .remove(0)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("login failed") && !error.contains("wrong"),
+            "{error}"
+        );
+        server.join().unwrap();
     }
 }

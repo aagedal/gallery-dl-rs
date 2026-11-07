@@ -1207,7 +1207,8 @@ impl Pinterest {
                                 };
                                 let root = self.site_root(&url);
                                 Some(child_job(
-                                    ChildMetadata::from_raw("pinterest", "user", &board),
+                                    ChildMetadata::from_raw("pinterest", "user", &board)
+                                        .with_url(url.as_str()),
                                     move || self.extract(child, root),
                                 ))
                             })
@@ -1228,7 +1229,8 @@ impl Pinterest {
                 };
                 let root = self.site_root(&location);
                 Ok(child_job(
-                    ChildMetadata::from_raw("pinterest", "pinit", &Map::new()),
+                    ChildMetadata::from_raw("pinterest", "pinit", &Map::new())
+                        .with_url(location.as_str()),
                     move || self.extract(child, root),
                 ))
             }),
@@ -1251,7 +1253,8 @@ impl Pinterest {
                         };
                         let root = self.site_root(&url);
                         Some(child_job(
-                            ChildMetadata::from_raw("pinterest", "board", &Map::new()),
+                            ChildMetadata::from_raw("pinterest", "board", &Map::new())
+                                .with_url(url.as_str()),
                             move || self.extract(child, root),
                         ))
                     })

@@ -1548,7 +1548,11 @@ async fn run(args: Args) -> Result<()> {
         let skip_filter = &skip_filter;
         let results = media
             .map(|(index, job)| {
-                let gallery_dl_rs::postprocess::jobs::JobMedia { media: item, scope } = job;
+                let gallery_dl_rs::postprocess::jobs::JobMedia {
+                    media: item,
+                    scope,
+                    child,
+                } = job;
                 let settings = settings_for(index);
                 let settings = &settings[media_settings_key(&item, args.extractor, settings)];
                 let client = client
@@ -1576,6 +1580,15 @@ async fn run(args: Args) -> Result<()> {
                     write_metadata: args.write_metadata,
                     directory: settings.directory.as_ref(),
                 };
+                // Upstream `parent-skip`: a child job's skips count toward
+                // its parent's limit instead of its own.
+                let parent_skip = settings
+                    .options
+                    .site_options
+                    .as_deref()
+                    .and_then(|options| options.get("parent-skip"))
+                    .is_some_and(gallery_dl_rs::postprocess::truthy);
+                let child = child.filter(|_| !parent_skip);
                 async move {
                     // Downloads queued before an abort are dropped unstarted.
                     if terminated.load(std::sync::atomic::Ordering::Acquire)
@@ -1583,6 +1596,7 @@ async fn run(args: Args) -> Result<()> {
                             .lock()
                             .expect("abort state lock poisoned")
                             .contains(&index)
+                        || child.as_ref().is_some_and(|child| child.is_cancelled())
                     {
                         return (index, None);
                     }
@@ -1649,17 +1663,44 @@ async fn run(args: Args) -> Result<()> {
                     let counted = skip_filter
                         .as_ref()
                         .is_none_or(|filter| filter.matches(&item).unwrap_or(false));
-                    (index, Some((result, counted)))
+                    (index, Some((result, counted, child)))
                 }
             })
             .buffer_unordered(args.jobs as usize);
         tokio::pin!(results);
         let mut skipped = 0u64;
         let mut input_skipped = BTreeMap::<usize, u64>::new();
+        let mut child_skipped = std::collections::HashMap::<usize, u64>::new();
         while let Some((index, result)) = results.next().await {
-            let Some((result, counted)) = result else {
+            let Some((result, counted, child)) = result else {
                 continue;
             };
+            // Like upstream's per-job counters, `-A`/`abort:N` inside a child
+            // job stops only that child; the parent continues.
+            if let Some(child) = &child {
+                let count = child_skipped.entry(child.key()).or_default();
+                if counted
+                    && matches!(
+                        result,
+                        Ok(ArchiveOutcome::Completed(Outcome::Skipped(_))
+                            | ArchiveOutcome::AlreadyArchived)
+                    )
+                {
+                    *count += 1;
+                    if args.abort.is_some_and(|limit| *count == limit) {
+                        child.cancel();
+                        eprintln!(
+                            "stopping a child job of input {} after {count} consecutive skipped files",
+                            index + 1
+                        );
+                    }
+                } else if matches!(
+                    result,
+                    Ok(ArchiveOutcome::Completed(Outcome::Downloaded(_)))
+                ) {
+                    *count = 0;
+                }
+            }
             let input = input_skipped.entry(index).or_default();
             if counted
                 && matches!(
@@ -1669,15 +1710,21 @@ async fn run(args: Args) -> Result<()> {
                 )
             {
                 skipped += 1;
-                *input += 1;
+                // Child jobs keep their own counters.
+                if child.is_none() {
+                    *input += 1;
+                }
             } else if matches!(
                 result,
                 Ok(ArchiveOutcome::Completed(Outcome::Downloaded(_)))
             ) {
                 skipped = 0;
-                *input = 0;
+                if child.is_none() {
+                    *input = 0;
+                }
             }
-            if args.abort.is_some_and(|limit| *input >= limit)
+            if child.is_none()
+                && args.abort.is_some_and(|limit| *input >= limit)
                 && aborted
                     .lock()
                     .expect("abort state lock poisoned")
@@ -2081,6 +2128,9 @@ fn extract_input<'a>(
                     let native = extractors
                         .instagram
                         .get_or_init(|| async {
+                            gallery_dl_rs::instagram::set_warn_images(
+                                options.site_options.as_deref().and_then(|o| o.get("warn-images")),
+                            );
                             Instagram::from_cookie_jar(
                                 extractors.cookie_jar(configured, "instagram.com").await?,
                                 backend.timeout,
@@ -2110,7 +2160,22 @@ fn extract_input<'a>(
                                 backend.timeout,
                             )
                             .and_then(|native| {
+                                gallery_dl_rs::twitter::set_ads(
+                                    options
+                                        .site_options
+                                        .as_deref()
+                                        .and_then(|o| o.get("ads"))
+                                        .is_some_and(gallery_dl_rs::postprocess::truthy),
+                                );
                                 native
+                                    .with_retries_api(
+                                        options
+                                            .site_options
+                                            .as_deref()
+                                            .and_then(|o| o.get("retries-api"))
+                                            .and_then(serde_json::Value::as_i64)
+                                            .unwrap_or(9),
+                                    )
                                     .with_include(options.include.clone())
                                     .with_expansion(ExpansionOptions {
                                         retweets: options.retweets.unwrap_or_default(),
@@ -2353,6 +2418,14 @@ fn extract_input<'a>(
                                     .with_favorites(options.favorites.unwrap_or_default())
                                     .with_max_posts(options.max_posts)
                                     .with_metadata(options.metadata.unwrap_or(true))
+                                    .with_login(
+                                        options.username.as_deref(),
+                                        options.password.as_deref(),
+                                    )
+                                    .with_extras(gallery_dl_rs::kemono::Extras::from_options(
+                                        options.site_options.as_deref(),
+                                        options.comments,
+                                    ))
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -2398,6 +2471,13 @@ fn extract_input<'a>(
                                             .site_options
                                             .as_deref()
                                             .and_then(|o| o.get("size-max")),
+                                    ))
+                                    .with_meta(gallery_dl_rs::flickr::MetaOptions::from_options(
+                                        options.site_options.as_deref(),
+                                        options.metadata,
+                                        options.videos.map(|mode| {
+                                            mode != gallery_dl_rs::twitter::VideoMode::Skip
+                                        }),
                                     ))
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
@@ -2500,6 +2580,7 @@ fn extract_input<'a>(
                             gallery_dl_rs::weasyl::Weasyl::new(backend.timeout).and_then(|native| {
                                 native
                                     .with_api_key(options.api_key.as_deref())
+                                    .with_metadata(options.metadata.unwrap_or(false))
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -2520,6 +2601,11 @@ fn extract_input<'a>(
                             )
                             .and_then(|native| {
                                 native
+                                    .with_post_options(
+                                        gallery_dl_rs::furaffinity::PostOptions::from_options(
+                                            options.site_options.as_deref(),
+                                        ),
+                                    )
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -2583,6 +2669,7 @@ fn extract_input<'a>(
                                 |native| {
                                     native
                                         .with_api_key(options.api_key.as_deref())
+                                        .with_metadata(options.metadata.unwrap_or(false))
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -2610,6 +2697,12 @@ fn extract_input<'a>(
                                             options.client_secret.as_deref(),
                                         )
                                         .with_refresh_token(options.refresh_token.as_deref())
+                                        .with_content_options(
+                                            gallery_dl_rs::deviantart::ContentOptions::from_options_with(
+                                                options.site_options.as_deref(),
+                                                options.comments,
+                                            ),
+                                        )
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -2771,6 +2864,13 @@ fn extract_input<'a>(
                                 |native| {
                                     native
                                         .with_pixeldrain_api_key(options.api_key.as_deref())?
+                                        .with_pixeldrain_recursive(
+                                            options
+                                                .site_options
+                                                .as_deref()
+                                                .and_then(|o| o.get("recursive"))
+                                                .is_none_or(gallery_dl_rs::postprocess::truthy),
+                                        )
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)
@@ -2807,6 +2907,12 @@ fn extract_input<'a>(
                                         )?
                                         .with_artist_parent_metadata(
                                             options.artist_parent_metadata().cloned(),
+                                        )
+                                        .with_metadata(
+                                            options
+                                                .site_options
+                                                .as_deref()
+                                                .and_then(|o| o.get("metadata")),
                                         )
                                         .with_threshold(options.booru_threshold.flatten())
                                         .with_favorite_order(options.booru_favorite_order.clone())
@@ -3030,6 +3136,23 @@ fn extract_input<'a>(
                 "unsupported URL; expected a social URL or direct media file (other gallery-dl sites need --extractor compatibility)",
             ));
         };
+        // Upstream `update_kwdict` options for dedicated native extractors.
+        let site_options = settings
+            .get(settings_key(&url, extractor))
+            .and_then(|settings| settings.options.site_options.clone());
+        let input = match site_options.filter(|_| matches!(extractor, Extractor::Native)) {
+            Some(options) => input
+                .map(move |event| {
+                    event.map(|mut event| {
+                        if let ExtractionEvent::Media(media) = &mut event {
+                            gallery_dl_rs::sites::apply_dedicated_keywords(media, Some(&options));
+                        }
+                        event
+                    })
+                })
+                .boxed(),
+            None => input,
+        };
         let input = if routed_site(&url, extractor) == Some("mastodon") {
             let category = settings_category(&url, extractor);
             input
@@ -3086,6 +3209,8 @@ impl Settings {
             before: self.options.date_before,
             after: self.options.date_after,
             unordered,
+            file_unique: self.options.file_unique.unwrap_or(false),
+            child_unique: self.options.child_unique.unwrap_or(false),
         }
     }
 }
@@ -3495,6 +3620,7 @@ async fn resolved_settings(
         None if options.is_empty() => Config::default(),
         None => Config::parse_with_options(b"{}", &std::env::current_dir()?, &options)?,
     };
+    gallery_dl_rs::extract::set_instances(config.instances());
     // Upstream -u/-p set root-level options, which every scope may override.
     let credentials = |username: Option<String>, password: Option<String>| {
         let mut site = serde_json::Map::new();
@@ -3703,6 +3829,8 @@ async fn resolved_settings(
         quoted: None,
         expand: None,
         unique: None,
+        file_unique: None,
+        child_unique: None,
         videos: None,
         previews: None,
         mp4: None,

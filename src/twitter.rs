@@ -124,6 +124,9 @@ pub struct Twitter {
     timeout: Duration,
     request_timeout: Duration,
     retries: u8,
+    /// Upstream `retries-api`: retries of API responses whose errors came
+    /// from the server (`None` retries without limit).
+    retries_api: Option<u32>,
     rate_limits: RateLimits,
     transaction: Mutex<Option<Transaction>>,
     initialize: tokio::sync::Mutex<()>,
@@ -175,6 +178,7 @@ impl Twitter {
             timeout,
             request_timeout: timeout,
             retries: 0,
+            retries_api: Some(9),
             rate_limits: RateLimits::default(),
             transaction: Mutex::new(None),
             initialize: tokio::sync::Mutex::new(()),
@@ -259,6 +263,12 @@ impl Twitter {
 
     /// Configure additional attempts for HTTP 429/5xx and transport failures.
     /// The extraction timeout covers all attempts and waits. Defaults to zero.
+    /// Upstream `retries-api` (negative values retry without limit).
+    pub fn with_retries_api(mut self, retries: i64) -> Self {
+        self.retries_api = u32::try_from(retries).ok();
+        self
+    }
+
     pub fn with_retries(mut self, retries: u8) -> Self {
         self.retries = retries;
         self
@@ -407,21 +417,36 @@ impl Twitter {
 
     async fn fetch(&self, endpoint: &Url, code: &str, api: bool) -> Result<Vec<u8>> {
         tokio::time::timeout(self.timeout, async {
-            for attempt in 0..=self.retries {
-                match self.attempt(endpoint, code, attempt, api).await {
-                    Ok(media) => return Ok(media),
-                    Err(failure) if failure.retry && attempt < self.retries => {
-                        // Transport failures have no response to establish a cooldown.
-                        // Also yield between attempts when Retry-After is zero.
-                        tokio::time::sleep(backoff(attempt)).await;
-                    }
-                    Err(failure) => return Err(failure.error),
+            let mut api_tries = 0u32;
+            loop {
+                let body = self.fetch_once(endpoint, code, api).await?;
+                if !(api && server_errors(&body))
+                    || self.retries_api.is_some_and(|limit| api_tries >= limit)
+                {
+                    return Ok(body);
                 }
+                api_tries += 1;
+                eprintln!("[twitter][warning] API server errors (attempt {api_tries}); retrying");
+                tokio::time::sleep(backoff(api_tries.min(6) as u8)).await;
             }
-            unreachable!()
         })
         .await
         .map_err(|_| error("native Twitter extraction timed out"))?
+    }
+
+    async fn fetch_once(&self, endpoint: &Url, code: &str, api: bool) -> Result<Vec<u8>> {
+        for attempt in 0..=self.retries {
+            match self.attempt(endpoint, code, attempt, api).await {
+                Ok(media) => return Ok(media),
+                Err(failure) if failure.retry && attempt < self.retries => {
+                    // Transport failures have no response to establish a cooldown.
+                    // Also yield between attempts when Retry-After is zero.
+                    tokio::time::sleep(backoff(attempt)).await;
+                }
+                Err(failure) => return Err(failure.error),
+            }
+        }
+        unreachable!()
     }
 
     async fn attempt(
@@ -601,6 +626,23 @@ impl Twitter {
     }
 }
 
+/// Whether an API response failed only because of server-side errors
+/// (upstream retries these up to `retries-api` times).
+fn server_errors(body: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<Value>(body) else {
+        return false;
+    };
+    value.get("data").is_none_or(Value::is_null)
+        && value
+            .get("errors")
+            .and_then(Value::as_array)
+            .is_some_and(|errors| {
+                errors
+                    .iter()
+                    .any(|e| e.get("source").and_then(Value::as_str) == Some("Server"))
+            })
+}
+
 fn backoff(attempt: u8) -> Duration {
     Duration::from_millis(250 * (1u64 << attempt.min(6)))
 }
@@ -767,6 +809,23 @@ pub fn parse_response(bytes: &[u8], requested_post_id: &str) -> Result<Vec<Media
 
 // Twitter dates use a fixed English month and UTC offset; httpdate does not
 // accept this layout, so normalize only the documented UTC form to IMF-fixdate.
+/// Upstream `ads`: keep promoted timeline entries (process-wide, like
+/// other per-run extractor settings).
+static ADS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_ads(include: bool) {
+    ADS.store(include, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether a timeline entry is a promoted tweet that should be skipped.
+pub(crate) fn skip_promoted(value: &Value) -> bool {
+    skip_promoted_with(value, ADS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+fn skip_promoted_with(value: &Value, ads: bool) -> bool {
+    !ads && value.get("promotedMetadata").is_some_and(|v| !v.is_null())
+}
+
 fn timestamp(date: &str) -> Option<i64> {
     let p: Vec<_> = date.split_ascii_whitespace().collect();
     if p.len() != 6 || p[4] != "+0000" {
@@ -1062,6 +1121,70 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn only_data_less_server_errors_are_retried() {
+        let server = br#"{"errors":[{"message":"Timeout","source":"Server"}]}"#;
+        assert!(server_errors(server));
+        let partial = br#"{"data":{"user":{}},"errors":[{"source":"Server"}]}"#;
+        assert!(!server_errors(partial));
+        let client = br#"{"errors":[{"code":89,"source":"Client"}]}"#;
+        assert!(!server_errors(client));
+        assert!(!server_errors(b"not json"));
+    }
+
+    #[test]
+    fn ads_option_keeps_promoted_entries() {
+        let entry = serde_json::json!({"promotedMetadata": {"advertiser": "x"}});
+        assert!(skip_promoted_with(&entry, false));
+        assert!(!skip_promoted_with(&entry, true));
+        assert!(!skip_promoted_with(
+            &serde_json::json!({"promotedMetadata": null}),
+            false
+        ));
+    }
+
+    #[test]
+    fn photo_keywords_follow_upstream_transform_tweet() {
+        let mut tweet: Value = serde_json::from_slice(PHOTO).unwrap();
+        let result = &mut tweet["data"]["tweetResult"]["result"];
+        result["core"]["user_results"]["result"]["rest_id"] = "42".into();
+        result["legacy"]["favorite_count"] = 7.into();
+        result["legacy"]["lang"] = "en".into();
+        result["legacy"]["entities"] = serde_json::json!({"hashtags": [{"text": "art"}]});
+        result["legacy"]["extended_entities"]["media"][0]["original_info"] =
+            serde_json::json!({"width": 640, "height": 480});
+        let media = parse_response(tweet.to_string().as_bytes(), ID).unwrap();
+        let keywords = media[0]
+            .metadata
+            .as_ref()
+            .unwrap()
+            .site_keywords
+            .clone()
+            .unwrap();
+        let fields = &keywords.fields;
+        assert_eq!(keywords.route.filename, "{tweet_id}_{num}.{extension}");
+        assert_eq!(fields["tweet_id"], 1234567890);
+        assert_eq!(fields["content"], "Synthetic post");
+        assert_eq!(fields["date"], "2023-11-14 22:13:20");
+        assert_eq!(fields["author"]["id"], 42);
+        assert_eq!(fields["user"]["name"], "fixture_user");
+        assert_eq!(fields["favorite_count"], 7);
+        assert_eq!(fields["hashtags"], serde_json::json!(["art"]));
+        assert_eq!(
+            (fields["num"].clone(), fields["count"].clone()),
+            (1.into(), 1.into())
+        );
+        assert_eq!(
+            (fields["width"].clone(), fields["height"].clone()),
+            (640.into(), 480.into())
+        );
+        assert_eq!(
+            (fields["filename"].clone(), fields["extension"].clone()),
+            ("fixture".into(), "jpg".into())
+        );
+        assert_eq!(fields["type"], "photo");
     }
 
     #[test]

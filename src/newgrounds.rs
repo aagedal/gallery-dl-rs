@@ -13,6 +13,7 @@
 //! search follow upstream. There is no login, so adult-rated posts are
 //! skipped by the site. Media must be HTTPS on `*.ngfiles.com` or
 //! `*.ungrounded.net`.
+use crate::sites::{Route, SiteKeywords};
 use crate::{
     Result, error,
     event::{ExtractionEvent, group},
@@ -29,7 +30,7 @@ use futures_util::{
     stream::{self, BoxStream},
 };
 use reqwest::{Client, StatusCode};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::Arc,
@@ -285,6 +286,145 @@ fn extension(url: &Url) -> String {
         .unwrap_or_else(|| "jpg".into())
 }
 
+const FILENAME: &str = "{category}_{_index}_{title}.{extension}";
+const ARCHIVE: &str = "{_type}{_index}";
+static POST: Route = Route::new(
+    "image",
+    FILENAME,
+    &["{category}", "{artist[:10]:J, }"],
+    ARCHIVE,
+);
+static FAVORITE: Route = Route::new(
+    "favorite",
+    FILENAME,
+    &["{category}", "{user}", "Favorites"],
+    ARCHIVE,
+);
+static SEARCH: Route = Route::new(
+    "search",
+    FILENAME,
+    &["{category}", "search", "{search_tags}"],
+    ARCHIVE,
+);
+
+/// Upstream `extract_post` keywords shared by art, audio and portal pages:
+/// the page's `title`, `description`, `date` and `rating`, plus the
+/// author comment, favorites, score, tags, artists, user, slug and URL.
+fn post_keywords(html: &str, post_url: &str, user: Option<&str>) -> Map<String, Value> {
+    use crate::sites::{extr, unescape};
+    let get = |begin: &str, end: &str| extr(html, begin, end).unwrap_or("");
+    let mut data = Map::new();
+    data.insert(
+        "title".into(),
+        unescape(get("\"og:title\" content=\"", "\"")).into(),
+    );
+    let description = get(":description\" content=\"", "\"");
+    data.insert("description".into(), unescape(description).into());
+    let date = get("itemprop=\"datePublished\" content=\"", "\"");
+    let timestamp = crate::date::parse_date(date.trim()).ok();
+    data.insert(
+        "date".into(),
+        crate::filter::source_date_text(timestamp).into(),
+    );
+    data.insert("rating".into(), get("class=\"rated-", "\"").into());
+    let comment = get("id=\"author_comments\"", "</div>")
+        .split_once('>')
+        .map_or("", |(_, rest)| rest)
+        .trim();
+    data.insert("comment_html".into(), comment.into());
+    let text = comment.replace("<p><br></p>", "\n\n").replace("<br>", "\n");
+    let mut stripped = String::new();
+    let mut rest = text.as_str();
+    while let Some(start) = rest.find('<') {
+        let Some(end) = rest[start..].find('>') else {
+            break;
+        };
+        stripped.push_str(&rest[..start]);
+        rest = &rest[start + end + 1..];
+    }
+    stripped.push_str(rest);
+    data.insert("comment".into(), unescape(stripped.trim()).into());
+    let favorites = get("id=\"faves_load\">", "<").replace(',', "");
+    data.insert(
+        "favorites".into(),
+        crate::sites::art::parse_int(&favorites, 0).into(),
+    );
+    let score = get("id=\"score_number\">", "<")
+        .trim()
+        .parse::<f64>()
+        .unwrap_or(0.0);
+    data.insert("score".into(), score.into());
+    let mut tags: Vec<String> = crate::sites::gdl::split_html(get("<dd class=\"tags\">", "</dd>"))
+        .into_iter()
+        .filter(|tag| !tag.contains("(function("))
+        .collect();
+    tags.sort();
+    data.insert("tags".into(), tags.into());
+    let artists: Vec<String> =
+        crate::sites::art::extract_iter(html, "<div class=\"item-user\">", ">")
+            .into_iter()
+            .map(|tag| extr(tag, "//", ".").unwrap_or("").to_owned())
+            .collect();
+    let user = user
+        .map(str::to_owned)
+        .or_else(|| artists.first().cloned())
+        .unwrap_or_default();
+    data.insert("artist".into(), artists.into());
+    data.insert("user".into(), user.into());
+    let slug = post_url.rsplit('/').next().unwrap_or_default();
+    data.insert("slug".into(), slug.into());
+    data.insert("post_url".into(), post_url.into());
+    data
+}
+
+/// Attach per-file keywords: `num`, multi-image `_index`, URL name parts.
+fn attach_keywords(items: &mut [Media], mut data: Map<String, Value>, index: &str) {
+    data.insert(
+        "index".into(),
+        crate::sites::art::parse_int(index, 0).into(),
+    );
+    for (num, item) in items.iter_mut().enumerate() {
+        let mut fields = data.clone();
+        fields.insert("num".into(), num.into());
+        let file_index = if num == 0 {
+            index.to_owned()
+        } else {
+            format!("{index}_{num:02}")
+        };
+        fields.insert("_index".into(), file_index.into());
+        let (filename, extension) = crate::sites::nameext(&item.url);
+        let extension = crate::path_options::map_extension(&extension).unwrap_or(extension);
+        fields.insert("filename".into(), filename.into());
+        fields.insert("extension".into(), extension.into());
+        if let Some(metadata) = item.metadata.as_mut() {
+            metadata.site_keywords = Some(Arc::new(SiteKeywords {
+                route: &POST,
+                fields,
+            }));
+        }
+    }
+}
+
+/// Use another upstream class's formats and metadata for built files.
+fn with_route(
+    events: &mut VecDeque<ExtractionEvent>,
+    route: &'static Route,
+    extra: &Map<String, Value>,
+) {
+    for event in events {
+        let metadata = match event {
+            ExtractionEvent::Media(media) => media.metadata.as_mut(),
+            ExtractionEvent::Post(post) => post.metadata.as_mut(),
+            _ => None,
+        };
+        if let Some(keywords) = metadata.and_then(|m| m.site_keywords.as_mut()) {
+            let keywords = Arc::make_mut(keywords);
+            keywords.route = route;
+            keywords.fields.extend(extra.clone());
+        }
+    }
+}
+
 /// Parse an art post page into its images.
 pub fn parse_post(bytes: &[u8], user: &str) -> Result<Vec<Media>> {
     let html = std::str::from_utf8(bytes).map_err(|_| error("Newgrounds returned invalid HTML"))?;
@@ -300,7 +440,19 @@ pub fn parse_post(bytes: &[u8], user: &str) -> Result<Vec<Media>> {
         .or_else(|| between(html, "\"datePublished\":\"", "\""))
         .and_then(|d| crate::date::parse_date(d.trim()).ok());
     let username: Arc<str> = Arc::from(user);
-    Ok(urls
+    let post_url = meta_property(html, "og:url").unwrap_or_default().to_owned();
+    let mut data = post_keywords(html, &post_url, Some(user));
+    data.insert("type".into(), "art".into());
+    data.insert("_type".into(), "i".into());
+    if let Some(full) = crate::sites::extr(html, "\"full_image_text\":", "});") {
+        let width = crate::sites::extr(full, "width=\\\"", "\\\"").unwrap_or("");
+        let height = crate::sites::extr(full, "height=\\\"", "\\\"").unwrap_or("");
+        let width = crate::sites::art::parse_int(width, 0);
+        let height = crate::sites::art::parse_int(height, 0);
+        data.insert("width".into(), width.into());
+        data.insert("height".into(), height.into());
+    }
+    let mut items: Vec<Media> = urls
         .into_iter()
         .enumerate()
         .map(|(n, url)| {
@@ -327,7 +479,9 @@ pub fn parse_post(bytes: &[u8], user: &str) -> Result<Vec<Media>> {
                 handoff: BTreeMap::new(),
             }
         })
-        .collect())
+        .collect();
+    attach_keywords(&mut items, data, &post_id);
+    Ok(items)
 }
 
 /// Upstream `_extract_audio_data`/`_extract_media_data`: the file of an
@@ -385,7 +539,31 @@ pub fn parse_media(html: &str, path: &str, video: Option<&Value>) -> Result<Vec<
     if !fallback.is_empty() {
         handoff.insert("_fallback".to_owned(), Value::Array(fallback));
     }
-    Ok(vec![Media {
+    let post_url = format!("https://www.newgrounds.com/{path}");
+    let mut data = post_keywords(html, &post_url, None);
+    if audio {
+        data.insert("type".into(), "audio".into());
+        data.insert("_type".into(), "a".into());
+        data.insert("rating".into(), "".into());
+    } else {
+        let kind = match crate::sites::extr(html, ",\"description\":\"", "\"") {
+            Some(kind) if !kind.is_empty() => {
+                kind.rsplit(' ').next().unwrap_or(kind).to_lowercase()
+            }
+            _ if video.is_some() => "movie".into(),
+            _ => "game".into(),
+        };
+        data.insert("type".into(), kind.into());
+        data.insert("_type".into(), "".into());
+        if data.get("description").and_then(Value::as_str) == Some("") {
+            let description = itemprop(html, "description").unwrap_or("");
+            data.insert(
+                "description".into(),
+                crate::sites::unescape(description).into(),
+            );
+        }
+    }
+    let mut items = vec![Media {
         filename: format!("{index}.{}", extension(&url)),
         job: MediaJob::DirectHttp,
         category: "newgrounds".into(),
@@ -405,7 +583,10 @@ pub fn parse_media(html: &str, path: &str, video: Option<&Value>) -> Result<Vec<
         url,
         headers: BTreeMap::new(),
         handoff,
-    }])
+    }];
+    let index = path.rsplit('/').next().unwrap_or_default().to_owned();
+    attach_keywords(&mut items, data, &index);
+    Ok(items)
 }
 
 /// Post links (`href="..."`) of an HTML fragment, made absolute.
@@ -698,7 +879,9 @@ impl Newgrounds {
                         })
                         .collect();
                 let next = (links.len() >= 24).then_some(page + 1);
-                Ok(Some((self.links(links), next)))
+                let mut extra = Map::new();
+                extra.insert("user".into(), user.clone().into());
+                Ok(Some((self.links(links, Some((&FAVORITE, extra))), next)))
             }
         })
         .map(|result| match result {
@@ -710,17 +893,30 @@ impl Newgrounds {
     }
 
     /// Posts for links, skipping adult or removed ones.
-    fn links(&self, links: Vec<String>) -> BoxStream<'_, Result<ExtractionEvent>> {
+    fn links(
+        &self,
+        links: Vec<String>,
+        route: Option<(&'static Route, Map<String, Value>)>,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
         stream::iter(links)
-            .then(move |link| async move {
-                match self.by_url(&link).await {
-                    Err(e)
-                        if e.to_string().contains("contains no images")
-                            || e.to_string().contains("no downloadable file") =>
-                    {
-                        Ok(VecDeque::new())
+            .then(move |link| {
+                let route = route.clone();
+                async move {
+                    let result = self.by_url(&link).await.map(|mut events| {
+                        if let Some((route, extra)) = &route {
+                            with_route(&mut events, route, extra);
+                        }
+                        events
+                    });
+                    match result {
+                        Err(e)
+                            if e.to_string().contains("contains no images")
+                                || e.to_string().contains("no downloadable file") =>
+                        {
+                            Ok(VecDeque::new())
+                        }
+                        result => result,
                     }
-                    result => result,
                 }
             })
             .map(|result| match result {
@@ -771,7 +967,16 @@ impl Newgrounds {
                 if links.is_empty() {
                     return Ok(None);
                 }
-                Ok::<_, crate::Error>(Some((self.links(links), Some(page + 1))))
+                let terms = query
+                    .iter()
+                    .find(|(k, _)| k == "terms")
+                    .map(|(_, v)| v.clone());
+                let mut extra = Map::new();
+                extra.insert("search_tags".into(), terms.unwrap_or_default().into());
+                Ok::<_, crate::Error>(Some((
+                    self.links(links, Some((&SEARCH, extra))),
+                    Some(page + 1),
+                )))
             }
         })
         .map(|result| match result {
@@ -1229,5 +1434,43 @@ mod tests {
         );
         assert!(requests[2].starts_with("GET /art/page/2 "));
         assert!(requests[3].starts_with("GET /art/view/alice/adult "));
+    }
+
+    #[test]
+    fn post_keywords_follow_upstream_extract_post() {
+        let html = post_html().replace(
+            "</body>",
+            r#"<div id="author_comments"><p>Hi<br>there</p></div>
+<span id="faves_load">1,234</span><span id="score_number">4.5</span>
+<dd class="tags"><a>ship</a><a>alice</a></dd>
+<div class="item-user"><a href="https://alice.newgrounds.com"></div></body>"#,
+        );
+        let items = parse_post(html.as_bytes(), "alice").unwrap();
+        let fields = |i: usize| {
+            items[i]
+                .metadata
+                .as_ref()
+                .unwrap()
+                .site_keywords
+                .as_ref()
+                .unwrap()
+                .fields
+                .clone()
+        };
+        let first = fields(0);
+        assert_eq!(first["title"], "Big & Bold");
+        assert_eq!(first["date"], "2024-01-01 00:00:00");
+        assert_eq!(first["_type"], "i");
+        assert_eq!(first["_index"], "1234567");
+        assert_eq!(first["index"], 1234567);
+        assert_eq!(first["num"], 0);
+        assert_eq!(first["favorites"], 1234);
+        assert_eq!(first["score"], 4.5);
+        assert_eq!(first["tags"], serde_json::json!(["alice", "ship"]));
+        assert_eq!(first["artist"], serde_json::json!(["alice"]));
+        assert_eq!(first["comment"], "Hi\nthere");
+        assert_eq!(first["user"], "alice");
+        assert_eq!(fields(1)["_index"], "1234567_01");
+        assert_eq!(fields(1)["extension"], "jpg");
     }
 }

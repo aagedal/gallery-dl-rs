@@ -709,7 +709,7 @@ mod tests {
         let template = crate::postprocess::template::Template::parse("{submitid}").unwrap();
         assert_eq!(template.render(&context).unwrap(), "123");
         // Source Weasyl.populate_submission retains submitid without rewriting.
-        assert_eq!(context["submitid"], submission["submitid"].to_string());
+        assert_eq!(context["submitid"], submission["submitid"]);
         let status = json!({"id":"42","account":{"acct":"artist"},"reblog":null,
             "media_attachments":[{"id":"77","type":"image","url":"https://mastodon.social/example.jpg"}]});
         let mut media = crate::mastodon::parse_status(&status, "mastodon.social")
@@ -718,6 +718,8 @@ mod tests {
         let mut context = crate::postprocess::context(&media);
         project_keywords(&media, &mut context);
         assert_eq!(context["media"]["id"], "77");
+        // Without upstream keywords, synthetic IDs are not projected.
+        media.metadata.as_mut().unwrap().site_keywords = None;
         media.metadata.as_mut().unwrap().media_id = "card77".into();
         let mut context = crate::postprocess::context(&media);
         project_keywords(&media, &mut context);

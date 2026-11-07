@@ -848,6 +848,85 @@ fn validate_id(id: &str) -> Result<()> {
     Ok(())
 }
 
+static PHOTO: crate::sites::Route = crate::sites::Route::new(
+    "photo",
+    "{id}.{extension}",
+    &["{category}", "{username}", "{title}{set_id:? (/)/}"],
+    "{id}.{extension}",
+);
+
+/// A JSON string literal's content, decoded like upstream `decode_all`.
+fn json_text(raw: &str) -> String {
+    serde_json::from_str::<String>(&format!("\"{raw}\"")).unwrap_or_else(|_| raw.to_owned())
+}
+
+/// Upstream `parse_photo_page` keywords, from the page and its photo node.
+fn photo_keywords(
+    page: &str,
+    photo: &Value,
+    id: &str,
+    url: &Url,
+) -> serde_json::Map<String, Value> {
+    let extr = |begin: &str, end: &str| crate::sites::extr(page, begin, end).unwrap_or("");
+    let mut data = serde_json::Map::new();
+    data.insert("id".into(), id.into());
+    let set = extr(
+        "\"url\":\"https:\\/\\/www.facebook.com\\/photo\\/?fbid=",
+        "\"",
+    );
+    let set = set.rsplit_once("&set=").map_or(set, |(_, set)| set);
+    data.insert("set_id".into(), set.into());
+    let name = photo
+        .pointer("/owner/name")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| json_text(extr("\"owner\":{\"__typename\":\"User\",\"name\":\"", "\"")));
+    data.insert("username".into(), name.into());
+    let mut user = photo
+        .pointer("/owner/id")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| extr("\"owner\":{\"__typename\":\"User\",\"id\":\"", "\""))
+        .to_owned();
+    let mut pfbid = String::new();
+    if user.starts_with("pfbid") {
+        pfbid = user;
+        user = extr("\\\"content_owner_id_new\\\":\\\"", "\\\"").to_owned();
+    }
+    data.insert("user_id".into(), user.into());
+    data.insert("user_pfbid".into(), pfbid.into());
+    let caption = photo
+        .pointer("/creation_story/message/text")
+        .or_else(|| photo.pointer("/message/text"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    data.insert("caption".into(), caption.into());
+    let timestamp = photo
+        .get("created_time")
+        .and_then(Value::as_i64)
+        .or_else(|| {
+            let publish = extr("\\\"publish_time\\\":", ",");
+            let created = extr("\"created_time\":", ",");
+            [publish, created]
+                .into_iter()
+                .find_map(|t| t.trim().parse().ok())
+        });
+    data.insert(
+        "date".into(),
+        crate::filter::source_date_text(timestamp).into(),
+    );
+    data.insert("url".into(), url.as_str().into());
+    let next = extr(
+        "\"nextMediaAfterNodeId\":{\"__typename\":\"Photo\",\"id\":\"",
+        "\"",
+    );
+    data.insert("next_photo_id".into(), next.into());
+    let (filename, extension) = crate::sites::nameext(url);
+    let extension = crate::path_options::map_extension(&extension).unwrap_or(extension);
+    data.insert("filename".into(), filename.into());
+    data.insert("extension".into(), extension.into());
+    data
+}
+
 /// Parse JSON script payloads, never a page-wide image/OG preview match.
 /// A photo must identify the exact requested ID and own its `image.uri`.
 pub fn parse_photo(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
@@ -894,7 +973,7 @@ pub fn parse_photo(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
                 .unwrap_or(0),
         );
         let media = Media {
-            url,
+            url: url.clone(),
             job: crate::extract::MediaJob::DirectHttp,
             category: "facebook".into(),
             filename: format!("{requested_id}.{extension}"),
@@ -967,7 +1046,10 @@ pub fn parse_photo(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
                 reposted_by_id: None,
                 article: None,
                 instance: None,
-                site_keywords: None,
+                site_keywords: Some(std::sync::Arc::new(crate::sites::SiteKeywords {
+                    route: &PHOTO,
+                    fields: photo_keywords(page, photo, requested_id, &url),
+                })),
                 post_id: requested_id.into(),
                 media_id: format!("{requested_id}.{extension}"),
                 shortcode: String::new(),

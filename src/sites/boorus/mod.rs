@@ -485,6 +485,93 @@ pub(crate) fn strptime(text: &str, format: &str) -> Option<i64> {
 
 /// One post boundary per item, as booru extractors yield one Directory per
 /// post.
+/// Upstream `BooruExtractor` `tags` and `notes`: read each post's HTML
+/// page (`page(id)`) for `tags_TYPE` lists and translation `notes`.
+/// `moebooru` selects that engine's tag pattern.
+pub(crate) async fn html_extras(
+    http: &Http,
+    items: &mut [Item],
+    page: impl Fn(&str) -> Option<Url>,
+    moebooru: bool,
+) -> crate::Result<()> {
+    let tags = http.option_bool("tags", false);
+    let notes = http.option_bool("notes", false);
+    if !tags && !notes {
+        return Ok(());
+    }
+    for item in items {
+        let id = item
+            .keywords
+            .get("id")
+            .map(crate::sites::scalar)
+            .unwrap_or_default();
+        let Some(url) = page(&id) else {
+            continue;
+        };
+        let html = http.text(&url).await?;
+        if tags {
+            tag_lists(&html, moebooru, &mut item.keywords);
+        }
+        if notes {
+            post_notes(&html, &mut item.keywords);
+        }
+    }
+    Ok(())
+}
+
+fn tag_lists(html: &str, moebooru: bool, keywords: &mut Map<String, Value>) {
+    let container = crate::sites::extr(html, "<ul id=\"tag-", "</ul>").or_else(|| {
+        (!moebooru)
+            .then(|| crate::sites::extr(html, "<ul class=\"tag-", "</ul>"))
+            .flatten()
+    });
+    let Some(container) = container else {
+        return;
+    };
+    let pattern = if moebooru {
+        crate::sites::gdl::re!(r#"tag-type-([^"' ]+).*?[?;]tags=([^"'+]+)"#)
+    } else {
+        crate::sites::gdl::re!(r#"(?s)tag-type-([^"' ]+).*?[?;]tags=([^"'&]+)"#)
+    };
+    let mut lists: Vec<(String, Vec<String>)> = Vec::new();
+    for captures in pattern.captures_iter(container) {
+        let kind = captures[1].to_owned();
+        let mut name = crate::sites::gdl::unquote(&captures[2]);
+        if !moebooru {
+            name = crate::sites::unescape(&name);
+        }
+        match lists.iter_mut().find(|(k, _)| *k == kind) {
+            Some((_, names)) => names.push(name),
+            None => lists.push((kind, vec![name])),
+        }
+    }
+    for (kind, names) in lists {
+        keywords.insert(format!("tags_{kind}"), names.join(" ").into());
+    }
+}
+
+fn post_notes(html: &str, keywords: &mut Map<String, Value>) {
+    let Some(container) = crate::sites::extr(html, "id=\"note-container\"", "<img ") else {
+        return;
+    };
+    let number = |text: &str| text.trim().parse::<i64>().unwrap_or(0);
+    let notes: Vec<Value> = container
+        .split("class=\"note-box\"")
+        .skip(1)
+        .map(|note| {
+            let mut extr = crate::sites::art::Scan::new(note);
+            let width = number(extr.extr("width:", "p"));
+            let height = number(extr.extr("height:", "p"));
+            let y = number(extr.extr("top:", "p"));
+            let x = number(extr.extr("left:", "p"));
+            let id = number(extr.extr("id=\"note-body-", "\""));
+            let body = crate::sites::unescape(&crate::sites::remove_html(extr.extr(">", "</div>")));
+            serde_json::json!({"width": width, "height": height, "y": y, "x": x, "id": id, "body": body})
+        })
+        .collect();
+    keywords.insert("notes".into(), notes.into());
+}
+
 pub(crate) fn per_post(
     site: &Site,
     http: &Http,
@@ -555,4 +642,35 @@ pub(crate) fn item(
         .user(user)
         .caption(caption)
         .timestamp(timestamp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn html_tag_lists_and_notes_follow_upstream() {
+        let gelbooru = r#"<ul id="tag-sidebar">
+            <li class="tag-type-artist tag"><a href="index.php?page=post&amp;s=list&amp;tags=some_artist">x</a></li>
+            <li class="tag-type-general tag"><a href="index.php?page=post&amp;s=list&amp;tags=cat%27s_ears">y</a></li>
+            <li class="tag-type-general tag"><a href="index.php?page=post&amp;s=list&amp;tags=solo">z</a></li>
+            </ul>"#;
+        let mut keywords = Map::new();
+        tag_lists(gelbooru, false, &mut keywords);
+        assert_eq!(keywords["tags_artist"], "some_artist");
+        assert_eq!(keywords["tags_general"], "cat's_ears solo");
+
+        let moebooru = r#"<ul id="tag-sidebar"><li class="tag-type-copyright"><a href="/post?tags=touhou">?</a></li></ul>"#;
+        let mut keywords = Map::new();
+        tag_lists(moebooru, true, &mut keywords);
+        assert_eq!(keywords["tags_copyright"], "touhou");
+
+        let notes = r#"<div id="note-container"><div class="note-box" style="width: 10px; height: 20px; top: 30px; left: 40px;"></div><div class="note-body" id="note-body-7" title="x">Hello <b>there</b></div><img "#;
+        let mut keywords = Map::new();
+        post_notes(notes, &mut keywords);
+        assert_eq!(
+            keywords["notes"],
+            serde_json::json!([{"width": 10, "height": 20, "y": 30, "x": 40, "id": 7, "body": "Hello there"}])
+        );
+    }
 }

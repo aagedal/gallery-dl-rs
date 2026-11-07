@@ -225,16 +225,18 @@ impl YtdlOptions {
 
     /// Arguments added to every yt-dlp invocation.
     pub fn arguments() -> Vec<String> {
-        let Some(options) = OPTIONS.get() else {
-            return Vec::new();
-        };
+        OPTIONS.get().map(Self::args).unwrap_or_default()
+    }
+
+    /// `config-file`, `raw-options` and `cmdline-args` as yt-dlp arguments.
+    pub fn args(&self) -> Vec<String> {
         let mut args = Vec::new();
-        if let Some(file) = &options.config_file {
+        if let Some(file) = &self.config_file {
             args.push("--config-locations".into());
             args.push(file.display().to_string());
         }
-        args.extend(options.raw_args.iter().cloned());
-        args.extend(options.cmdline_args.iter().cloned());
+        args.extend(self.raw_args.iter().cloned());
+        args.extend(self.cmdline_args.iter().cloned());
         args
     }
 

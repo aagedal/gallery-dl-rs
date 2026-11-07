@@ -14,6 +14,7 @@
 //! (`/_puppy`) web API with the page's `__CSRF_TOKEN__` and the session
 //! cookies; each listed deviation is then fetched through the OAuth API.
 //! Without login cookies, site searches scrape the search result pages.
+use crate::sites::{Route, SiteKeywords};
 use crate::{
     Result,
     cookies::CookieJar,
@@ -29,9 +30,10 @@ use futures_util::{
     stream::{self, BoxStream},
 };
 use reqwest::{Client, RequestBuilder, StatusCode};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::{
     collections::{BTreeMap, VecDeque},
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 use url::Url;
@@ -401,13 +403,330 @@ pub fn wants_download(deviation: &Value) -> bool {
         && deviation.get("content").is_some()
 }
 
+const FILENAME: &str = "{category}_{index}_{title}.{extension}";
+const DIRECTORY: &[&str] = &["{category}", "{username}"];
+static DEVIATION: Route = Route::new(
+    "deviation",
+    FILENAME,
+    DIRECTORY,
+    "g_{_username}_{index}.{extension}",
+);
+static GALLERY: Route = Route::new(
+    "gallery",
+    FILENAME,
+    DIRECTORY,
+    "g_{_username}_{index}.{extension}",
+);
+static FOLDER: Route = Route::new(
+    "folder",
+    FILENAME,
+    &["{category}", "{username}", "{folder[title]}"],
+    "F_{folder[uuid]}_{index}.{extension}",
+);
+static FAVORITE: Route = Route::new(
+    "favorite",
+    FILENAME,
+    &["{category}", "{username}", "Favourites"],
+    "f_{_username}_{index}.{extension}",
+);
+static COLLECTION: Route = Route::new(
+    "collection",
+    FILENAME,
+    &[
+        "{category}",
+        "{username}",
+        "Favourites",
+        "{collection[title]}",
+    ],
+    "C_{collection[uuid]}_{index}.{extension}",
+);
+static JOURNAL: Route = Route::new(
+    "journal",
+    FILENAME,
+    &["{category}", "{username}", "Journal"],
+    "j_{_username}_{index}.{extension}",
+);
+static TAG: Route = Route::new(
+    "tag",
+    FILENAME,
+    &["{category}", "Tags", "{search_tags}"],
+    "T_{search_tags}_{index}.{extension}",
+);
+
+/// Upstream `util.b36encode`.
+fn to_base36(mut value: u64) -> String {
+    const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let mut out = Vec::new();
+    loop {
+        out.push(DIGITS[(value % 36) as usize]);
+        value /= 36;
+        if value == 0 {
+            break;
+        }
+    }
+    out.reverse();
+    String::from_utf8(out).expect("ASCII digits")
+}
+
+/// Upstream `prepare` and `commit` keywords of one deviation file.
+fn deviation_keywords(
+    deviation: &Value,
+    target: &Value,
+    url: &Url,
+    original: Option<bool>,
+) -> Map<String, Value> {
+    let mut data = deviation.as_object().cloned().unwrap_or_default();
+    let index = string(deviation, "url")
+        .and_then(|url| url.rsplit('-').next())
+        .and_then(|id| id.parse::<u64>().ok())
+        .unwrap_or(0);
+    if !data.contains_key("index") {
+        data.insert("index".into(), index.into());
+    }
+    let index = data.get("index").and_then(Value::as_u64).unwrap_or(index);
+    data.entry("index_base36")
+        .or_insert_with(|| to_base36(index).into());
+    let author = deviation
+        .pointer("/author/username")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    data.insert("username".into(), author.clone().into());
+    data.insert("_username".into(), author.to_lowercase().into());
+    let published = match deviation.get("published_time") {
+        Some(Value::String(s)) => s.trim().parse::<i64>().unwrap_or(0),
+        Some(Value::Number(n)) => n.as_i64().unwrap_or(0),
+        _ => 0,
+    };
+    data.insert("published_time".into(), published.into());
+    data.insert(
+        "date".into(),
+        crate::filter::source_date_text(Some(published)).into(),
+    );
+    let word = |text: &str| -> String {
+        text.to_lowercase()
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect()
+    };
+    let title = string(deviation, "title").unwrap_or("");
+    let base36 = data
+        .get("index_base36")
+        .and_then(Value::as_str)
+        .unwrap_or("0")
+        .to_owned();
+    let filename = format!("{}_by_{}-d{base36}", word(title), word(&author));
+    data.insert("filename".into(), filename.clone().into());
+    // `commit`: the chosen target with the shared filename and extension.
+    let name = target
+        .get("filename")
+        .and_then(Value::as_str)
+        .unwrap_or(url.as_str());
+    let name = name.split('?').next().unwrap_or(name);
+    let extension = name
+        .rsplit('/')
+        .next()
+        .and_then(|name| name.rsplit_once('.'))
+        .map(|(_, ext)| ext.to_lowercase())
+        .unwrap_or_default();
+    let extension = crate::path_options::map_extension(&extension).unwrap_or(extension);
+    let mut target = target.as_object().cloned().unwrap_or_default();
+    target.insert("filename".into(), filename.into());
+    target.insert("extension".into(), extension.clone().into());
+    data.insert("target".into(), target.into());
+    data.insert("extension".into(), extension.into());
+    let original = original.unwrap_or_else(|| !url.as_str().contains("/v1/"));
+    data.insert("is_original".into(), original.into());
+    data
+}
+
+/// Use another upstream class's formats and metadata for a built file.
+fn retarget(
+    media: &mut Media,
+    route: &'static Route,
+    extra: &Map<String, Value>,
+    user: Option<&str>,
+) {
+    let Some(keywords) = media
+        .metadata
+        .as_mut()
+        .and_then(|m| m.site_keywords.as_mut())
+    else {
+        return;
+    };
+    let keywords = Arc::make_mut(keywords);
+    keywords.route = route;
+    keywords.fields.extend(extra.clone());
+    if let Some(user) = user.filter(|user| !user.is_empty()) {
+        keywords.fields.insert("username".into(), user.into());
+        keywords
+            .fields
+            .insert("_username".into(), user.to_lowercase().into());
+    }
+}
+
+/// Upstream `quality`, `intermediary`, `jwt`, `mature` and `wait-min`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContentOptions {
+    /// `quality`: a JPEG quality, `"png"`, or `None` to keep URLs.
+    pub quality: Option<String>,
+    pub intermediary: bool,
+    pub jwt: bool,
+    /// `mature`: the API's `mature_content` value.
+    pub mature: String,
+    /// `wait-min`: seconds to wait before each API request.
+    pub wait_min: u64,
+    /// `flat`: list every deviation instead of queueing each folder.
+    pub flat: bool,
+    /// `subfolders`: queue a folder's subfolders.
+    pub subfolders: bool,
+    /// `comments` (or `comments-avatars`): add each deviation's comments.
+    pub comments: bool,
+}
+
+impl Default for ContentOptions {
+    fn default() -> Self {
+        Self {
+            quality: Some("100".into()),
+            intermediary: true,
+            jwt: false,
+            mature: "true".into(),
+            wait_min: 0,
+            flat: true,
+            subfolders: true,
+            comments: false,
+        }
+    }
+}
+
+impl ContentOptions {
+    pub fn from_options(options: Option<&Map<String, Value>>) -> Self {
+        Self::from_options_with(options, None)
+    }
+
+    /// Like [`Self::from_options`], with the typed `comments` setting.
+    pub fn from_options_with(options: Option<&Map<String, Value>>, comments: Option<bool>) -> Self {
+        let get = |key: &str| options.and_then(|o| o.get(key));
+        let flag = |key: &str, default: bool| get(key).map_or(default, crate::postprocess::truthy);
+        let defaults = Self::default();
+        Self {
+            quality: match get("quality") {
+                None => defaults.quality,
+                Some(Value::String(q)) if !q.is_empty() => Some(q.clone()),
+                Some(Value::Number(n)) => Some(n.to_string()),
+                Some(_) => None,
+            },
+            intermediary: flag("intermediary", true),
+            jwt: flag("jwt", false),
+            mature: match get("mature") {
+                None => defaults.mature,
+                Some(Value::String(value)) => value.clone(),
+                Some(value) => if crate::postprocess::truthy(value) {
+                    "true"
+                } else {
+                    "false"
+                }
+                .into(),
+            },
+            wait_min: get("wait-min").and_then(Value::as_u64).unwrap_or(0),
+            flat: flag("flat", true),
+            subfolders: flag("subfolders", true),
+            comments: comments.unwrap_or(false)
+                || flag("comments", false)
+                || flag("comments-avatars", false),
+        }
+    }
+
+    /// Upstream `_extract_content`/`_update_token`: the file URL to use and
+    /// its fallback, and whether the URL is an original.
+    fn source(&self, src: &str, index: u64) -> (String, Option<String>, Option<bool>) {
+        use crate::sites::gdl::re;
+        if self.jwt {
+            let Some((url, _)) = src.split_once("/v1/") else {
+                return (src.to_owned(), None, None);
+            };
+            let url = url.replacen("//images-wixmp", "//wixmp", 1);
+            let path = url.split_once("/f/").map_or("", |(_, path)| path);
+            let payload = format!(
+                r#"{{"sub":"urn:app:","iss":"urn:app:","obj":[[{{"path":"/f/{path}"}}]],"aud":["urn:service:file.download"]}}"#
+            );
+            use base64::Engine;
+            let payload = base64::engine::general_purpose::STANDARD_NO_PAD.encode(payload);
+            let token = format!("{url}?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJub25lIn0.{payload}.");
+            return (token, Some(src.to_owned()), Some(true));
+        }
+        if !src.starts_with("https://images-wixmp-") {
+            return (src.to_owned(), None, None);
+        }
+        let mut url = src.to_owned();
+        let mut fallback = None;
+        let mut original = None;
+        if self.intermediary && index <= 790_677_560 {
+            let pattern = re!(r"(/f/[^/]+/[^/]+)/v\d+/.*");
+            if pattern.is_match(&url) {
+                fallback = Some(url.clone());
+                original = Some(false);
+                url = pattern.replacen(&url, 1, "/intermediary$1").into_owned();
+            }
+        }
+        match self.quality.as_deref() {
+            Some("png") => {
+                url = re!(r"-fullview\.[a-z0-9]+\?")
+                    .replacen(&url, 1, "-fullview.png?")
+                    .into_owned();
+            }
+            Some(quality) => {
+                let quality = format!(",q_{quality}");
+                url = re!(r",q_\d+")
+                    .replacen(&url, 1, quality.as_str())
+                    .into_owned();
+            }
+            None => {}
+        }
+        url = re!(r",blur_\d+").replacen(&url, 1, "").into_owned();
+        (url, fallback, original)
+    }
+}
+
 /// Parse one deviation into its file, optionally using a `deviation/download`
 /// response for the original. `None` for deviations without image content.
 pub fn parse_deviation(deviation: &Value, download: Option<&Value>) -> Option<Media> {
+    parse_deviation_with(
+        deviation,
+        download,
+        &ContentOptions {
+            quality: None,
+            intermediary: false,
+            ..ContentOptions::default()
+        },
+    )
+}
+
+fn parse_deviation_with(
+    deviation: &Value,
+    download: Option<&Value>,
+    options: &ContentOptions,
+) -> Option<Media> {
     let uuid = string(deviation, "deviationid").filter(|id| valid_uuid(id))?;
     let content = deviation.get("content")?;
-    let preview = string(content, "src").and_then(media_url)?;
+    let index = string(deviation, "url")
+        .and_then(|url| url.rsplit('-').next())
+        .and_then(|id| id.parse::<u64>().ok())
+        .unwrap_or(0);
+    let (src, content_fallback, content_original) = options.source(string(content, "src")?, index);
+    let preview = media_url(&src)?;
     let original = download.and_then(|d| Some((d, string(d, "src").and_then(media_url)?)));
+    let is_original = if original.is_some() {
+        Some(true)
+    } else {
+        content_original
+    };
     let (source, url) = original.unwrap_or((content, preview));
     let timestamp = match deviation.get("published_time") {
         Some(Value::String(s)) => s.trim().parse::<i64>().ok(),
@@ -434,11 +753,18 @@ pub fn parse_deviation(deviation: &Value, download: Option<&Value>) -> Option<Me
             caption: string(deviation, "title").map(Into::into),
             timestamp,
             index: 1,
+            site_keywords: Some(Arc::new(SiteKeywords {
+                route: &DEVIATION,
+                fields: deviation_keywords(deviation, source, &url, is_original),
+            })),
             ..PostMetadata::default()
         }),
         url,
         headers: BTreeMap::new(),
-        handoff: BTreeMap::new(),
+        handoff: content_fallback
+            .filter(|_| is_original != Some(true) || download.is_none())
+            .map(|fallback| BTreeMap::from([("_fallback".into(), serde_json::json!([fallback]))]))
+            .unwrap_or_default(),
     })
 }
 
@@ -480,6 +806,7 @@ pub struct DeviantArt {
     cookies: std::sync::Mutex<CookieJar>,
     /// Eclipse API `csrf_token`, fetched from the front page once.
     csrf: tokio::sync::Mutex<Option<String>>,
+    content: ContentOptions,
 }
 
 /// Upstream login cookie names (`cookies_names`).
@@ -517,6 +844,8 @@ struct ListingState {
     /// The API listing: `gallery`, `collections` or `browse/tags`.
     kind: &'static str,
     folder: Option<String>,
+    /// The folder's URL ID and name, for `folder`/`collection` metadata.
+    folder_info: Option<(String, Option<String>)>,
     offset: Option<u64>,
     pages: usize,
     pending: VecDeque<ExtractionEvent>,
@@ -538,6 +867,7 @@ impl DeviantArt {
             rate_limits: RateLimits::default(),
             cookies: std::sync::Mutex::new(CookieJar::default()),
             csrf: tokio::sync::Mutex::new(None),
+            content: ContentOptions::default(),
         })
     }
 
@@ -585,6 +915,12 @@ impl DeviantArt {
         self
     }
 
+    /// Upstream `quality`, `intermediary`, `jwt`, `mature` and `wait-min`.
+    pub fn with_content_options(mut self, content: ContentOptions) -> Self {
+        self.content = content;
+        self
+    }
+
     /// Override the site, OAuth and API origin; intended for local tests.
     pub fn with_root(mut self, root: Url) -> Self {
         self.root = root;
@@ -597,7 +933,8 @@ impl DeviantArt {
             .join("api/v1/oauth2/")
             .and_then(|base| base.join(path))
             .expect("static path");
-        url.query_pairs_mut().append_pair("mature_content", "true");
+        url.query_pairs_mut()
+            .append_pair("mature_content", &self.content.mature);
         url
     }
 
@@ -652,6 +989,9 @@ impl DeviantArt {
 
     /// Authorized API GET, refreshing the access token once on HTTP 401.
     async fn get(&self, endpoint: &Url) -> Result<Value> {
+        if self.content.wait_min > 0 {
+            tokio::time::sleep(Duration::from_secs(self.content.wait_min)).await;
+        }
         tokio::time::timeout(self.timeout, async {
             let mut token = self.access_token(None).await?;
             for refreshed in [false, true] {
@@ -710,12 +1050,88 @@ impl DeviantArt {
                 .await
                 .ok();
         }
-        let mut media = match parse_deviation(deviation, download.as_ref()) {
+        let mut media = match parse_deviation_with(deviation, download.as_ref(), &self.content) {
             Some(media) => media,
             None => self.journal(deviation).await?,
         };
+        if self.content.comments
+            && let Some(keywords) = media
+                .metadata
+                .as_mut()
+                .and_then(|m| m.site_keywords.as_mut())
+        {
+            let any = deviation
+                .pointer("/stats/comments")
+                .and_then(Value::as_u64)
+                .is_some_and(|count| count > 0);
+            let comments = match string(deviation, "deviationid") {
+                Some(id) if any => self.comments(id).await.unwrap_or_default(),
+                _ => Vec::new(),
+            };
+            Arc::make_mut(keywords)
+                .fields
+                .insert("comments".into(), comments.into());
+        }
         self.network.apply_media(&mut media);
         Some(media)
+    }
+
+    /// Upstream `_extract_comments`: every thread, following replies that
+    /// were not expanded on their page.
+    async fn comments(&self, id: &str) -> Result<Vec<Value>> {
+        let mut results: Vec<Value> = Vec::new();
+        let mut pending = vec![None::<String>];
+        let mut requests = 0;
+        while let Some(comment) = pending.pop() {
+            let mut offset = 0;
+            let mut page_comments = Vec::new();
+            loop {
+                requests += 1;
+                if requests > MAX_PAGES {
+                    return Ok(results);
+                }
+                let mut endpoint = self.api(&format!("comments/deviation/{id}"));
+                {
+                    let mut query = endpoint.query_pairs_mut();
+                    if let Some(comment) = &comment {
+                        query.append_pair("commentid", comment);
+                    }
+                    query
+                        .append_pair("maxdepth", "5")
+                        .append_pair("offset", &offset.to_string())
+                        .append_pair("limit", "50");
+                }
+                let body = self.get(&endpoint).await?;
+                page_comments.extend(
+                    body.get("thread")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default(),
+                );
+                match (
+                    body.get("has_more").and_then(Value::as_bool),
+                    body.get("next_offset").and_then(Value::as_u64),
+                ) {
+                    (Some(true), Some(next)) if next > offset => offset = next,
+                    _ => break,
+                }
+            }
+            let parents: std::collections::HashSet<&str> = page_comments
+                .iter()
+                .filter_map(|c| string(c, "parentid"))
+                .collect();
+            for comment in &page_comments {
+                let replies = comment.get("replies").and_then(Value::as_u64).unwrap_or(0);
+                if let Some(cid) = string(comment, "commentid")
+                    && replies > 0
+                    && !parents.contains(cid)
+                {
+                    pending.push(Some(cid.to_owned()));
+                }
+            }
+            results.extend(page_comments);
+        }
+        Ok(results)
     }
 
     /// Literature and journals (upstream `journals: "html"`): the
@@ -867,11 +1283,54 @@ impl DeviantArt {
             {
                 continue;
             }
-            if let Some(media) = self.media(deviation).await {
+            if let Some(mut media) = self.media(deviation).await {
+                let (route, extra, user) = self.listing_route(state);
+                retarget(&mut media, route, &extra, user.as_deref());
                 state.pending.extend(group(vec![media], "deviantart"));
             }
         }
         Ok(())
+    }
+
+    /// The upstream class, metadata and `username` of a listing's files.
+    fn listing_route(
+        &self,
+        state: &ListingState,
+    ) -> (&'static Route, Map<String, Value>, Option<String>) {
+        let mut extra = Map::new();
+        let user = Some(state.user.clone());
+        let folder = |key: &str| {
+            let (id, name) = state.folder_info.clone().unwrap_or_default();
+            let mut folder = Map::new();
+            folder.insert("title".into(), name.unwrap_or_default().into());
+            folder.insert(
+                "uuid".into(),
+                state.folder.clone().unwrap_or_default().into(),
+            );
+            folder.insert("index".into(), id.into());
+            folder.insert("owner".into(), state.user.clone().into());
+            (key.to_owned(), Value::Object(folder))
+        };
+        match (state.kind, &state.folder) {
+            ("gallery", None) => (&GALLERY, extra, user),
+            ("gallery", Some(_)) => {
+                let (key, value) = folder("folder");
+                extra.insert(key, value);
+                (&FOLDER, extra, user)
+            }
+            ("collections", None) => (&FAVORITE, extra, user),
+            ("collections", Some(_)) => {
+                let (key, value) = folder("collection");
+                extra.insert(key, value);
+                (&COLLECTION, extra, user)
+            }
+            ("browse/tags", _) => {
+                extra.insert("search_tags".into(), state.user.clone().into());
+                (&TAG, extra, None)
+            }
+            ("user/profile/posts", _) => (&JOURNAL, extra, user),
+            _ => (&DEVIATION, extra, None),
+        }
     }
 
     pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
@@ -1333,6 +1792,81 @@ impl DeviantArt {
     }
 
     /// Upstream `DeviantartFollowingExtractor`: queue every watched user.
+    /// Upstream `flat: false` and `subfolders`: queue gallery or collection
+    /// folders (`kind` is `gallery` or `collections`) as folder children.
+    fn folders(
+        &self,
+        kind: &'static str,
+        user: String,
+        parent: Option<(String, Option<String>)>,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let path = if kind == "gallery" {
+            "gallery"
+        } else {
+            "favourites"
+        };
+        stream::try_unfold((Some(0u64), 0usize), move |(offset, pages)| {
+            let user = user.clone();
+            let parent = parent.clone();
+            async move {
+                let Some(offset) = offset.filter(|_| pages < MAX_PAGES) else {
+                    return Ok(None);
+                };
+                let mut endpoint = self.api(&format!("{kind}/folders"));
+                endpoint
+                    .query_pairs_mut()
+                    .append_pair("username", &user)
+                    .append_pair("offset", &offset.to_string())
+                    .append_pair("limit", "50");
+                let page = parse_page(&self.get(&endpoint).await?)?;
+                let folders: Vec<Value> = match &parent {
+                    None => page.results.clone(),
+                    // Subfolders of one folder, as listed in its `subfolders`.
+                    Some((id, name)) => page
+                        .results
+                        .iter()
+                        .find(|folder| {
+                            string(folder, "folderid") == Some(id.as_str())
+                                || name.as_deref().is_some_and(|name| {
+                                    string(folder, "name").map(slugify) == Some(slugify(name))
+                                })
+                        })
+                        .and_then(|folder| folder.get("subfolders").and_then(Value::as_array))
+                        .cloned()
+                        .unwrap_or_default(),
+                };
+                let children: Vec<_> = folders
+                    .into_iter()
+                    .filter_map(|folder| {
+                        let id = string(&folder, "folderid").filter(|id| valid_uuid(id))?;
+                        let name = string(&folder, "name").unwrap_or("folder");
+                        let mut url = Url::parse("https://www.deviantart.com/").ok()?;
+                        url.path_segments_mut().ok()?.extend([
+                            user.as_str(),
+                            path,
+                            id,
+                            &slugify(name),
+                        ]);
+                        let data = folder.as_object().cloned().unwrap_or_default();
+                        Some(crate::event::child_job(
+                            crate::event::ChildMetadata::from_raw("deviantart", "folder", &data)
+                                .with_url(url.as_str()),
+                            move || self.events(&url),
+                        ))
+                    })
+                    .collect();
+                let next = page.next.filter(|next| *next > offset && parent.is_none());
+                Ok::<_, crate::Error>(Some((stream::iter(children).flatten(), (next, pages + 1))))
+            }
+        })
+        .map(|result| match result {
+            Ok(events) => events.boxed(),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
     fn following(&self, user: String) -> BoxStream<'_, Result<ExtractionEvent>> {
         stream::try_unfold((Some(0u64), 0usize), move |(offset, pages)| {
             let user = user.clone();
@@ -1382,6 +1916,10 @@ impl DeviantArt {
 
     /// Emit one post boundary per deviation; galleries paginate lazily.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
+        self.events_with(url, self.content.subfolders)
+    }
+
+    fn events_with(&self, url: &Url, subfolders: bool) -> BoxStream<'_, Result<ExtractionEvent>> {
         let target = match target(url) {
             Ok(target) => target,
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
@@ -1456,8 +1994,18 @@ impl DeviantArt {
             Target::Watch { posts: false } => ("browse/deviantsyouwatch", String::new(), None),
             Target::Watch { posts: true } => ("browse/posts/deviantsyouwatch", String::new(), None),
             Target::Tag(tag) => ("browse/tags", tag, None),
+            Target::Favorites { user, folder: None } if !self.content.flat => {
+                return self.folders("collections", user, None);
+            }
+            Target::Gallery(user) if !self.content.flat => {
+                return self.folders("gallery", user, None);
+            }
             Target::Favorites { user, folder } => ("collections", user, folder),
             Target::Gallery(user) => ("gallery", user, None),
+            Target::Folder { user, id, name } if subfolders => {
+                let queued = self.folders("gallery", user, Some((id, name)));
+                return queued.chain(self.events_with(url, false)).boxed();
+            }
             Target::Folder { user, id, name } => ("gallery", user, Some((id, name))),
             Target::Deviation { user, slug } => {
                 return stream::once(async move {
@@ -1484,6 +2032,7 @@ impl DeviantArt {
             kind,
             user,
             folder: None,
+            folder_info: folder.clone(),
             offset: None,
             pages: 0,
             pending: VecDeque::new(),
@@ -1944,6 +2493,10 @@ mod tests {
             ok(json!({"results": [deviation(&uuid(3), false)], "has_more": false})),
         ]);
         let results: Vec<_> = client(root)
+            .with_content_options(ContentOptions {
+                subfolders: false,
+                ..ContentOptions::default()
+            })
             .stream(&Url::parse("https://www.deviantart.com/alice/gallery/5/my-folder").unwrap())
             .collect()
             .await;
@@ -2089,5 +2642,154 @@ mod tests {
         assert!(error.contains("client-secret"), "{error}");
         assert!(!error.contains("topsecret") && !error.contains("127.0.0.1"));
         assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn deviation_keywords_follow_upstream_prepare_and_commit() {
+        let mut value = deviation(&uuid(1), false);
+        value["url"] = json!("https://www.deviantart.com/alice/art/My-Art-123456");
+        let media = parse_deviation(&value, None).unwrap();
+        let keywords = media
+            .metadata
+            .as_ref()
+            .unwrap()
+            .site_keywords
+            .clone()
+            .unwrap();
+        let fields = &keywords.fields;
+        assert_eq!(fields["index"], 123456);
+        assert_eq!(fields["index_base36"], "2n9c");
+        assert_eq!(fields["username"], "alice");
+        assert_eq!(fields["published_time"], 1704067200);
+        assert_eq!(fields["date"], "2024-01-01 00:00:00");
+        assert_eq!(fields["filename"], "my_art_by_alice-d2n9c");
+        assert_eq!(fields["extension"], "jpg");
+        assert_eq!(fields["target"]["filename"], "my_art_by_alice-d2n9c");
+        assert_eq!(fields["is_original"], true);
+        let mut media = media;
+        let mut extra = Map::new();
+        extra.insert("search_tags".into(), json!("cats"));
+        retarget(&mut media, &TAG, &extra, None);
+        let keywords = media.metadata.unwrap().site_keywords.unwrap();
+        assert_eq!(
+            keywords.route.archive,
+            "T_{search_tags}_{index}.{extension}"
+        );
+        assert_eq!(keywords.fields["search_tags"], "cats");
+    }
+
+    #[test]
+    fn content_options_rewrite_quality_intermediary_and_jwt() {
+        let src = "https://images-wixmp-ed30a86b8c4ca887773594c2.wixmp.com/f/abc/def-x.jpg/v1/fill/w_800,h_600,q_75,blur_5,strp/a.jpg?token=t";
+        let defaults = ContentOptions::default();
+        let (url, fallback, original) = defaults.source(src, 900_000_000);
+        assert!(url.contains(",q_100,") && !url.contains("blur_"));
+        assert_eq!((fallback, original), (None, None));
+        let (url, fallback, original) = defaults.source(src, 1);
+        assert!(url.contains("/intermediary/f/abc/def-x.jpg"), "{url}");
+        assert_eq!((fallback.as_deref(), original), (Some(src), Some(false)));
+        let jwt = ContentOptions::from_options(json!({"jwt": true, "mature": false}).as_object());
+        assert_eq!(jwt.mature, "false");
+        let (url, _, original) = jwt.source(src, 1);
+        assert!(url.starts_with("https://wixmp-ed30a86b8c4ca887773594c2.wixmp.com/f/abc/def-x.jpg?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJub25lIn0."));
+        assert_eq!(original, Some(true));
+        let png = ContentOptions::from_options(json!({"quality": "png"}).as_object());
+        let (url, ..) = png.source(
+            "https://images-wixmp-x.wixmp.com/f/a/b-fullview.jpg?token=1",
+            900_000_000,
+        );
+        assert!(url.contains("-fullview.png?token=1"));
+    }
+
+    #[tokio::test]
+    async fn folders_queue_subfolders_and_non_flat_galleries() {
+        let folders = json!({"results": [{"folderid": uuid(8), "name": "My Folder",
+            "has_subfolders": true, "subfolders": [{"folderid": uuid(7), "name": "Sub Part"}]},
+            {"folderid": uuid(9), "name": "Other"}], "has_more": false});
+        let first_child = |client: DeviantArt, url: &'static str| async move {
+            client
+                .events(&Url::parse(url).unwrap())
+                .filter_map(|event| {
+                    std::future::ready(match event {
+                        Ok(ExtractionEvent::BeginChild(scope)) => {
+                            scope.control.cancel();
+                            Some(scope.metadata.url().unwrap_or_default().to_owned())
+                        }
+                        _ => None,
+                    })
+                })
+                .take(1)
+                .collect::<Vec<_>>()
+                .await
+        };
+        let (root, server) = serve(vec![token("t"), ok(folders.clone())]);
+        let queued = first_child(
+            client(root),
+            "https://www.deviantart.com/alice/gallery/5/my-folder",
+        )
+        .await;
+        assert_eq!(
+            queued,
+            [format!(
+                "https://www.deviantart.com/alice/gallery/{}/sub-part",
+                uuid(7)
+            )]
+        );
+        server.join().unwrap();
+
+        let (root, server) = serve(vec![token("t"), ok(folders)]);
+        let flat = client(root).with_content_options(ContentOptions {
+            flat: false,
+            ..ContentOptions::default()
+        });
+        let queued = first_child(flat, "https://www.deviantart.com/alice/gallery").await;
+        assert_eq!(
+            queued,
+            [format!(
+                "https://www.deviantart.com/alice/gallery/{}/my-folder",
+                uuid(8)
+            )]
+        );
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn comments_follow_unexpanded_replies() {
+        let page =
+            format!(r#"<meta property="da:appurl" content="DeviantArt://deviation/{UUID}">"#);
+        let mut item = deviation(UUID, false);
+        item["stats"] = json!({"comments": 3});
+        let (root, server) = serve(vec![
+            response("200 OK", page.as_bytes()),
+            token("t"),
+            ok(item),
+            ok(json!({"thread": [
+                {"commentid": "c1", "parentid": null, "replies": 1, "body": "top"},
+                {"commentid": "c2", "parentid": null, "replies": 0, "body": "other"}],
+                "has_more": false})),
+            ok(
+                json!({"thread": [{"commentid": "c3", "parentid": "c1", "replies": 0, "body": "reply"}],
+                "has_more": false}),
+            ),
+        ]);
+        let media: Vec<_> = client(root)
+            .with_content_options(ContentOptions::from_options_with(None, Some(true)))
+            .stream(&Url::parse("https://alice.deviantart.com/art/My-Art-123").unwrap())
+            .collect()
+            .await;
+        let media = media.into_iter().next().unwrap().unwrap();
+        let fields = &media.metadata.unwrap().site_keywords.unwrap().fields;
+        let bodies: Vec<_> = fields["comments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["body"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(bodies, ["top", "other", "reply"]);
+        let requests = server.join().unwrap();
+        assert!(requests[3].contains(&format!(
+            "/comments/deviation/{UUID}?mature_content=true&maxdepth=5"
+        )));
+        assert!(requests[4].contains("commentid=c1"));
     }
 }

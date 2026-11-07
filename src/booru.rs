@@ -1027,6 +1027,8 @@ pub struct Booru {
     retries: u8,
     rate_limits: RateLimits,
     threshold: Option<usize>,
+    /// Upstream Danbooru `metadata`: extra `only=` includes per page.
+    includes: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1165,6 +1167,7 @@ impl Booru {
             retries: 0,
             rate_limits: RateLimits::default(),
             threshold: None,
+            includes: None,
         })
     }
 
@@ -1251,6 +1254,62 @@ impl Booru {
     pub fn with_popular_today(mut self, date: time::Date) -> Self {
         self.popular_today = Some(date);
         self
+    }
+
+    /// Upstream Danbooru `metadata` (a boolean, string or list of includes).
+    pub fn with_metadata(mut self, value: Option<&Value>) -> Self {
+        self.includes = match value {
+            Some(Value::Array(items)) => Some(
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
+            Some(Value::String(includes)) if !includes.is_empty() => Some(includes.clone()),
+            Some(value) if crate::postprocess::truthy(value) => {
+                Some("artist_commentary,children,notes,parent,uploader".into())
+            }
+            _ => None,
+        }
+        .filter(|_| self.site == Site::Danbooru)
+        .map(|includes| format!("{includes},id"));
+        self
+    }
+
+    /// Merge the configured includes into one page's posts.
+    async fn include_metadata(&self, root: &Url, raw: &mut [Value]) -> Result<()> {
+        let Some(includes) = &self.includes else {
+            return Ok(());
+        };
+        if raw.is_empty() {
+            return Ok(());
+        }
+        let ids: Vec<String> = raw
+            .iter()
+            .filter_map(|post| post.get("id").map(|id| id.to_string()))
+            .collect();
+        let tags = format!("id:{}", ids.join(","));
+        let limit = raw.len().to_string();
+        let query = [
+            ("only", includes.as_str()),
+            ("limit", &limit),
+            ("tags", &tags),
+        ];
+        let body = self.call(root, "posts.json", &query).await?;
+        let extra = posts(self.site, &body)?;
+        for post in raw.iter_mut() {
+            let id = post.get("id").cloned();
+            if let (Some(Value::Object(post)), Some(Value::Object(meta))) = (
+                Some(post),
+                extra.iter().find(|meta| meta.get("id") == id.as_ref()),
+            ) {
+                for (key, value) in meta {
+                    post.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Minimum raw page length that continues Danbooru/e621 searches.
@@ -1543,6 +1602,7 @@ impl Booru {
                 }
                 let body = self.call(&state.root, "posts.json", &query).await?;
                 let mut raw = posts(self.site, &body)?;
+                self.include_metadata(&state.root, &mut raw).await?;
                 if *order == TagOrder::After && page.is_some() {
                     raw.reverse();
                 }
@@ -2780,6 +2840,31 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /posts.json?tags=cat&limit=200 "));
         assert!(requests[1].contains("&page=b801 "));
+    }
+
+    #[tokio::test]
+    async fn danbooru_metadata_includes_are_merged_per_page() {
+        let page = Value::Array(vec![danbooru_post(42)]).to_string();
+        let extra = json!([{"id": 42, "artist_commentary": {"original_title": "T"}}]).to_string();
+        let (root, server) = serve(vec![
+            response("200 OK", "", page.as_bytes()),
+            response("200 OK", "", extra.as_bytes()),
+        ]);
+        let media: Vec<_> = booru(Site::Danbooru, root)
+            .with_metadata(Some(&json!(["artist_commentary"])))
+            .stream(&Url::parse("https://danbooru.donmai.us/posts?tags=cat").unwrap())
+            .collect()
+            .await;
+        let media = media.into_iter().next().unwrap().unwrap();
+        let fields = media.metadata.unwrap().booru_keywords.unwrap();
+        assert_eq!(fields["artist_commentary"]["original_title"], "T");
+        let requests = server.join().unwrap();
+        assert!(
+            requests[1]
+                .starts_with("GET /posts.json?only=artist_commentary%2Cid&limit=1&tags=id%3A42 "),
+            "{}",
+            requests[1]
+        );
     }
 
     #[tokio::test]

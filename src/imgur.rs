@@ -3,6 +3,7 @@
 //! Mirrors gallery_dl/extractor/imgur.py: posts are read from Imgur's public
 //! `post/v1` API with the anonymous web client ID, and file URLs are rebuilt
 //! as `https://i.imgur.com/{id}.{ext}` from validated identifiers only.
+use crate::sites::{Route, SiteKeywords};
 use crate::{
     Result, error,
     event::{ExtractionEvent, group},
@@ -16,7 +17,7 @@ use futures_util::{
     stream::{self, BoxStream},
 };
 use reqwest::{Client, StatusCode, header};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::{
     collections::BTreeMap,
     sync::Arc,
@@ -211,10 +212,82 @@ fn string<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
 /// Parse a `post/v1/media` or `post/v1/albums` response. `requested_id`
 /// must match the response so a mismatched post is never misattributed.
 pub fn parse_post(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
-    parse_post_with_mp4(bytes, requested_id, true)
+    parse_post_with_mp4(bytes, requested_id, true, None)
 }
 
-fn parse_post_with_mp4(bytes: &[u8], requested_id: &str, mp4: bool) -> Result<Vec<Media>> {
+static IMAGE: Route = Route::new(
+    "image",
+    "{category}_{id}{title:?_//}.{extension}",
+    &["{category}"],
+    "{id}",
+);
+static ALBUM: Route = Route::new(
+    "album",
+    "{category}_{album[id]}_{num:>03}_{id}.{extension}",
+    &["{category}", "{album[id]}{album[title]:? - //}"],
+    "{album[id]}_{id}",
+);
+
+/// Upstream `_prepare` of one media object: `metadata` merged in, the
+/// chosen `ext`, `url`, `date`, `filename` and `extension`.
+fn prepare(item: &Value, ext: &str, url: &Url) -> Map<String, Value> {
+    let mut image = item.as_object().cloned().unwrap_or_default();
+    if let Some(Value::Object(metadata)) = image.remove("metadata") {
+        image.extend(metadata);
+    }
+    image.insert("ext".into(), ext.into());
+    image.insert("url".into(), url.as_str().into());
+    let created = image.get("created_at").and_then(Value::as_str);
+    let timestamp = created.and_then(|d| crate::date::parse_date(d).ok());
+    image.insert(
+        "date".into(),
+        crate::filter::source_date_text(timestamp).into(),
+    );
+    let (filename, extension) = crate::sites::nameext(url);
+    image.insert("filename".into(), filename.into());
+    image.insert("extension".into(), extension.into());
+    image
+}
+
+/// Upstream keywords of a post's files: `album` posts follow
+/// `ImgurAlbumExtractor`, others `ImgurImageExtractor`.
+fn post_keywords(
+    post: &Value,
+    item: &Value,
+    ext: &str,
+    url: &Url,
+    album: bool,
+) -> Map<String, Value> {
+    let mut post = post.as_object().cloned().unwrap_or_default();
+    post.remove("ad_url");
+    post.remove("ad_type");
+    let media = post.remove("media");
+    if album {
+        let count = media.as_ref().and_then(Value::as_array).map_or(0, Vec::len);
+        let created = post.get("created_at").and_then(Value::as_str);
+        let timestamp = created.and_then(|d| crate::date::parse_date(d).ok());
+        post.insert(
+            "date".into(),
+            crate::filter::source_date_text(timestamp).into(),
+        );
+        let mut image = prepare(item, ext, url);
+        image.insert("count".into(), count.into());
+        image.insert("album".into(), post.into());
+        image
+    } else {
+        if let Value::Object(item) = item {
+            post.extend(item.clone());
+        }
+        prepare(&Value::Object(post), ext, url)
+    }
+}
+
+fn parse_post_with_mp4(
+    bytes: &[u8],
+    requested_id: &str,
+    mp4: bool,
+    album: Option<bool>,
+) -> Result<Vec<Media>> {
     let post: Value =
         serde_json::from_slice(bytes).map_err(|_| error("Imgur returned invalid JSON"))?;
     if post.get("errors").is_some() {
@@ -264,6 +337,16 @@ fn parse_post_with_mp4(bytes: &[u8], requested_id: &str, mp4: bool) -> Result<Ve
             .map_err(|_| error("invalid Imgur media URL"))?;
         let description = string(meta, "description").or_else(|| string(meta, "title"));
         let positive = |key: &str| item.get(key).and_then(Value::as_u64).filter(|v| *v > 0);
+        // Without an explicit endpoint, multi-file posts are albums.
+        let album = album.unwrap_or(items.len() > 1);
+        let mut fields = post_keywords(&post, item, &ext, &url, album);
+        if album {
+            fields.insert("num".into(), (index + 1).into());
+        }
+        let site_keywords = Some(Arc::new(SiteKeywords {
+            route: if album { &ALBUM } else { &IMAGE },
+            fields,
+        }));
         media.push(Media {
             url,
             job: MediaJob::DirectHttp,
@@ -290,6 +373,7 @@ fn parse_post_with_mp4(bytes: &[u8], requested_id: &str, mp4: bool) -> Result<Ve
                     string(item, "created_at").and_then(|d| crate::date::parse_date(d).ok())
                 }),
                 index: index + 1,
+                site_keywords,
                 ..PostMetadata::default()
             }),
             headers: BTreeMap::new(),
@@ -388,20 +472,20 @@ impl Imgur {
 
     async fn extract_target(&self, target: &Target) -> Result<Vec<Media>> {
         let id = target.id();
-        let body = match target {
-            Target::Image(_) => self.request(&self.endpoint("media", id)).await?,
-            Target::Album(_) => self.request(&self.endpoint("albums", id)).await?,
+        let (body, album) = match target {
+            Target::Image(_) => (self.request(&self.endpoint("media", id)).await?, false),
+            Target::Album(_) => (self.request(&self.endpoint("albums", id)).await?, true),
             // Gallery posts may be albums or single images.
             Target::Listing(_) => return Err(error("Imgur listings queue their posts")),
             Target::Gallery(_) => match self.request(&self.endpoint("albums", id)).await {
-                Ok(body) => body,
+                Ok(body) => (body, true),
                 Err(Failure {
                     not_found: true, ..
-                }) => self.request(&self.endpoint("media", id)).await?,
+                }) => (self.request(&self.endpoint("media", id)).await?, false),
                 Err(failure) => return Err(failure.error),
             },
         };
-        let mut media = parse_post_with_mp4(&body, id, self.mp4)?;
+        let mut media = parse_post_with_mp4(&body, id, self.mp4, Some(album))?;
         for item in &mut media {
             self.network.apply_media(item);
         }
@@ -754,15 +838,23 @@ mod tests {
         })
         .to_string();
         let preferred = parse_post(response.as_bytes(), "AbCdE12").unwrap();
-        let original = parse_post_with_mp4(response.as_bytes(), "AbCdE12", false).unwrap();
+        let original = parse_post_with_mp4(response.as_bytes(), "AbCdE12", false, None).unwrap();
         assert_eq!(preferred[0].url.as_str(), "https://i.imgur.com/Gif0001.mp4");
         assert_eq!(original[0].url.as_str(), "https://i.imgur.com/Gif0001.gif");
         assert_eq!(original[0].filename, "Gif0001.gif");
         assert_eq!(original[0].archive_key(), preferred[0].archive_key());
-        assert_eq!(
-            serde_json::to_value(&original[0].metadata).unwrap(),
-            serde_json::to_value(&preferred[0].metadata).unwrap()
-        );
+        let typed = |media: &Media| {
+            let mut metadata = media.metadata.clone().unwrap();
+            let keywords = metadata.site_keywords.take().unwrap();
+            (serde_json::to_value(metadata).unwrap(), keywords)
+        };
+        let (original_typed, original_keywords) = typed(&original[0]);
+        let (preferred_typed, preferred_keywords) = typed(&preferred[0]);
+        assert_eq!(original_typed, preferred_typed);
+        assert_eq!(original_keywords.fields["extension"], "gif");
+        assert_eq!(preferred_keywords.fields["extension"], "mp4");
+        assert_eq!(preferred_keywords.route.subcategory, "album");
+        assert_eq!(preferred_keywords.fields["count"], 5);
         for index in 1..5 {
             assert_eq!(preferred[index].url, original[index].url);
             assert_eq!(preferred[index].filename, original[index].filename);

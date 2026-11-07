@@ -41,11 +41,15 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
             "only",
             "id-min",
             "id-max",
+            "date-min",
+            "date-max",
             "limit",
             "parent-directory",
         ],
     ),
     ("pinterest", &["sections", "stories", "videos", "domain"]),
+    ("flickr", &["metadata", "videos"]),
+    ("danbooru", &["metadata"]),
     (
         "tumblr",
         &[
@@ -97,6 +101,10 @@ pub struct Options {
     pub expand: Option<bool>,
     /// Suppress duplicate Twitter posts.
     pub unique: Option<bool>,
+    /// Upstream `file-unique`/`image-unique` and `child-unique`/`chapter-unique`:
+    /// skip file or queued child URLs already seen by one job.
+    pub file_unique: Option<bool>,
+    pub child_unique: Option<bool>,
     /// Select native video files, skip videos, or delegate video pages.
     pub videos: Option<crate::twitter::VideoMode>,
     /// Include video and animated-GIF preview images.
@@ -334,6 +342,8 @@ impl Options {
             quoted: overrides.quoted.or(self.quoted),
             expand: overrides.expand.or(self.expand),
             unique: overrides.unique.or(self.unique),
+            file_unique: overrides.file_unique.or(self.file_unique),
+            child_unique: overrides.child_unique.or(self.child_unique),
             videos: overrides.videos.or(self.videos),
             previews: overrides.previews.or(self.previews),
             mp4: overrides.mp4.or(self.mp4),
@@ -647,6 +657,8 @@ pub const GLOBAL_KEYS: &[&str] = &[
     "path-replace",
     "path-remove",
     "path-strip",
+    "path-convert",
+    "path-extended",
     "skip",
     "download",
     "cookies-update",
@@ -876,6 +888,10 @@ struct RawRoot {
     quoted: Field,
     expand: Field,
     unique: Field,
+    file_unique: Field,
+    image_unique: Field,
+    child_unique: Field,
+    chapter_unique: Field,
     videos: Field,
     previews: Field,
     mp4: Field,
@@ -958,6 +974,10 @@ struct RawExtractor {
     quoted: Field,
     expand: Field,
     unique: Field,
+    file_unique: Field,
+    image_unique: Field,
+    child_unique: Field,
+    chapter_unique: Field,
     videos: Field,
     previews: Field,
     mp4: Field,
@@ -1078,6 +1098,10 @@ struct RawOptions {
     quoted: Field,
     expand: Field,
     unique: Field,
+    file_unique: Field,
+    image_unique: Field,
+    child_unique: Field,
+    chapter_unique: Field,
     videos: Field,
     previews: Field,
     mp4: Field,
@@ -1492,6 +1516,10 @@ impl Config {
                 "post-filter",
                 "child-range",
                 "child-filter",
+                "file-unique",
+                "image-unique",
+                "child-unique",
+                "chapter-unique",
                 "date-before",
                 "date-after",
                 "parent-metadata",
@@ -1615,6 +1643,10 @@ impl Config {
             quoted: root.quoted,
             expand: root.expand,
             unique: root.unique,
+            file_unique: root.file_unique,
+            image_unique: root.image_unique,
+            child_unique: root.child_unique,
+            chapter_unique: root.chapter_unique,
             videos: root.videos,
             previews: root.previews,
             mp4: root.mp4,
@@ -1708,6 +1740,10 @@ impl Config {
             quoted: extractor.quoted,
             expand: extractor.expand,
             unique: extractor.unique,
+            file_unique: extractor.file_unique,
+            image_unique: extractor.image_unique,
+            child_unique: extractor.child_unique,
+            chapter_unique: extractor.chapter_unique,
             videos: extractor.videos,
             previews: extractor.previews,
             mp4: extractor.mp4,
@@ -1851,11 +1887,11 @@ impl Config {
                     "native configuration threshold is only supported for danbooru and e621",
                 ));
             }
-            if !matches!(name, "danbooru" | "e621" | "bluesky")
+            if !matches!(name, "danbooru" | "e621" | "bluesky" | "kemono" | "coomer")
                 && (settings.username.0.is_some() || settings.password.0.is_some())
             {
                 return Err(error(
-                    "native configuration username/password are only supported for danbooru, e621 and bluesky",
+                    "native configuration username/password are only supported for danbooru, e621, bluesky, kemono and coomer",
                 ));
             }
             if !matches!(name, "gelbooru" | "safebooru") && settings.user_id.0.is_some() {
@@ -2065,6 +2101,42 @@ impl Config {
         };
         Ok(resolved)
     }
+    /// Upstream configured `BaseExtractor` instances
+    /// (`extractor.BASE.NAME: {"root": URL, ...}`) as `(base, root)` pairs.
+    pub fn instances(&self) -> Vec<(String, String)> {
+        const BASES: &[&str] = &[
+            "mastodon",
+            "misskey",
+            "moebooru",
+            "szurubooru",
+            "shimmie2",
+            "foolfuuka",
+            "vichan",
+            "lynxchan",
+        ];
+        let mut found = Vec::new();
+        for base in BASES {
+            let sources = [
+                self.extractor
+                    .site_options
+                    .as_deref()
+                    .and_then(|options| options.get(*base))
+                    .and_then(Value::as_object),
+                self.categories
+                    .get(*base)
+                    .and_then(|options| options.site_options.as_deref()),
+            ];
+            for object in sources.into_iter().flatten() {
+                for info in object.values() {
+                    if let Some(root) = info.get("root").and_then(Value::as_str) {
+                        found.push(((*base).to_owned(), root.trim_end_matches('/').to_owned()));
+                    }
+                }
+            }
+        }
+        found
+    }
+
     /// Upstream `downloader`, `output` and `cache` sections.
     pub fn sections(&self) -> &serde_json::Map<String, Value> {
         &self.sections
@@ -2133,6 +2205,19 @@ impl RawOptions {
                 ));
             }
         };
+        let any_truthy = |fields: [Field; 2]| {
+            let mut present = false;
+            let mut value = false;
+            for Field(field) in fields {
+                if let Some(field) = field {
+                    present = true;
+                    value |= crate::postprocess::truthy(&field);
+                }
+            }
+            present.then_some(value)
+        };
+        let file_unique = any_truthy([self.file_unique, self.image_unique]);
+        let child_unique = any_truthy([self.child_unique, self.chapter_unique]);
         let quoted = match self.quoted.0 {
             None => None,
             Some(Value::Bool(value)) => Some(value),
@@ -2739,6 +2824,8 @@ impl RawOptions {
             quoted,
             expand,
             unique,
+            file_unique,
+            child_unique,
             videos,
             previews,
             mp4,

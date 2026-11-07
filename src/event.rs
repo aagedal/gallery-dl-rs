@@ -29,6 +29,11 @@ impl ChildControl {
     pub fn same_scope(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
+
+    /// A key identifying this scope while it is alive.
+    pub fn key(&self) -> usize {
+        Arc::as_ptr(&self.0) as usize
+    }
 }
 
 impl std::fmt::Debug for ChildControl {
@@ -49,6 +54,7 @@ pub struct ChildMetadata {
     target_category: Option<String>,
     source_archive: Option<Arc<crate::source_archive::ArchiveDescriptor>>,
     booru_artist: Option<Arc<BooruArtistChild>>,
+    url: Option<Arc<str>>,
 }
 
 #[derive(Clone)]
@@ -155,6 +161,7 @@ impl ChildMetadata {
         }
         Self {
             booru_artist: None,
+            url: None,
             keyword_updates: None,
             source_archive: None,
             target_category: None,
@@ -181,6 +188,7 @@ impl ChildMetadata {
         };
         Self {
             booru_artist: None,
+            url: None,
             keyword_updates: None,
             source_archive: None,
             target_category: Some("pixiv".into()),
@@ -275,7 +283,16 @@ impl ChildMetadata {
                 queue,
                 inheritance: parent,
             })),
+            url: None,
         })
+    }
+    /// The queued child URL, for upstream `child-unique`.
+    pub fn with_url(mut self, url: &str) -> Self {
+        self.url = Some(Arc::from(url));
+        self
+    }
+    pub fn url(&self) -> Option<&str> {
+        self.url.as_deref().or_else(|| self.booru_artist_url())
     }
     pub fn booru_artist_url(&self) -> Option<&str> {
         self.booru_artist.as_ref().map(|artist| artist.url.as_ref())

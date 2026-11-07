@@ -179,13 +179,9 @@ fn extract<'a>(category: &'static str, http: &'a Http, url: Url) -> Events<'a> {
         Target::Post(id) => crate::sites::once(async move {
             let url = http.api(&format!("{base}/post.json?tags=id:{id}"))?;
             let posts = http.json(&url).await?;
-            Ok(crate::sites::events(posts_events(
-                category,
-                http,
-                &POST,
-                posts,
-                &Map::new(),
-            )))
+            Ok(crate::sites::events(
+                posts_events(category, http, &POST, posts, &Map::new()).await?,
+            ))
         }),
         Target::Popular { scale, query } => crate::sites::once(async move {
             let data = popular_metadata(&scale, &query, today())?;
@@ -194,9 +190,9 @@ fn extract<'a>(category: &'static str, http: &'a Http, url: Url) -> Events<'a> {
                 url.query_pairs_mut().extend_pairs(&query);
             }
             let posts = http.json(&url).await?;
-            Ok(crate::sites::events(posts_events(
-                category, http, &POPULAR, posts, &data,
-            )))
+            Ok(crate::sites::events(
+                posts_events(category, http, &POPULAR, posts, &data).await?,
+            ))
         }),
     }
 }
@@ -274,7 +270,7 @@ fn paginate<'a>(
                 .append_pair("limit", &PER_PAGE.to_string());
             let posts = http.json(&url).await?;
             let count = posts.as_array().map_or(0, Vec::len);
-            let events = posts_events(category, http, route, posts, &data);
+            let events = posts_events(category, http, route, posts, &data).await?;
             let next = (count >= PER_PAGE && page < 10_000).then_some(page + 1);
             Ok(Some((crate::sites::events(events), next)))
         }
@@ -282,21 +278,33 @@ fn paginate<'a>(
 }
 
 /// One post boundary per API post, as upstream yields a Directory per post.
-fn posts_events(
+async fn posts_events(
     category: &str,
     http: &Http,
     route: &'static Route,
     posts: Value,
     data: &Map<String, Value>,
-) -> Vec<crate::event::ExtractionEvent> {
+) -> Result<Vec<crate::event::ExtractionEvent>> {
     let site = site(category);
+    let mut items: Vec<_> = posts
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|post| parse_post(category, post, data))
+        .collect();
+    let root = root(category);
+    crate::sites::boorus::html_extras(
+        http,
+        &mut items,
+        |id| Url::parse(&format!("{root}/post/show/{id}")).ok(),
+        true,
+    )
+    .await?;
     let mut events = Vec::new();
-    for post in posts.as_array().into_iter().flatten() {
-        if let Some(item) = parse_post(category, post, data) {
-            events.extend(crate::sites::post(site, http, route, vec![item]));
-        }
+    for item in items {
+        events.extend(crate::sites::post(site, http, route, vec![item]));
     }
-    events
+    Ok(events)
 }
 
 pub(crate) fn parse_post(category: &str, post: &Value, data: &Map<String, Value>) -> Option<Item> {

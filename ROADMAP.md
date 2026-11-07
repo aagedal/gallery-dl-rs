@@ -622,6 +622,18 @@ Add native configuration and filename templates, then prioritize additional site
 Integrate the companion **yt-dlp-rs** project for video extraction and segmented
 downloads. Document compatibility differences as features land.
 
+**Implemented upstream keyword dictionaries (2026-11-07):** files of the
+native Pinterest, Tumblr, Reddit, Flickr, Kemono/Coomer, Wallhaven, Imgur,
+Weasyl, VSCO, ArtStation, Fur Affinity, Newgrounds, Mastodon, Bluesky,
+DeviantArt, Twitter and Instagram (regular posts) extractors carry upstream's per-file keyword dictionaries
+(`PostMetadata.site_keywords`), so upstream filename/directory templates,
+filters and postprocessor keywords work unchanged, and default paths follow
+upstream's per-subcategory formats. Fur Affinity also parses the site's
+current (2025) markup, which upstream's parsers no longer match. Twitter keywords omit raw `article` objects and community dictionaries,
+which may carry malformed or private payloads. Remaining: Facebook,
+Instagram stories/highlights and Pixiv (whose typed metadata already maps
+most upstream names) still expose native keywords.
+
 **Implemented experimental native Imgur:** single images, albums and gallery
 posts via the public `post/v1` API, with shared retries, timeouts, network
 options and Retry-After cooldowns. The upstream boolean `mp4` option defaults
@@ -639,8 +651,11 @@ views and artist discovery. Danbooru/e621 support
 API-only username/password Basic authentication and Gelbooru/Safebooru support API-only
 user-id/api-key credentials, with same-origin redirects and no credentials in
 media metadata. API-reported file size, rating and signed score are exposed.
-Remaining: other favorites, notes,
-`tags`/`metadata` options, per-category tags and authenticated live verification.
+The `[booru]` `tags` (per-type `tags_TYPE`) and `notes` options read post pages
+for the gelbooru_v02 and moebooru engines (2026-11-07). Danbooru's `metadata`
+includes (boolean, string or list) are merged per page for native tag
+listings. Remaining: other favorites, `metadata` for pool/favorite-group and
+e621 listings, and authenticated live verification.
 
 **Implemented experimental native Mastodon:** statuses, user timelines,
 bookmarks, favourites, list timelines and Unicode hashtags on mastodon.social,
@@ -661,7 +676,10 @@ anonymously (category `mastodon`, where upstream uses the host name; tokens
 stay bound to the built-in instances), including Pleroma/Akkoma `notice`
 links and alphanumeric flake IDs; followed accounts on such hosts are queued
 with the prefix. Pleroma `objects/UUID` redirects are not followed yet.
-Remaining: OAuth/cache discovery, configured additional instances, followed views,
+Configured instances (`extractor.mastodon.NAME.root`, also for misskey,
+moebooru, szurubooru, shimmie2, foolfuuka, vichan and lynxchan) route plain
+URLs on their hosts to the `BASE:` readers (2026-11-07).
+Remaining: OAuth/cache discovery, followed views,
 account-search fallback/moved handling, and fuller metadata/default
 naming. Authenticated live verification and real captures remain required.
 
@@ -681,9 +699,15 @@ no files were downloaded. Subsequent gzip-aware inspection emitted a Kemono
 thumbnail job and a Coomer MP4 original job with creator display names; no media
 was downloaded in those inspections. Authenticated verification, wider service
 captures and successful original transfers remain required.
-Remaining: popular views, comments/DMs, archive/link
-extraction from post text, username/password login, additional endpoint behavior
-and full upstream metadata/default naming.
+Since 2026-11-07 files carry upstream's keyword dictionaries (the post
+object merged with each file's `type`/`path`/`hash`/`url`/`filename`, plus
+`date`, `count`, `num`, `archives`, `user_profile`, `username` and revision
+fields) with upstream's default filename/directory, and the `comments`,
+`dms`, `announcements`, `archives` and `archives-format` options.
+`user_profile` uses the native typed profile (dates as Unix seconds).
+Since 2026-11-07 `username`/`password` log in through
+`/api/v1/authentication/login` once per host (session cookies stay in memory).
+Remaining: additional endpoint behavior.
 
 **Implemented Kemono/Coomer creator metadata:** default-enabled, lazy profile
 lookups attach typed immutable IDs and optional display names, public IDs, dates,
@@ -781,9 +805,10 @@ lists (including zero-based Pixeldrain `#item=N` selection), albums, galleries
 and image pages. Catbox album dates accept upstream's `Created Month DD YYYY`
 and the previously accepted `Uploaded DD Month YYYY` format; invalid optional dates do not
 change media selection. Pixeldrain API keys authenticate API requests and file downloads.
-Remaining: Pixeldrain filesystem (`/d/`) links and other domains; Catbox file
-`/c/` descriptions; imgbox per-image metadata (width/height); Postimg
-JS-paginated gallery pages beyond the server-rendered listing.
+Pixeldrain filesystem (`/d/`) folders (with `recursive`) followed, and since
+2026-11-07 Postimg galleries list every image through `json?action=list`.
+Remaining: other Pixeldrain domains; Catbox file `/c/` descriptions; imgbox
+per-image metadata (width/height).
 
 **Implemented experimental native Tumblr:** blog listings, single posts and
 tagged listings via API v2 with an overridable `api-key`, original-image token
@@ -794,9 +819,10 @@ settings. Single-post URLs bypass the `posts` filter, matching upstream.
 Failed token lookups fall back to the
 API rendition; upstream's delayed token refresh retries remain unimplemented.
 Since 2026-10-29 `access-token`/`access-token-secret` (and `api-secret`) sign
-requests with OAuth 1.0a. Remaining: likes/search/day views, NPF posts,
-external audio/video, `external`/`fallback-delay`/`fallback-retries` options,
-and custom-domain blogs.
+requests with OAuth 1.0a. Likes, search and day views, the `external`,
+`avatar`, `offset`, `pagination` and `fallback-*` options followed, and since
+2026-11-07 `tumblr:DOMAIN` custom-domain blogs. Remaining: native NPF posts
+(they are converted to the legacy format) and external audio/video.
 
 **Implemented experimental native Pixiv:** artworks and user illustration/manga
 works via the App API with a `refresh-token`, including lazy ugoira frame ZIPs
@@ -999,15 +1025,16 @@ overview, upstream's `flash`, `format` and `include` options, and tags/rating/
 score metadata.
 
 **Implemented experimental native Fur Affinity:** submissions, galleries and
-scraps via page scraping with optional `a`/`b` session cookies. Remaining:
-favorites, search, user profile/journals, followed users, upstream's
-`descriptions`, `external`, `include` and `layout` options, and tags/
-description metadata.
+scraps via page scraping with optional `a`/`b` session cookies; favorites,
+search, folders, submissions and followed users followed. Since 2026-11-07
+files carry upstream `_parse_post` keywords (both upstream layouts and the
+site's 2025 markup) with the `descriptions` and `layout` options.
+Remaining: `external` link queueing.
 
 **Implemented experimental native Weasyl:** submissions and user galleries via
-the API with an optional `api-key`. Remaining: folders, journals, favorites,
-characters, multi-file/non-visual submissions, and upstream's `metadata`
-option.
+the API with an optional `api-key`; folders, journals and favorites followed,
+and since 2026-11-07 upstream keywords and the `metadata` option. Remaining:
+characters and multi-file/non-visual submissions.
 
 **Implemented experimental native ArtStation:** projects and user portfolios
 via site JSON with browser-like headers. Listings, challenges, following and
@@ -1024,15 +1051,18 @@ photostreams and `flic.kr` short links via the REST API (overridable `api-key`).
 Favorites, galleries, groups, search and album lists followed on
 2026-10-28; `size-max` (pixels or a format code/label; listings request
 upstream's eight `url_*` formats within the limit, `getSizes` drops larger
-sizes) on 2026-10-31. Remaining: OAuth/private content,
-`contexts`/`exif`/`info`/`metadata` options (no keyword dictionary for
-Flickr files yet), `videos: false`, and album metadata on listed items.
+sizes) on 2026-10-31. Since 2026-11-07 files carry upstream's keyword
+dictionaries (`user`, `owner`, `album`/`gallery`/`group`/`search`, `date`,
+`tags`, `label`, ...) with upstream default paths per subcategory, `_d`
+download URLs and `video.getStreamInfo` streams; `info`, `exif`,
+`contexts`, `profile`, `videos` and `metadata` (listing extras) are
+supported. Remaining: OAuth/private content.
 
 **Implemented experimental native Reddit:** submissions, galleries, subreddit
 and user listings over public JSON; video-only v.redd.it MP4s. Since
 2026-10-29 `api: "oauth"` uses oauth.reddit.com with a `refresh-token`/
-`client-id` or an anonymous installed-client token. Remaining: `date-min`/
-`date-max`, preview fallbacks for failed child jobs, the 100-page listing cap.
+`client-id` or an anonymous installed-client token; `date-min`/`date-max`
+filter listings (2026-11-07). Remaining: preview fallbacks for failed child jobs, the 100-page listing cap.
 
 **Implemented experimental native Bluesky:** single posts, author media/posts
 feeds, public custom feeds and list feeds via the public AppView, with full-size
@@ -1141,7 +1171,7 @@ than Python runtime datetime/sentinel objects. Novel runtime fixtures exercise
 conversion/arithmetic results through later file and child counter increments.
 Keyword-driven pre-download selection and request/text-fetch changes remain open.
 Remaining: PostgreSQL processor archives and further default-key coverage,
-additional encodings/open modes and formatter dialects, Unicode
+additional encodings/open modes, Unicode
 decimal/underscore-float parsing, nested-container sorting, runtime Python
 datetime/sentinel object identity, arbitrary native filename fields,
 keyword-driven archive identity and pre-download selection changes, further
@@ -1575,6 +1605,36 @@ path) or `expression` (`mode: eval`) in an external `python3`
 (`$GALLERY_DL_PYTHON`), exchanging the keywords as JSON; `archive` works.
 `compression: lzma` writes LZMA (method 14) entries built natively and
 copied into the archive, readable by Python's `zipfile` (2026-10-28).
+
+**Implemented format string dialects, 2026-11-07:** filename, directory
+and postprocessor templates accept upstream's `\fE` (expression), `\fF`
+(f-string), `\fT`/`\fTF` (template file) and `\fS` formats, evaluated by
+the native expression engine (the same Python subset as filters, which now
+also accepts `start:stop:step` slices). `\fJ` (Jinja) and `\fM` (module
+function) run in an external `python3` (`$GALLERY_DL_PYTHON`), like the
+`python` postprocessor.
+
+**Implemented extraction options, 2026-11-07:** `path-convert`,
+`file-unique`/`image-unique`, `child-unique`/`chapter-unique` and
+`category-transfer` (with upstream's class defaults for manga and other
+listing extractors) apply to native jobs, and the `noop` input is accepted.
+Options tied to the Python runtime have no native meaning and are accepted
+without effect: `metadata-extractor` (inserts the Python extractor object),
+`extractor.module-sources` (Python extractor modules), `path-extended` and
+`output.ansi` (Windows console/path workarounds handled by Rust's standard
+library), and `downloader.http.consume-content` (connection reuse).
+`-A`/`abort:N` counts consecutive skips per child job like upstream, stopping
+only that child (`parent-skip` makes children count toward their input).
+Remaining: `parent-session` (native extractors keep per-site sessions).
+
+**Remaining site options (2026-11-07):** documented upstream options without
+native behavior yet: DeviantArt `auto-watch`/`auto-unwatch` (account
+actions) and `comments-avatars` avatar queueing (comments themselves are
+supported); Facebook `author-followups`; Instagram `audio`, `user-strategy`
+(native lookups use `web_profile_info`), `user-cache` (memory only) and
+`warn-videos` (`warn-images` is supported); Pixiv `work.related`; Twitter `locked`,
+`metadata-user` and `twitpic` (`retries-api` and `ads` are supported); `ytdl.deprecations` (yt-dlp
+diagnostics are never shown). Most need an account to verify.
 
 **Implemented input, auth and pacing options, 2026-10-28:** input files accept
 upstream's `-KEY=VALUE` (next URL) and `-G KEY=VALUE` (all following URLs)

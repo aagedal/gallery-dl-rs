@@ -1206,6 +1206,15 @@ fn python_float_text(text: &str) -> Option<String> {
         Some(result)
     }
 }
+/// Apply upstream `_CONVERSIONS` in order to a path segment (`path-convert`).
+pub(crate) fn convert_text(value: &str, conversions: &str) -> Result<String> {
+    let mut value = Value::Str(value.to_owned());
+    for conversion in conversions.chars() {
+        value = convert(value, conversion)?;
+    }
+    Ok(value.text())
+}
+
 fn convert(value: Value, conversion: char) -> Result<Value> {
     if value == Value::Missing {
         return Ok(match conversion {

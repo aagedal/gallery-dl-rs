@@ -251,22 +251,30 @@ fn extract<'a>(category: &'static str, http: &'a Http, url: Url) -> Events<'a> {
 }
 
 /// Files of one API page, one post boundary per post.
-fn posts_events(
+async fn posts_events(
     ctx: &Ctx<'_>,
     route: &'static Route,
     posts: Vec<Map<String, Value>>,
     data: &Map<String, Value>,
-) -> Events<'static> {
-    let items = posts
+) -> Result<Events<'static>> {
+    let mut items: Vec<_> = posts
         .into_iter()
         .filter_map(|post| parse_post(ctx.category, post, data))
         .collect();
-    crate::sites::events(crate::sites::boorus::per_post(
+    let root = root(ctx.category);
+    crate::sites::boorus::html_extras(
+        ctx.http,
+        &mut items,
+        |id| Url::parse(&format!("{root}/index.php?page=post&s=view&id={id}")).ok(),
+        false,
+    )
+    .await?;
+    Ok(crate::sites::events(crate::sites::boorus::per_post(
         site(ctx.category),
         ctx.http,
         route,
         items,
-    ))
+    )))
 }
 
 struct ApiState {
@@ -346,7 +354,7 @@ fn api_pagination<'a>(
                     .map(crate::sites::scalar);
                 let num = posts.len() as u64;
                 state.count += num;
-                let events = posts_events(&ctx, route, posts, &state.data);
+                let events = posts_events(&ctx, route, posts, &state.data).await?;
                 if num < PER_PAGE {
                     let total = state.total.unwrap_or(0);
                     if total <= 0 || state.count as i64 >= total {
@@ -425,7 +433,7 @@ async fn api_posts(
     data: &Map<String, Value>,
 ) -> Result<Events<'static>> {
     match ctx.api(&[("id", id)]).await? {
-        Xml::Page { posts, .. } => Ok(posts_events(ctx, route, posts, data)),
+        Xml::Page { posts, .. } => posts_events(ctx, route, posts, data).await,
         Xml::Invalid => Err(error(format!("{} returned invalid XML", ctx.http.name()))),
     }
 }

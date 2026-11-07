@@ -8,6 +8,7 @@
 //! assets are downloaded, as-is (no `4k` rewrite), over HTTPS from
 //! `cdn*.artstation.com`; covers, video player embeds and other asset types
 //! are skipped.
+use crate::sites::{Route, SiteKeywords};
 use crate::{
     Result, error,
     event::{ExtractionEvent, KeywordPolicy, group_with_keywords},
@@ -21,7 +22,7 @@ use futures_util::{
     stream::{self, BoxStream},
 };
 use reqwest::{Client, StatusCode};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::Arc,
@@ -292,6 +293,90 @@ enum Asset {
     },
 }
 
+const FILENAME: &str = "{category}_{id}_{asset[id]}_{title}.{extension}";
+const DIRECTORY: &[&str] = &["{category}", "{userinfo[username]}"];
+static IMAGE: Route = Route::new("image", FILENAME, DIRECTORY, "{asset[id]}");
+static USER: Route = Route::new("user", FILENAME, DIRECTORY, "{asset[id]}");
+static ALBUM: Route = Route::new(
+    "album",
+    FILENAME,
+    &[
+        "{category}",
+        "{userinfo[username]}",
+        "Albums",
+        "{album[id]} - {album[title]}",
+    ],
+    "a_{album[id]}_{asset[id]}",
+);
+static LIKES: Route = Route::new(
+    "likes",
+    FILENAME,
+    &["{category}", "{userinfo[username]}", "Likes"],
+    "f_{userinfo[id]}_{asset[id]}",
+);
+static COLLECTION: Route = Route::new(
+    "collection",
+    FILENAME,
+    &[
+        "{category}",
+        "{user}",
+        "{collection[id]} {collection[name]}",
+    ],
+    "c_{collection[id]}_{asset[id]}",
+);
+static SEARCH: Route = Route::new(
+    "search",
+    FILENAME,
+    &["{category}", "Searches", "{search[query]}"],
+    "s_{search[query]}_{asset[id]}",
+);
+static ARTWORK: Route = Route::new(
+    "artwork",
+    FILENAME,
+    &["{category}", "Artworks", "{artwork[sorting]!c}"],
+    "A_{asset[id]}",
+);
+
+/// Upstream `get_project_assets`: the project without `assets`, with
+/// cleaned `title`/`description`, `date` and `count`.
+fn project_keywords(project: &Value, count: usize) -> Map<String, Value> {
+    let mut data = project.as_object().cloned().unwrap_or_default();
+    data.remove("assets");
+    if let Some(title) = data.get("title").and_then(Value::as_str) {
+        let title = crate::sites::unescape(title);
+        data.insert("title".into(), title.into());
+    }
+    if let Some(description) = data.get("description").and_then(Value::as_str) {
+        let description = crate::sites::unescape(&crate::sites::remove_html(description));
+        data.insert("description".into(), description.into());
+    }
+    let created = data.get("created_at").and_then(Value::as_str);
+    let timestamp = created.and_then(|d| crate::date::parse_date(d).ok());
+    data.insert(
+        "date".into(),
+        crate::filter::source_date_text(timestamp).into(),
+    );
+    data.insert("count".into(), count.into());
+    data
+}
+
+/// Set a file's URL-derived `filename` and `extension` keywords.
+fn set_name(media: &mut Media, url: &Url, extension: Option<&str>) {
+    let Some(keywords) = media
+        .metadata
+        .as_mut()
+        .and_then(|m| m.site_keywords.as_mut())
+    else {
+        return;
+    };
+    let fields = &mut Arc::make_mut(keywords).fields;
+    let (filename, ext) = crate::sites::nameext(url);
+    let ext = extension.map_or(ext, str::to_owned);
+    let ext = crate::path_options::map_extension(&ext).unwrap_or(ext);
+    fields.insert("filename".into(), filename.into());
+    fields.insert("extension".into(), ext.into());
+}
+
 /// Parse a `projects/HASH.json` response into its image assets.
 pub fn parse_project(bytes: &[u8], hash: &str) -> Result<Vec<Media>> {
     parse_project_data(bytes, hash, &AssetOptions::default()).map(|(assets, _)| {
@@ -328,6 +413,7 @@ fn parse_project_data(
         .get("assets")
         .and_then(Value::as_array)
         .ok_or_else(|| error("ArtStation project contains no asset list"))?;
+    let data = project_keywords(&project, assets.len());
     let mut items = Vec::new();
     for (position, asset) in assets.iter().enumerate() {
         let Some(id) = text(asset, "id").filter(|id| valid_id(id)) else {
@@ -350,6 +436,15 @@ fn parse_project_data(
                 caption: caption.clone(),
                 timestamp,
                 index: position + 1,
+                site_keywords: Some(Arc::new(SiteKeywords {
+                    route: &IMAGE,
+                    fields: {
+                        let mut fields = data.clone();
+                        fields.insert("asset".into(), asset.clone());
+                        fields.insert("num".into(), (position + 1).into());
+                        fields
+                    },
+                })),
                 ..PostMetadata::default()
             }),
             url,
@@ -387,6 +482,7 @@ fn parse_project_data(
                 && matches!(page.scheme(), "http" | "https")
             {
                 let mut media = item(page.clone(), "mp4".into(), true);
+                set_name(&mut media, &page, Some("mp4"));
                 media.job = MediaJob::VideoPage { page_url: page };
                 items.push(Asset::Ready(media));
             }
@@ -406,6 +502,7 @@ fn parse_project_data(
         };
         let ext = extension(&url);
         let mut media = item(url.clone(), ext, false);
+        set_name(&mut media, &url, None);
         if url.path().contains("/images/images/")
             && let Some((lhs, rhs)) = url.as_str().split_once("/large/")
             && !rhs.is_empty()
@@ -514,9 +611,50 @@ fn search_body(params: &[(String, String)], pro_first: bool) -> Value {
     })
 }
 
+/// What a listing's upstream `metadata()` needs.
+enum Metadata {
+    User(String),
+    Album(String, u64),
+    Collection(String, String),
+    Other(Map<String, Value>),
+}
+
+/// The upstream class and metadata of a `Target::Listing` URL.
+fn listing_kind(url: &Url, path: &str) -> (&'static Route, Metadata) {
+    let user = url
+        .host_str()
+        .and_then(|host| host.strip_suffix(".artstation.com"))
+        .filter(|host| *host != "www")
+        .map(str::to_owned)
+        .or_else(|| url.path_segments()?.next().map(str::to_owned))
+        .unwrap_or_default();
+    if let Some(query) = path.strip_prefix("projects.json?") {
+        let mut map = Map::new();
+        map.insert(
+            "artwork".into(),
+            crate::sites::gdl::parse_query(query).into(),
+        );
+        return (&ARTWORK, Metadata::Other(map));
+    }
+    if path.ends_with("/likes.json") {
+        return (&LIKES, Metadata::User(user));
+    }
+    if let Some(rest) = path.strip_prefix("collections/") {
+        let id = rest.split('/').next().unwrap_or_default().to_owned();
+        return (&COLLECTION, Metadata::Collection(user, id));
+    }
+    if let Some((_, id)) = path.split_once("album_id=") {
+        return (&ALBUM, Metadata::Album(user, id.parse().unwrap_or(0)));
+    }
+    (&USER, Metadata::User(user))
+}
+
 struct ListingState {
     /// API path, possibly with a query.
     path: String,
+    route: &'static Route,
+    metadata: Metadata,
+    data: Option<Map<String, Value>>,
     /// JSON body of a POST listing (search), with its `page` updated.
     post: Option<Value>,
     /// `PUBLIC-CSRF-TOKEN` for POST listings, fetched before the first page.
@@ -638,9 +776,18 @@ impl ArtStation {
         self.api_root.as_str().trim_end_matches('/').to_owned()
     }
 
-    async fn project(&self, hash: &str) -> Result<VecDeque<ExtractionEvent>> {
+    async fn project(
+        &self,
+        hash: &str,
+        route: &'static Route,
+        data: Option<&Map<String, Value>>,
+    ) -> Result<VecDeque<ExtractionEvent>> {
         let body = self.call(&format!("projects/{hash}.json")).await?;
         let (assets, count) = parse_project_data(&body, hash, &self.assets)?;
+        let owner = serde_json::from_slice::<Value>(&body)
+            .ok()
+            .and_then(|project| project.get("user").and_then(|user| text(user, "username")))
+            .filter(|user| valid_user(user));
         let mut items = Vec::new();
         for asset in assets {
             let mut item = match asset {
@@ -662,12 +809,43 @@ impl ArtStation {
                     media
                         .filename
                         .push_str(if ext.is_empty() { "mp4" } else { &ext });
+                    set_name(&mut media, &url, None);
                     media.url = url;
                     media
                 }
             };
             self.network.apply_media(&mut item);
             items.push(item);
+        }
+        // A single project's metadata is its owner's `userinfo`; unlike
+        // upstream, an unavailable profile only loses that keyword.
+        let owned;
+        let data = match data {
+            Some(data) => data,
+            None => {
+                let mut map = Map::new();
+                if let Some(user) = owner {
+                    match self.userinfo(&user).await {
+                        Ok(userinfo) => {
+                            map.insert("userinfo".into(), userinfo);
+                        }
+                        Err(e) => eprintln!("[artstation][warning] {user}: no user info ({e})"),
+                    }
+                }
+                owned = map;
+                &owned
+            }
+        };
+        for item in &mut items {
+            if let Some(keywords) = item
+                .metadata
+                .as_mut()
+                .and_then(|m| m.site_keywords.as_mut())
+            {
+                let keywords = Arc::make_mut(keywords);
+                keywords.route = route;
+                keywords.fields.extend(data.clone());
+            }
         }
         // Upstream emits Directory for each asset, even within one project.
         // Each asset's Url then reuses that Directory dictionary.
@@ -692,7 +870,54 @@ impl ArtStation {
             .collect())
     }
 
+    /// Upstream `get_user_info`.
+    async fn userinfo(&self, user: &str) -> Result<Value> {
+        let body = self
+            .call(&format!("users/{}/quick.json", user.to_lowercase()))
+            .await?;
+        serde_json::from_slice(&body).map_err(|_| error("ArtStation returned invalid user info"))
+    }
+
+    /// Upstream `metadata()` of listing extractors.
+    async fn listing_metadata(&self, metadata: &Metadata) -> Result<Map<String, Value>> {
+        let mut data = Map::new();
+        match metadata {
+            Metadata::User(user) => {
+                data.insert("userinfo".into(), self.userinfo(user).await?);
+            }
+            Metadata::Album(user, id) => {
+                let userinfo = self.userinfo(user).await?;
+                let album = userinfo
+                    .get("albums_with_community_projects")
+                    .and_then(Value::as_array)
+                    .and_then(|albums| {
+                        albums
+                            .iter()
+                            .find(|album| album.get("id").and_then(Value::as_u64) == Some(*id))
+                    })
+                    .cloned()
+                    .ok_or_else(|| error("ArtStation album not found"))?;
+                data.insert("userinfo".into(), userinfo);
+                data.insert("album".into(), album);
+            }
+            Metadata::Collection(user, id) => {
+                let body = self
+                    .call(&format!("collections/{id}.json?username={user}"))
+                    .await?;
+                let collection: Value = serde_json::from_slice(&body)
+                    .map_err(|_| error("ArtStation returned an invalid collection"))?;
+                data.insert("collection".into(), collection);
+                data.insert("user".into(), user.clone().into());
+            }
+            Metadata::Other(map) => data = map.clone(),
+        }
+        Ok(data)
+    }
+
     async fn next_page(&self, state: &mut ListingState) -> Result<()> {
+        if state.data.is_none() {
+            state.data = Some(self.listing_metadata(&state.metadata).await?);
+        }
         state.page += 1;
         let body = if let Some(json) = state.post.as_mut() {
             if state.csrf.is_none() {
@@ -724,7 +949,9 @@ impl ArtStation {
             || state.page >= MAX_PAGES
             || self.max_posts.is_some_and(|max| state.projects >= max);
         for hash in hashes {
-            let events = self.project(&hash).await?;
+            let events = self
+                .project(&hash, state.route, state.data.as_ref())
+                .await?;
             state.pending.extend(events);
         }
         Ok(())
@@ -926,18 +1153,41 @@ impl ArtStation {
     /// Emit one post boundary per project; portfolios paginate lazily.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
         let mut post = None;
+        let mut route = &USER;
+        let metadata;
         let path = match target(url) {
-            Ok(Target::User { user }) => format!("users/{user}/projects.json"),
-            Ok(Target::Listing { path }) => path,
+            Ok(Target::User { user }) => {
+                metadata = Metadata::User(user.clone());
+                format!("users/{user}/projects.json")
+            }
+            Ok(Target::Listing { path }) => {
+                (route, metadata) = listing_kind(url, &path);
+                path
+            }
             Ok(Target::Search { params }) => {
-                post = Some(search_body(&params, self.pro_first));
+                let body = search_body(&params, self.pro_first);
+                let param = |key: &str| params.iter().find(|(k, _)| k == key).map(|(_, v)| v);
+                let tags: Vec<Value> = param("tags")
+                    .map_or("", String::as_str)
+                    .split(',')
+                    .map(Value::from)
+                    .collect();
+                let search = serde_json::json!({
+                    "query": body["query"],
+                    "sorting": body["sorting"],
+                    "tags": tags,
+                });
+                let mut map = Map::new();
+                map.insert("search".into(), search);
+                (route, metadata) = (&SEARCH, Metadata::Other(map));
+                post = Some(body);
                 "api/v2/search/projects.json".into()
             }
             Ok(Target::Collections { user }) => return self.collections(user),
             Ok(Target::Challenge { id, sorting }) => return self.challenge(id, sorting),
             Ok(Target::Following { user }) => return self.following(user),
             Ok(Target::Project { hash }) => {
-                return stream::once(async move { self.project(&hash).await })
+                return stream::once(async move { self.project(&hash, &IMAGE, None).await })
                     .map(|result| match result {
                         Ok(events) => stream::iter(events.into_iter().map(Ok)).boxed(),
                         Err(e) => stream::once(async move { Err(e) }).boxed(),
@@ -949,6 +1199,9 @@ impl ArtStation {
         };
         let state = ListingState {
             path,
+            route,
+            metadata,
+            data: None,
             post,
             csrf: None,
             page: 0,
@@ -1335,7 +1588,9 @@ mod tests {
 
     #[tokio::test]
     async fn paginates_portfolio_and_reports_blocks() {
+        let userinfo = || ok(json!({"id": 5, "username": "alice"}));
         let (root, server) = serve(vec![
+            userinfo(),
             ok(json!({"data": [{"hash_id": "a"}], "total_count": 2})),
             ok(project("a")),
             ok(json!({"data": [{"hash_id": "b"}], "total_count": 2})),
@@ -1347,8 +1602,22 @@ mod tests {
             .await;
         let media: Vec<_> = media.into_iter().map(|m| m.unwrap()).collect();
         assert_eq!(media.len(), 6);
+        let keywords = media[0]
+            .metadata
+            .as_ref()
+            .unwrap()
+            .site_keywords
+            .as_ref()
+            .unwrap();
+        assert_eq!(keywords.route.subcategory, "user");
+        assert_eq!(keywords.fields["userinfo"]["username"], "alice");
+        assert_eq!(keywords.fields["asset"]["id"], 11);
+        assert_eq!(keywords.fields["title"], "Ship");
+        assert_eq!(keywords.fields["count"], 6);
+        assert_eq!(keywords.fields["filename"], "c");
         let limited = artstation(
             serve(vec![
+                userinfo(),
                 ok(json!({"data": [{"hash_id": "a"}, {"hash_id": "b"}], "total_count": 9})),
                 ok(project("a")),
             ])
@@ -1364,8 +1633,9 @@ mod tests {
         assert_eq!(limited.len(), 3);
         assert_eq!(media[4].filename, "b_12.png");
         let requests = server.join().unwrap();
-        assert!(requests[0].starts_with("GET /users/alice/projects.json?page=1 "));
-        assert!(requests[2].starts_with("GET /users/alice/projects.json?page=2 "));
+        assert!(requests[0].starts_with("GET /users/alice/quick.json "));
+        assert!(requests[1].starts_with("GET /users/alice/projects.json?page=1 "));
+        assert!(requests[3].starts_with("GET /users/alice/projects.json?page=2 "));
 
         let (root, server) = serve(vec![response("403 Forbidden", b"cf")]);
         let error = artstation(root)

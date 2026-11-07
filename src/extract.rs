@@ -777,20 +777,57 @@ pub struct Backend {
     pub timeout: Duration,
 }
 
+/// Hosts of configured shared-engine instances and their base category.
+static INSTANCES: std::sync::OnceLock<std::collections::HashMap<String, String>> =
+    std::sync::OnceLock::new();
+
+/// Register upstream configured instances (`extractor.BASE.NAME.root`) so
+/// plain URLs on their hosts use the `BASE:URL` reader; later calls are
+/// ignored.
+pub fn set_instances(instances: Vec<(String, String)>) {
+    let map = instances
+        .into_iter()
+        .filter_map(|(base, root)| {
+            let host = Url::parse(&root).ok()?.host_str()?.to_ascii_lowercase();
+            Some((host, base))
+        })
+        .collect();
+    let _ = INSTANCES.set(map);
+}
+
 pub fn http_url(value: &str) -> Result<Url> {
+    parse_input_url(value, true)
+}
+
+fn parse_input_url(value: &str, instances: bool) -> Result<Url> {
+    // Upstream `noop` (pattern `(?i)noo?p$`).
+    if value.eq_ignore_ascii_case("noop") || value.eq_ignore_ascii_case("nop") {
+        return Ok(Url::parse("noop:").expect("static URL"));
+    }
     let url = Url::parse(value)?;
+    if instances
+        && matches!(url.scheme(), "http" | "https")
+        && let Some(base) = url
+            .host_str()
+            .and_then(|host| INSTANCES.get()?.get(&host.to_ascii_lowercase()))
+        && crate::sites::find(&url).is_none()
+        && let Ok(prefixed) = Url::parse(&format!("{base}:{url}"))
+    {
+        return parse_input_url(prefixed.as_str(), false);
+    }
     // gallery-dl `basecategory:https://host/...` inputs address readers of
     // a shared engine that has no built-in instance for the host.
     // Opaque inputs such as `smugmug:album:ID` are accepted when a registry
     // site matches them; embedded HTTP(S) URLs are still validated.
     if !matches!(url.scheme(), "http" | "https")
         && (crate::sites::find(&url).is_some()
-            || url.scheme() == "mastodon" && crate::mastodon::target(&url).is_ok())
+            || url.scheme() == "mastodon" && crate::mastodon::target(&url).is_ok()
+            || url.scheme() == "tumblr" && crate::tumblr::is_blog_url(&url))
     {
         if let Some((_, inner)) = value.split_once(':')
             && Url::parse(inner).is_ok_and(|inner| matches!(inner.scheme(), "http" | "https"))
         {
-            http_url(inner)?;
+            parse_input_url(inner, false)?;
         }
         return Ok(url);
     }

@@ -66,17 +66,16 @@ every category listed here are still passed to gallery-dl, so any site it
 supports works; those files keep gallery-dl's category and complete keyword
 dictionary for filters, templates and postprocessors, and default to
 `CATEGORY/{filename}.{extension}` paths (per-extractor upstream path formats
-are not reported by gallery-dl, and no download-archive identity is derived). `--extractor native` experimentally
-supports Instagram `/p/`, `/reel/`, and `/tv/` posts, Instagram `/USERNAME/` and
-`/USERNAME/feed/` profiles, Instagram reels/tagged/saved collections and
-stories/highlights (described below), Facebook `/photo/?fbid=ID`, `/photo.php?fbid=ID`, and
-`/USER/photos/ALBUM/ID` photo permalinks, experimental Facebook sets via
-`/media/set/?set=TOKEN` or `/photo/?set=TOKEN`, Facebook `/watch/?v=ID` and
-`/USER/videos/ID` videos, and Twitter/X single-status plus `/USER/media`, `/USER/tweets`, `/USER/with_replies`,
-and `/USER/highlights` URLs, root profiles, search, hashtags, likes, bookmarks,
-lists, home feeds, and community feeds.
-X conversation extraction is also available through scoped settings. Other
-unsupported profiles and album listings still need the compatibility backend.
+are not reported by gallery-dl, and no download-archive identity is derived). `--extractor native`
+handles almost every URL form in upstream gallery-dl's test suite (as of
+1.32.19, everything but 500px's login-only `liked` page) without Python:
+dedicated extractors for Instagram, Facebook, Twitter/X, Pixiv, DeviantArt,
+Bluesky, Mastodon, Kemono/Coomer, Reddit, Tumblr, Pinterest, Flickr, Imgur,
+the boorus and others, plus ports of upstream's remaining extractor modules.
+Files carry upstream's keyword dictionaries and default paths, so upstream
+filename/directory templates, filters and postprocessors work unchanged; see
+ROADMAP.md for per-site status and the remaining differences. Many sites
+still need cookies or credentials, exactly as upstream.
 Native extraction does not fall back to that backend automatically. In native
 mode, `--config` names a gallery-dl configuration file that Rust reads in place
 of `--native-config`.

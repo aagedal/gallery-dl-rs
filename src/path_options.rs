@@ -1,4 +1,5 @@
-//! Upstream `path-restrict`, `path-replace`, `path-remove` and `path-strip`.
+//! Upstream `path-restrict`, `path-replace`, `path-convert`, `path-remove`
+//! and `path-strip`.
 //!
 //! These are process-wide, like upstream's global configuration. When none is
 //! configured, filenames keep gallery-dl-rs's default cleaning. Separators
@@ -39,6 +40,7 @@ impl Clean {
 #[derive(Debug)]
 pub struct PathOptions {
     restrict: Clean,
+    convert: String,
     remove: Clean,
     strip: String,
 }
@@ -97,6 +99,15 @@ impl PathOptions {
             ),
             Some(_) => return Err(error("path-restrict must be a string or mapping")),
         };
+        let convert = match values.get("path-convert") {
+            None | Some(Value::Null) => String::new(),
+            Some(Value::String(value)) => {
+                crate::naming::format::convert_text("", value)
+                    .map_err(|_| error("path-convert has an unknown conversion"))?;
+                value.clone()
+            }
+            Some(_) => return Err(error("path-convert must be a string")),
+        };
         let remove = match values.get("path-remove") {
             None => Clean::build("\\x00-\\x1f\\x7f", "")?,
             Some(Value::String(value)) => Clean::build(&regex_class(value), "")?,
@@ -110,6 +121,7 @@ impl PathOptions {
         };
         Ok(Some(Self {
             restrict,
+            convert,
             remove,
             strip,
         }))
@@ -128,7 +140,12 @@ impl PathOptions {
     /// Upstream `clean_path(clean_segment(value))`, plus mandatory separator
     /// and NUL replacement. Directory components are also `strip`ped.
     pub fn clean(&self, value: &str, directory: bool) -> String {
-        let value = self.remove.apply(&self.restrict.apply(value));
+        let mut value = self.restrict.apply(value);
+        if !self.convert.is_empty() {
+            // Validated in `parse`; conversions of strings do not fail.
+            value = crate::naming::format::convert_text(&value, &self.convert).unwrap_or(value);
+        }
+        let value = self.remove.apply(&value);
         let mut value: String = value
             .chars()
             .map(|c| {
@@ -206,6 +223,9 @@ mod tests {
         assert_eq!(plus.clean("a:b", false), "a：b");
         let custom = options(json!({"path-restrict": {"a": "A"}}));
         assert_eq!(custom.clean("a/a", false), "A_A");
+        let convert = options(json!({"path-convert": "Wl"}));
+        assert_eq!(convert.clean("Foo  Bar/Baz", false), "foo bar_baz");
+        assert!(PathOptions::parse(json!({"path-convert": "?"}).as_object().unwrap()).is_err());
         let strip = options(json!({"path-strip": "windows"}));
         assert_eq!(strip.clean(" dir. ", true), "dir");
         assert_eq!(strip.clean(" name. ", false), " name. ");

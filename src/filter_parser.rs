@@ -667,8 +667,47 @@ impl Parser {
         let mut value = self.atom()?;
         loop {
             if self.take(&Token::LBracket) {
-                let index = self.expression()?;
+                // Python slices: up to three optional bounds separated by `:`.
+                let mut bounds = Vec::new();
+                let mut sliced = false;
+                loop {
+                    if matches!(self.peek(), Token::Colon | Token::RBracket) {
+                        bounds.push(None);
+                    } else {
+                        bounds.push(Some(self.expression()?));
+                    }
+                    if self.take(&Token::Colon) {
+                        sliced = true;
+                        if bounds.len() == 3 {
+                            return Err(syntax());
+                        }
+                        continue;
+                    }
+                    break;
+                }
                 self.expect(&Token::RBracket)?;
+                if sliced {
+                    bounds.resize_with(3, || None);
+                    let depth = 1 + bounds
+                        .iter()
+                        .flatten()
+                        .map(|bound| bound.depth)
+                        .max()
+                        .unwrap_or(0)
+                        .max(value.depth);
+                    let mut exprs = bounds
+                        .into_iter()
+                        .map(|bound| bound.map_or(Expr::Literal(Value::None), |b| b.expr));
+                    let bounds = [
+                        exprs.next().expect("three bounds"),
+                        exprs.next().expect("three bounds"),
+                        exprs.next().expect("three bounds"),
+                    ];
+                    value =
+                        self.node(Expr::Slice(Box::new(value.expr), Box::new(bounds)), depth)?;
+                    continue;
+                }
+                let index = bounds.pop().flatten().ok_or_else(syntax)?;
                 let depth = 1 + value.depth.max(index.depth);
                 value = self.node(
                     Expr::Index(Box::new(value.expr), Box::new(index.expr)),
@@ -1072,7 +1111,6 @@ mod tests {
             "re.search('private', caption)",
             "'ß'.casefold()",
             "'²'.isdigit()",
-            "a[1:2]",
             "len(value=1)",
             "1e999",
             "1__0",

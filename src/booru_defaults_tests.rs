@@ -220,7 +220,13 @@ async fn replay(case: &Value, archived: bool, scoped: bool) {
         )
     } else {
         crate::event::media_only(events)
-            .map(|result| result.map(|media| JobMedia { media, scope: None }))
+            .map(|result| {
+                result.map(|media| JobMedia {
+                    media,
+                    scope: None,
+                    child: None,
+                })
+            })
             .boxed()
     };
     let download = download::client(Duration::from_secs(30)).unwrap();

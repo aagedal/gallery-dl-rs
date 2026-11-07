@@ -9,6 +9,7 @@
 //! are progressive MP4 or HLS (handed to yt-dlp). Video pages, avatars
 //! (`im.vsco.co` redirects) and collections (`api/2.0/collections`) follow
 //! upstream. Media must be HTTPS on a `*.vsco.co` host.
+use crate::sites::{Route, SiteKeywords};
 use crate::{
     Result, error,
     event::{ExtractionEvent, group},
@@ -23,7 +24,7 @@ use futures_util::{
     stream::{self, BoxStream},
 };
 use reqwest::{Client, StatusCode};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::Arc,
@@ -208,6 +209,94 @@ fn extension(url: &Url, video: bool) -> String {
         .unwrap_or_else(|| if video { "mp4" } else { "jpg" }.into())
 }
 
+const DIRECTORY: &[&str] = &["{category}", "{user}"];
+static MEDIA: Route = Route::new("image", "{id}.{extension}", DIRECTORY, "{id}");
+static COLLECTION: Route = Route::new(
+    "collection",
+    "{id}.{extension}",
+    &["{category}", "{user}", "collection"],
+    "c_{user}_{id}",
+);
+static SPACE: Route = Route::new(
+    "space",
+    "{id}.{extension}",
+    &["{category}", "space", "{user}"],
+    "s_{user}_{id}",
+);
+
+/// Use another upstream class's formats for already built files.
+fn with_route(mut items: Vec<Media>, route: &'static Route) -> Vec<Media> {
+    for item in &mut items {
+        if let Some(keywords) = item
+            .metadata
+            .as_mut()
+            .and_then(|m| m.site_keywords.as_mut())
+        {
+            Arc::make_mut(keywords).route = route;
+        }
+    }
+    items
+}
+
+/// Upstream's per-file keywords.
+fn keywords(
+    media: &Value,
+    user: &str,
+    url: &Url,
+    video: bool,
+    timestamp: Option<i64>,
+) -> Map<String, Value> {
+    let (filename, extension) = crate::sites::nameext(url);
+    let extension = if extension == "m3u8" {
+        "mp4".to_owned()
+    } else {
+        crate::path_options::map_extension(&extension).unwrap_or(extension)
+    };
+    let tags: Vec<Value> = media
+        .get("tags")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|tag| tag.get("text").cloned())
+        .collect();
+    let meta = field(media, "imageMeta", "image_meta")
+        .filter(|meta| !meta.is_null())
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Map::new()));
+    let id = field(media, "_id", "_id")
+        .or_else(|| media.get("id"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let mut fields = Map::new();
+    fields.insert("id".into(), id);
+    fields.insert("user".into(), user.to_lowercase().into());
+    let grid = field(media, "gridName", "grid_name").cloned();
+    fields.insert("grid".into(), grid.unwrap_or_else(|| "".into()));
+    fields.insert("meta".into(), meta);
+    fields.insert("tags".into(), tags.into());
+    fields.insert(
+        "date".into(),
+        crate::filter::source_date_text(timestamp).into(),
+    );
+    fields.insert("video".into(), video.into());
+    fields.insert(
+        "width".into(),
+        media.get("width").cloned().unwrap_or(0.into()),
+    );
+    fields.insert(
+        "height".into(),
+        media.get("height").cloned().unwrap_or(0.into()),
+    );
+    let description = media.get("description").filter(|d| !d.is_null()).cloned();
+    fields.insert(
+        "description".into(),
+        description.unwrap_or_else(|| "".into()),
+    );
+    fields.insert("filename".into(), filename.into());
+    fields.insert("extension".into(), extension.into());
+    fields
+}
+
 /// One media object (page state camelCase or API snake_case) as a download.
 pub fn media_item(media: &Value, user: &str) -> Option<Media> {
     let id = text(media, "_id", "_id")
@@ -265,6 +354,10 @@ pub fn media_item(media: &Value, user: &str) -> Option<Media> {
             caption: text(media, "description", "description").map(Arc::<str>::from),
             timestamp,
             index: 1,
+            site_keywords: Some(Arc::new(SiteKeywords {
+                route: &MEDIA,
+                fields: keywords(media, user, &url, video, timestamp),
+            })),
             ..PostMetadata::default()
         }),
         url,
@@ -677,10 +770,23 @@ impl Vsco {
                         }
                     };
                     let user = format!("space-{id}");
-                    let items: Vec<Media> = images
+                    let mut items: Vec<Media> = images
                         .iter()
                         .filter_map(|image| media_item(image, &user))
                         .collect();
+                    items = with_route(items, &SPACE);
+                    for item in &mut items {
+                        // Upstream's `user` of a space is its ID.
+                        let keywords = item
+                            .metadata
+                            .as_mut()
+                            .and_then(|m| m.site_keywords.as_mut());
+                        if let Some(keywords) = keywords {
+                            Arc::make_mut(keywords)
+                                .fields
+                                .insert("user".into(), id.to_lowercase().into());
+                        }
+                    }
                     Ok::<_, crate::Error>(Some((
                         self.finish(items),
                         (Some((token, cursor)), page + 1),
@@ -754,7 +860,7 @@ impl Vsco {
                         let body = self.call(&format!("{user}/collection/1"), None).await?;
                         let (collection, token, items) = parse_collection_page(&body, &user)?;
                         return Ok::<_, crate::Error>(Some((
-                            self.finish(items),
+                            self.finish(with_route(items, &COLLECTION)),
                             (Some((collection, token)), 2, false),
                         )));
                     };
@@ -774,7 +880,7 @@ impl Vsco {
                     let items: Vec<Media> =
                         medias.iter().filter_map(|m| media_item(m, &user)).collect();
                     Ok(Some((
-                        self.finish(items),
+                        self.finish(with_route(items, &COLLECTION)),
                         (Some((collection, token)), page + 1, medias.is_empty()),
                     )))
                 }
@@ -1253,5 +1359,39 @@ mod tests {
             .to_string();
         assert!(error.contains("preloaded state"), "{error}");
         server.join().unwrap();
+    }
+
+    #[test]
+    fn media_keywords_match_upstream_fields() {
+        let media = media_state()["medias"]["byId"][ID]["media"].clone();
+        let item = media_item(&media, "Alice").unwrap();
+        let keywords = item.metadata.unwrap().site_keywords.unwrap();
+        let fields = &keywords.fields;
+        assert_eq!(fields["id"], ID);
+        assert_eq!(fields["user"], "alice");
+        assert_eq!(fields["grid"], "");
+        assert_eq!(fields["meta"], json!({}));
+        assert_eq!(fields["tags"], json!([]));
+        assert_eq!(fields["date"], "2024-01-01 00:00:00");
+        assert_eq!(fields["video"], false);
+        assert_eq!(
+            (fields["width"].clone(), fields["height"].clone()),
+            (json!(800), json!(600))
+        );
+        assert_eq!(fields["description"], "Sunset");
+        assert_eq!(
+            (fields["filename"].clone(), fields["extension"].clone()),
+            (json!("a"), json!("jpg"))
+        );
+        let collection = with_route(vec![media_item(&media, "alice").unwrap()], &COLLECTION);
+        let route = collection[0]
+            .metadata
+            .as_ref()
+            .unwrap()
+            .site_keywords
+            .as_ref()
+            .unwrap()
+            .route;
+        assert_eq!(route.archive, "c_{user}_{id}");
     }
 }

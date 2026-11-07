@@ -303,8 +303,16 @@ fn found(url: &str) -> crate::Result<&str> {
 }
 
 fn imxto_info(page: &str) -> crate::Result<(String, Option<String>)> {
+    // The site's current markup (`img-center`) replaced upstream's marker.
+    let marker = [
+        "<div style=\"text-align:center;\"><a href=\"",
+        "<div class=\"img-center\"><a href=\"",
+    ]
+    .into_iter()
+    .find(|marker| page.contains(marker))
+    .unwrap_or("<div style=\"text-align:center;\"><a href=\"");
     let mut scan = Scan::new(page);
-    let url = found(scan.extr("<div style=\"text-align:center;\"><a href=\"", "\""))?.to_owned();
+    let url = found(scan.extr(marker, "\""))?.to_owned();
     let filename = scan
         .find(" title=\"", "\"")
         .filter(|f| !f.is_empty())
@@ -742,6 +750,14 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("POST /img-57a2050547b97.html "));
         assert!(requests[0].ends_with("imgContinue=Continue%2Bto%2Bimage%2B...%2B"));
+    }
+
+    #[test]
+    fn imxto_reads_the_current_markup() {
+        let page = r#"<div class="img-title">t.png</div><div class="img-center"><a href="https://image.imx.to/u/i/2018/04/09/1qdeva.png" title="t.png" target="_blank">"#;
+        let (url, name) = imxto_info(page).unwrap();
+        assert_eq!(url, "https://image.imx.to/u/i/2018/04/09/1qdeva.png");
+        assert_eq!(name.as_deref(), Some("t.png"));
     }
 
     #[tokio::test]

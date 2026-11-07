@@ -711,6 +711,24 @@ pub fn parse_postimg_image(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
 }
 
 /// Image page IDs linked from gallery thumbnails (` class="thumb"><a href=`).
+/// One `json?action=list` page: image page IDs and whether more follow.
+fn parse_postimg_list(bytes: &[u8]) -> (Vec<String>, bool) {
+    let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
+        return (Vec::new(), false);
+    };
+    let ids = value
+        .get("images")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|image| image.get(1)?.as_str())
+        .filter(|id| valid_media_id(Site::Postimg, id))
+        .map(str::to_owned)
+        .collect();
+    let next = value.get("has_page_next").and_then(Value::as_bool) == Some(true);
+    (ids, next)
+}
+
 pub fn parse_postimg_gallery(bytes: &[u8]) -> Result<(Option<String>, Vec<String>)> {
     let page = html(Site::Postimg, bytes)?;
     let title = meta_property(page, "og:title").and_then(clean_text);
@@ -749,6 +767,8 @@ pub struct ImageHosts {
     retries: u8,
     rate_limits: RateLimits,
     pixeldrain_authorization: Option<HeaderValue>,
+    /// Upstream Pixeldrain `recursive`: queue subdirectories.
+    pixeldrain_recursive: bool,
 }
 
 impl ImageHosts {
@@ -762,6 +782,7 @@ impl ImageHosts {
             retries: 0,
             rate_limits: RateLimits::default(),
             pixeldrain_authorization: None,
+            pixeldrain_recursive: true,
         })
     }
 
@@ -805,6 +826,12 @@ impl ImageHosts {
     }
 
     /// Additional attempts for HTTP 429/5xx and transport failures.
+    /// Upstream Pixeldrain `recursive` (default true).
+    pub fn with_pixeldrain_recursive(mut self, recursive: bool) -> Self {
+        self.pixeldrain_recursive = recursive;
+        self
+    }
+
     pub fn with_retries(mut self, retries: u8) -> Self {
         self.retries = retries;
         self
@@ -855,7 +882,30 @@ impl ImageHosts {
             Target::PostimgImage(id) => parse_postimg_image(&self.call(site, &id).await?, &id),
             Target::PostimgGallery(id) => {
                 let page = self.call(site, &format!("gallery/{id}")).await?;
-                let (title, images) = parse_postimg_gallery(&page)?;
+                // Upstream lists gallery images through `json?action=list`;
+                // older pages linked them as thumbnails.
+                let mut images = Vec::new();
+                for number in 1..=MAX_GALLERY_PAGES {
+                    let path = format!("json?action=list&page={number}&album={id}");
+                    let (ids, next) = match self.call(site, &path).await {
+                        Ok(body) => parse_postimg_list(&body),
+                        Err(_) => (Vec::new(), false),
+                    };
+                    images.extend(ids);
+                    if !next || images.len() >= MAX_GALLERY_PAGES {
+                        break;
+                    }
+                }
+                images.truncate(MAX_GALLERY_PAGES);
+                let (title, images) = if images.is_empty() {
+                    parse_postimg_gallery(&page)?
+                } else {
+                    let title = html(Site::Postimg, &page)
+                        .ok()
+                        .and_then(|page| meta_property(page, "og:title"))
+                        .and_then(clean_text);
+                    (title, images)
+                };
                 let mut items = Vec::new();
                 for image in images {
                     let page = self.call(site, &image).await?;
@@ -965,7 +1015,7 @@ impl ImageHosts {
                             handoff: BTreeMap::new(),
                         });
                     }
-                    Some("dir") => {
+                    Some("dir") if self.pixeldrain_recursive => {
                         folders.push((child_path.trim_start_matches('/').to_owned(), child))
                     }
                     _ => {}
@@ -1695,10 +1745,12 @@ mod tests {
 
     #[tokio::test]
     async fn fetches_postimg_gallery_image_pages() {
-        let gallery = r#"<div class="thumb"><a href="https://postimg.cc/Img1"></a></div>
-            <div class="thumb"><a href="https://postimg.cc/Img2"></a></div>"#;
+        let gallery = r#"<meta property="og:title" content="G">"#;
+        let list = json!({"images": [["t1", "Img1", "one", "jpg", 1, 1, "", "", 0, "", ""],
+            ["t2", "Img2", "two", "png", 1, 1, "", "", 0, "", ""]], "has_page_next": false});
         let (root, server) = serve(vec![
             response("200 OK", gallery.as_bytes()),
+            response("200 OK", list.to_string().as_bytes()),
             response("200 OK", POSTIMG_IMAGE.as_bytes()),
             response(
                 "200 OK",
@@ -1716,7 +1768,8 @@ mod tests {
         assert_eq!(meta(&media[1]).post_id, "G1");
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /gallery/G1 "));
-        assert!(requests[2].starts_with("GET /Img2 "));
+        assert!(requests[1].starts_with("GET /json?action=list&page=1&album=G1 "));
+        assert!(requests[3].starts_with("GET /Img2 "));
     }
 
     #[tokio::test]
@@ -1732,5 +1785,30 @@ mod tests {
         assert!(error.to_string().contains("not found"));
         assert!(!error.to_string().contains("127.0.0.1"));
         assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn pixeldrain_folders_queue_subdirectories_unless_not_recursive() {
+        let sha = "a".repeat(64);
+        let stat = json!({"path": [{"id": "root", "name": "Root", "type": "dir", "path": "/root"}],
+            "base_index": 0, "children": [
+                {"type": "file", "name": "x.png", "path": "/root/x.png", "sha256_sum": sha},
+                {"type": "dir", "name": "sub", "path": "/root/sub"}]})
+        .to_string();
+        for (recursive, children) in [(true, 1), (false, 0)] {
+            let (root, server) = serve(vec![response("200 OK", stat.as_bytes())]);
+            // Stop at the first queued child so it is never started.
+            let queued = hosts(root)
+                .with_pixeldrain_recursive(recursive)
+                .events(&Url::parse("https://pixeldrain.com/d/root").unwrap())
+                .filter(|event| {
+                    std::future::ready(matches!(event, Ok(ExtractionEvent::BeginChild(_))))
+                })
+                .take(1)
+                .count()
+                .await;
+            assert_eq!(queued, children);
+            server.join().unwrap();
+        }
     }
 }

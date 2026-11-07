@@ -471,6 +471,26 @@ var blogNo = '12345'; var nickName = 'nick';
     }
 
     #[tokio::test]
+    async fn category_transfer_can_be_disabled() {
+        let (root, server) = serve(vec![
+            html("var gnFirstLogNo = \"999\";"),
+            json(json!({"postList": [{"logNo": "999", "title": "a"}], "hasNextPage": false})),
+            html(PAGE.split("<div").next().unwrap()),
+        ]);
+        let options = json!({"category-transfer": false});
+        let http = http("naver-blog", root).with_options(Some(std::sync::Arc::new(
+            options.as_object().unwrap().clone(),
+        )));
+        let files = media(extract(
+            &http,
+            Url::parse("https://blog.naver.com/user_1").unwrap(),
+        ))
+        .await;
+        assert_eq!(keywords(&files[0])["subcategory"], "post");
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
     async fn blog_queues_posts_and_paginates() {
         let (root, server) = serve(vec![
             html("var gnFirstLogNo = \"999\";"),
@@ -486,7 +506,8 @@ var blogNo = '12345'; var nickName = 'nick';
         ))
         .await;
         assert_eq!(files.len(), 2);
-        assert_eq!(keywords(&files[0])["subcategory"], "post");
+        // Upstream `categorytransfer`: posts queued by a blog report `blog`.
+        assert_eq!(keywords(&files[0])["subcategory"], "blog");
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /PostList.nhn?blogId=user_1 "));
         assert!(requests[1].starts_with(

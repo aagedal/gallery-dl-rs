@@ -145,6 +145,218 @@ const FIELDS: &[&str] = &[
 enum Part {
     Literal(String),
     Field(Field),
+    /// A `\fE`/`\fF` expression, formatted through a `_value` field.
+    Expr(Box<(crate::filter::Expression, Field)>),
+    /// A `\fJ`/`\fM` format run by Python: its kind and source.
+    Python(String, String),
+}
+
+/// A part of an expression-dialect format string.
+pub(crate) enum Segment {
+    Text(String),
+    Expr(Box<(crate::filter::Expression, Field)>),
+    Python(String, String),
+}
+
+/// `\fJ` (Jinja) and `\fM` (module function) formats, which run in an
+/// external Python interpreter (`python3` or `$GALLERY_DL_PYTHON`).
+const PYTHON_FORMAT: &str = r#"
+import importlib, importlib.util, json, os, sys
+spec = json.loads(sys.argv[1])
+kwdict = json.load(sys.stdin)
+if spec["kind"] == "J":
+    import jinja2
+    result = jinja2.Environment().from_string(spec["source"]).render(kwdict)
+else:
+    module_name, _, function_name = spec["source"].rpartition(":")
+    path = os.path.expanduser(module_name)
+    if os.sep in path or path.endswith(".py"):
+        loader = importlib.util.spec_from_file_location("gdl_format_module", path)
+        module = importlib.util.module_from_spec(loader)
+        loader.loader.exec_module(module)
+    else:
+        module = importlib.import_module(module_name)
+    result = getattr(module, function_name)(kwdict)
+sys.stdout.write(str(result))
+"#;
+
+/// Render a `\fJ`/`\fM` segment through Python.
+pub(crate) fn render_python(
+    kind: &str,
+    source: &str,
+    context: &BTreeMap<String, crate::filter::Value>,
+) -> Result<String> {
+    use std::io::Write;
+    let keywords: serde_json::Map<_, _> = context
+        .iter()
+        .map(|(key, value)| (key.clone(), crate::filter::value_json(value)))
+        .collect();
+    let python = std::env::var_os("GALLERY_DL_PYTHON").unwrap_or_else(|| "python3".into());
+    let spec = serde_json::json!({"kind": kind, "source": source}).to_string();
+    let mut child = std::process::Command::new(python)
+        .args(["-c", PYTHON_FORMAT, &spec])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|_| error("Jinja and module format strings need python3"))?;
+    let input = serde_json::to_vec(&keywords)?;
+    child.stdin.take().expect("piped stdin").write_all(&input)?;
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        return Err(error("Python format string failed"));
+    }
+    String::from_utf8(output.stdout)
+        .map_err(|_| error("Python format string returned invalid UTF-8"))
+}
+
+/// The segments of a `\fE`/`\fF`/`\fTF` format string, or `None` for
+/// standard formats (`\fS`, `\fT` file contents or no selector), which are
+/// returned as the source to parse.
+pub(crate) fn dialect(template: &str) -> Result<std::result::Result<Vec<Segment>, String>> {
+    let Some(selector) = template.strip_prefix('\u{c}') else {
+        return Ok(Err(template.to_owned()));
+    };
+    let (mode, body) = selector
+        .split_once(' ')
+        .ok_or_else(|| error("unsupported format string dialect"))?;
+    let read = |path: &str| {
+        std::fs::read_to_string(crate::postprocess::expand_path(path))
+            .map(|text| text.trim_end_matches('\n').to_owned())
+            .map_err(|_| error("cannot read format template file"))
+    };
+    let parts = match mode {
+        "S" => return Ok(Err(body.to_owned())),
+        "T" => return Ok(Err(read(body)?)),
+        "E" => vec![expression_part(body, None, "")?],
+        "F" => fstring_parts(body)?,
+        "TF" => fstring_parts(&read(body)?)?,
+        "J" | "M" => vec![Part::Python(mode.to_owned(), body.to_owned())],
+        _ => return Err(error("unsupported format string dialect")),
+    };
+    Ok(Ok(parts
+        .into_iter()
+        .map(|part| match part {
+            Part::Literal(text) => Segment::Text(text),
+            Part::Expr(expression) => Segment::Expr(expression),
+            Part::Python(kind, source) => Segment::Python(kind, source),
+            Part::Field(_) => unreachable!("dialects have no standard fields"),
+        })
+        .collect()))
+}
+
+/// Evaluate an expression segment and apply its conversion and spec.
+pub(crate) fn render_expression(
+    expression: &(crate::filter::Expression, Field),
+    context: &BTreeMap<String, crate::filter::Value>,
+) -> Result<String> {
+    let (expression, field) = expression;
+    let value = convert(&expression.evaluate(context)?, "");
+    field
+        .render(|name| (name == "_value").then(|| value.clone()))?
+        .ok_or_else(|| error("format expression produced no value"))
+}
+
+/// Split an f-string replacement field into its expression, conversion
+/// and format spec, ignoring `!`/`:` inside brackets and strings.
+fn split_expression(text: &str) -> (&str, Option<char>, &str) {
+    let mut depth = 0usize;
+    let mut quote = None;
+    let bytes = text.as_bytes();
+    for (i, c) in text.char_indices() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '\'' | '"') => quote = Some(c),
+            (None, '(' | '[' | '{') => depth += 1,
+            (None, ')' | ']' | '}') => depth = depth.saturating_sub(1),
+            (None, '!') if depth == 0 && bytes.get(i + 1).is_some_and(u8::is_ascii_alphabetic) => {
+                let conversion = bytes[i + 1] as char;
+                let rest = &text[i + 2..];
+                if rest.is_empty() {
+                    return (&text[..i], Some(conversion), "");
+                }
+                if let Some(spec) = rest.strip_prefix(':') {
+                    return (&text[..i], Some(conversion), spec);
+                }
+            }
+            (None, ':') if depth == 0 => return (&text[..i], None, &text[i + 1..]),
+            _ => {}
+        }
+    }
+    (text, None, "")
+}
+
+fn expression_part(expression: &str, conversion: Option<char>, spec: &str) -> Result<Part> {
+    let expression = crate::filter::Expression::parse(expression.trim())?;
+    let mut field = "_value".to_owned();
+    if let Some(conversion) = conversion {
+        field.push('!');
+        field.push(conversion);
+    }
+    if !spec.is_empty() {
+        field.push(':');
+        field.push_str(spec);
+    }
+    Ok(Part::Expr(Box::new((
+        expression,
+        Field::parse(&field, |_| true)?,
+    ))))
+}
+
+/// Upstream `\fF` f-strings: literal text with `{expression!c:spec}` fields.
+fn fstring_parts(source: &str) -> Result<Vec<Part>> {
+    let mut parts = Vec::new();
+    let mut literal = String::new();
+    let mut chars = source.char_indices().peekable();
+    while let Some((start, c)) = chars.next() {
+        match c {
+            '{' if chars.peek().map(|(_, c)| *c) == Some('{') => {
+                chars.next();
+                literal.push('{');
+            }
+            '}' if chars.peek().map(|(_, c)| *c) == Some('}') => {
+                chars.next();
+                literal.push('}');
+            }
+            '{' => {
+                let mut depth = 1usize;
+                let mut quote = None;
+                let mut end = None;
+                for (i, c) in chars.by_ref() {
+                    match (quote, c) {
+                        (Some(q), c) if c == q => quote = None,
+                        (Some(_), _) => {}
+                        (None, '\'' | '"') => quote = Some(c),
+                        (None, '{' | '[' | '(') => depth += 1,
+                        (None, '}' | ']' | ')') => {
+                            depth -= 1;
+                            if depth == 0 {
+                                end = Some(i);
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                let end = end.ok_or_else(|| error("unclosed f-string field"))?;
+                if !literal.is_empty() {
+                    parts.push(Part::Literal(std::mem::take(&mut literal)));
+                }
+                let (expression, conversion, spec) = split_expression(&source[start + 1..end]);
+                parts.push(expression_part(expression, conversion, spec)?);
+                if parts.len() > 256 {
+                    return Err(error("f-string has too many fields"));
+                }
+            }
+            '}' => return Err(error("unmatched closing brace in f-string")),
+            c => literal.push(c),
+        }
+    }
+    if !literal.is_empty() {
+        parts.push(Part::Literal(literal));
+    }
+    Ok(parts)
 }
 
 /// A single-basename template using gallery-dl replacement fields, such as
@@ -227,6 +439,26 @@ impl FilenameTemplate {
         }
         if template.len() > MAX_TEMPLATE {
             return Err(error("filename template exceeds 8192 bytes"));
+        }
+        // Upstream formatter dialects: `\fE` expression, `\fF` f-string,
+        // `\fT`/`\fTF` template files and `\fS` standard formats.
+        if template.starts_with('\u{c}') {
+            return match dialect(template)? {
+                Err(standard) => Self::parse_mode(&standard, keywords, source),
+                Ok(segments) => Ok(Self {
+                    parts: Some(
+                        segments
+                            .into_iter()
+                            .map(|segment| match segment {
+                                Segment::Text(text) => Part::Literal(text),
+                                Segment::Expr(expression) => Part::Expr(expression),
+                                Segment::Python(kind, source) => Part::Python(kind, source),
+                            })
+                            .collect(),
+                    ),
+                    conditions: Vec::new(),
+                }),
+            };
         }
         let mut chars = template.chars().peekable();
         let mut parts = Vec::new();
@@ -417,6 +649,22 @@ impl FilenameTemplate {
         for part in parts {
             let text = match part {
                 Part::Literal(value) => value.clone(),
+                Part::Python(kind, code) => {
+                    let context = context.get_or_insert_with(|| crate::filter::context(media));
+                    let value = render_python(kind, code, context)?;
+                    if parts.len() == 1 {
+                        return Ok(Value::Str(value));
+                    }
+                    value
+                }
+                Part::Expr(expression) => {
+                    let context = context.get_or_insert_with(|| crate::filter::context(media));
+                    let value = render_expression(expression, context)?;
+                    if parts.len() == 1 {
+                        return Ok(Value::Str(value));
+                    }
+                    value
+                }
                 Part::Field(field) => {
                     let context = context.get_or_insert_with(|| crate::filter::context(media));
                     let value = unwrap_source_value(field.render_default_value(|name| {
@@ -457,6 +705,14 @@ impl FilenameTemplate {
         for part in parts {
             match part {
                 Part::Literal(value) => output.push_str(value),
+                Part::Expr(expression) => {
+                    let context = context.get_or_insert_with(|| crate::filter::context(media));
+                    output.push_str(&render_expression(expression, context)?);
+                }
+                Part::Python(kind, code) => {
+                    let context = context.get_or_insert_with(|| crate::filter::context(media));
+                    output.push_str(&render_python(kind, code, context)?);
+                }
                 Part::Field(field) => {
                     let context = context.get_or_insert_with(|| crate::filter::context(media));
                     let lookup = |name: &str| Self::lookup_value(media, context, name, keywords);
@@ -796,9 +1052,13 @@ impl DirectoryTemplate {
     }
     fn parse_mode(components: &[String], keywords: &[String], source: bool) -> Result<Self> {
         if components.len() > 32
-            || components
-                .iter()
-                .any(|s| s.len() > 8192 || s.chars().any(char::is_control))
+            || components.iter().any(|s| {
+                s.len() > 8192
+                    || s.strip_prefix('\u{c}')
+                        .unwrap_or(s)
+                        .chars()
+                        .any(char::is_control)
+            })
         {
             return Err(error("directory template exceeds component limits"));
         }

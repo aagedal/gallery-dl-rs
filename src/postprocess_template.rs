@@ -11,6 +11,10 @@ const MAX_OUTPUT: usize = 16 * 1024 * 1024;
 enum Part {
     Text(String),
     Field(Field),
+    /// A `\fE`/`\fF` expression, resolved against the JSON context.
+    Expr(std::sync::Arc<(crate::filter::Expression, Field)>),
+    /// A `\fJ`/`\fM` format run by Python.
+    Python(std::sync::Arc<(String, String)>),
 }
 #[derive(Clone)]
 pub struct Template {
@@ -26,16 +30,30 @@ impl Template {
         if source.len() > MAX_SOURCE {
             return Err(error("postprocessor template exceeds the size limit"));
         }
-        let source = if let Some(selector) = source.strip_prefix('\u{000c}') {
-            let (mode, source) = selector
-                .split_once(' ')
-                .ok_or_else(|| error("unsupported postprocessor template formatter"))?;
-            if mode != "S" {
-                return Err(error("unsupported postprocessor template formatter"));
+        let standard;
+        let source = match crate::naming::dialect(source)
+            .map_err(|_| error("unsupported postprocessor template formatter"))?
+        {
+            Ok(segments) => {
+                return Ok(Self {
+                    parts: segments
+                        .into_iter()
+                        .map(|segment| match segment {
+                            crate::naming::Segment::Text(text) => Part::Text(text),
+                            crate::naming::Segment::Expr(expression) => {
+                                Part::Expr(std::sync::Arc::from(expression))
+                            }
+                            crate::naming::Segment::Python(kind, source) => {
+                                Part::Python(std::sync::Arc::new((kind, source)))
+                            }
+                        })
+                        .collect(),
+                });
             }
-            source
-        } else {
-            source
+            Err(text) => {
+                standard = text;
+                standard.as_str()
+            }
         };
         let mut chars = source.chars().peekable();
         let mut parts = Vec::new();
@@ -76,7 +94,37 @@ impl Template {
         Ok(Self { parts })
     }
     pub fn render(&self, context: &Map<String, Value>) -> Result<String> {
-        self.render_format_context(&convert_context(context)?)
+        self.resolve(context)?
+            .render_format_context(&convert_context(context)?)
+    }
+
+    /// Evaluate expression parts against the JSON context into text.
+    fn resolve(&self, context: &Map<String, Value>) -> Result<std::borrow::Cow<'_, Self>> {
+        if !self
+            .parts
+            .iter()
+            .any(|part| matches!(part, Part::Expr(_) | Part::Python(_)))
+        {
+            return Ok(std::borrow::Cow::Borrowed(self));
+        }
+        let keywords: std::collections::BTreeMap<_, _> = context
+            .iter()
+            .map(|(key, value)| (key.clone(), crate::filter::json_value(value)))
+            .collect();
+        let parts = self
+            .parts
+            .iter()
+            .map(|part| match part {
+                Part::Expr(expression) => {
+                    crate::naming::render_expression(expression, &keywords).map(Part::Text)
+                }
+                Part::Python(format) => {
+                    crate::naming::render_python(&format.0, &format.1, &keywords).map(Part::Text)
+                }
+                part => Ok(part.clone()),
+            })
+            .collect::<Result<_>>()?;
+        Ok(std::borrow::Cow::Owned(Self { parts }))
     }
     pub(crate) fn render_format_context(
         &self,
@@ -87,6 +135,9 @@ impl Template {
         for part in &self.parts {
             let text = match part {
                 Part::Text(text) => text.clone(),
+                Part::Expr(_) | Part::Python(_) => {
+                    return Err(error("template expression needs keyword context"));
+                }
                 Part::Field(field) => {
                     let value = field.render_default_value(|name| context.get(name).cloned())?;
                     if !single && !matches!(value, FormatValue::Str(_)) {
@@ -126,10 +177,12 @@ impl Template {
         self.render_value_mode(context, false)
     }
     pub(crate) fn render_source_value(&self, context: &Map<String, Value>) -> Result<Value> {
-        self.render_source_format_context(&convert_context(context)?)
+        self.resolve(context)?
+            .render_source_format_context(&convert_context(context)?)
     }
     fn render_value_mode(&self, context: &Map<String, Value>, typed_dates: bool) -> Result<Value> {
-        self.render_value_format_context(&convert_context(context)?, typed_dates)
+        self.resolve(context)?
+            .render_value_format_context(&convert_context(context)?, typed_dates)
     }
     pub(crate) fn render_source_format_context(
         &self,
@@ -152,6 +205,9 @@ impl Template {
             for part in &self.parts {
                 let text = match part {
                     Part::Text(text) => text.clone(),
+                    Part::Expr(_) | Part::Python(_) => {
+                        return Err(error("template expression needs keyword context"));
+                    }
                     Part::Field(field) => field
                         .render_value(|name| context.get(name).cloned())?
                         .identity_text()?,
@@ -469,12 +525,18 @@ mod tests {
                 .unwrap(),
             serde_json::json!(7)
         );
-        for selector in ["E", "F", "J", "M", "T", "PRIVATE"] {
+        for selector in ["T", "TF", "PRIVATE"] {
             let error = Template::parse(&format!("\u{000c}{selector} PRIVATE"))
                 .unwrap_err()
                 .to_string();
             assert!(!error.contains("PRIVATE"));
         }
+        // Upstream `\fE` expressions and `\fF` f-strings.
+        let context = serde_json::json!({"x": 7, "title": "Hello"});
+        let context = context.as_object().unwrap();
+        let render = |source: &str| Template::parse(source).unwrap().render(context).unwrap();
+        assert_eq!(render("\u{000c}E x * 6"), "42");
+        assert_eq!(render("\u{000c}F {title[:3].upper()}-{x:>03}"), "HEL-007");
     }
     #[test]
     fn dates_conversion_and_nested_source_dates() {

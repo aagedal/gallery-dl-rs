@@ -4038,3 +4038,47 @@ fn bluesky_accepts_login_credentials() {
     assert_eq!(selected.username.as_deref(), Some("alice.bsky.social"));
     assert!(selected.password.is_some());
 }
+
+#[test]
+fn unique_predicates_accept_upstream_aliases_and_truthy_values() {
+    let config = parse(
+        r#"{"extractor":{"mangadex":{"chapter-unique":"yes","file-unique":false},"imgur":{"image-unique":1}}}"#,
+    )
+    .unwrap();
+    let mangadex = config.resolve("mangadex").unwrap();
+    assert_eq!(mangadex.file_unique, Some(false));
+    assert_eq!(mangadex.child_unique, Some(true));
+    let other = config.resolve("imgur").unwrap();
+    assert_eq!(other.file_unique, Some(true));
+    assert_eq!(other.child_unique, None);
+}
+
+#[test]
+fn configured_base_instances_are_listed_like_upstream() {
+    let config = parse(
+        r#"{"extractor":{"moebooru":{"mybooru":{"root":"https://booru.example.test/"}},
+            "mastodon":{"myinst":{"root":"https://social.example.test","access-token":"t"}}}}"#,
+    )
+    .unwrap();
+    let mut instances = config.instances();
+    instances.sort();
+    assert_eq!(
+        instances,
+        [
+            (
+                "mastodon".to_owned(),
+                "https://social.example.test".to_owned()
+            ),
+            (
+                "moebooru".to_owned(),
+                "https://booru.example.test".to_owned()
+            ),
+        ]
+    );
+    gallery_dl_rs::extract::set_instances(instances);
+    let url = gallery_dl_rs::extract::http_url("https://booru.example.test/post/show/1").unwrap();
+    assert_eq!(
+        url.as_str(),
+        "moebooru:https://booru.example.test/post/show/1"
+    );
+}

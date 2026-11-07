@@ -325,7 +325,9 @@ impl Specification {
                 || media.metadata.as_ref().is_some_and(|m| m.frames.is_some()))
     }
 }
-pub(crate) fn truthy(value: &Value) -> bool {
+
+/// Python truthiness of a JSON configuration value.
+pub fn truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
         Value::Bool(v) => *v,

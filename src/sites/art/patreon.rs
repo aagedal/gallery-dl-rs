@@ -570,6 +570,19 @@ async fn post_events(
     crate::sites::post(&SITE, http, route, items)
 }
 
+/// `PatreonUserExtractor`'s `date-max`: an ISO 8601 cursor, from Unix
+/// seconds or an ISO 8601 string.
+fn date_max_cursor(http: &Http) -> Option<String> {
+    let timestamp = match http.option("date-max")? {
+        Value::Number(n) => n.as_i64()?,
+        Value::String(s) => crate::date::parse_date(s).ok()?,
+        _ => return None,
+    };
+    let date = time::OffsetDateTime::from_unix_timestamp(timestamp).ok()?;
+    let format = time::macros::format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]");
+    date.format(&format).ok().filter(|_| timestamp != 0)
+}
+
 /// `_init_cursor`: the `cursor` option's starting position.
 fn init_cursor(http: &Http) -> String {
     match http.option("cursor") {
@@ -600,6 +613,10 @@ fn order(http: &Http, sort: &str, collection: bool) -> String {
 
 /// `_build_url`.
 fn build_url(http: &Http, endpoint: &str, query: &str, order: &str) -> String {
+    build_url_at(endpoint, query, order, &init_cursor(http))
+}
+
+fn build_url_at(endpoint: &str, query: &str, order: &str, cursor: &str) -> String {
     format!(
         "{ROOT}/api/{endpoint}\
          ?include=campaign,access_rules,attachments,attachments_media,\
@@ -629,8 +646,7 @@ fn build_url(http: &Http, endpoint: &str, query: &str, order: &str) -> String {
          &fields[native_video_insights]=average_view_duration,\
          average_view_pct,has_preview,id,last_updated_at,num_views,\
          preview_views,video_duration\
-         &page[cursor]={}{query}{order}&json-api-version=1.0",
-        init_cursor(http)
+         &page[cursor]={cursor}{query}{order}&json-api-version=1.0"
     )
 }
 
@@ -788,7 +804,9 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
         }),
         Target::User => {
             let query = "&filter[is_following]=true&json-api-use-default-includes=false";
-            let url = build_url(http, "stream", query, &order(http, "", false));
+            // `date-max` replaces any configured cursor.
+            let cursor = date_max_cursor(http).unwrap_or_else(|| init_cursor(http));
+            let url = build_url_at("stream", query, &order(http, "", false), &cursor);
             pagination(http, &USER, None, url)
         }
         Target::Post(id) => crate::sites::once(async move {
@@ -822,6 +840,24 @@ mod tests {
     use super::*;
     use crate::sites::testing::{html, http as client, keywords, media, serve};
     use serde_json::json;
+
+    #[test]
+    fn user_date_max_sets_the_starting_cursor() {
+        let http = |value: serde_json::Value| {
+            client("Patreon", Url::parse("http://127.0.0.1:1/").unwrap()).with_options(Some(
+                std::sync::Arc::new(json!({"date-max": value}).as_object().unwrap().clone()),
+            ))
+        };
+        assert_eq!(
+            date_max_cursor(&http(json!(1704067200))).as_deref(),
+            Some("2024-01-01T00:00:00")
+        );
+        assert_eq!(
+            date_max_cursor(&http(json!("2024-01-02T03:04:05"))).as_deref(),
+            Some("2024-01-02T03:04:05")
+        );
+        assert_eq!(date_max_cursor(&http(json!(0))), None);
+    }
 
     #[test]
     fn classifies_urls() {

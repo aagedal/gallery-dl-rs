@@ -123,6 +123,31 @@ const FILE_FIELDS: &[&str] = &[
 ];
 
 /// Blog names are 1-32 ASCII letters, digits and inner hyphens.
+/// The API identifier of a blog: a custom domain as-is, else NAME.tumblr.com.
+fn blog_identifier(blog: &str) -> String {
+    if blog.contains('.') {
+        blog.to_owned()
+    } else {
+        format!("{blog}.tumblr.com")
+    }
+}
+
+/// A custom blog domain of an upstream `tumblr:` input.
+fn custom_blog(url: &Url) -> Option<(String, Vec<String>)> {
+    let inner = crate::sites::custom_domain(url, "tumblr")?;
+    let host = inner.host_str()?.to_ascii_lowercase();
+    let valid = host.len() <= 253
+        && host.contains('.')
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.'));
+    let segments = inner
+        .path_segments()
+        .map(|s| s.filter(|s| !s.is_empty()).map(str::to_owned).collect())
+        .unwrap_or_default();
+    valid.then_some((host, segments))
+}
+
 pub fn valid_blog(name: &str) -> bool {
     (1..=32).contains(&name.len())
         && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
@@ -162,6 +187,9 @@ fn is_www(host: &str) -> bool {
 
 /// Whether a URL is a Tumblr blog or search page handled by this extractor.
 pub fn is_blog_url(url: &Url) -> bool {
+    if url.scheme() == "tumblr" {
+        return custom_blog(url).is_some();
+    }
     match url.host_str() {
         Some(host) if is_www(host) => {
             let all = segments(url);
@@ -272,16 +300,23 @@ pub fn target(url: &Url) -> Result<Target> {
             "unsupported Tumblr URL; expected https://BLOG.tumblr.com[/post/ID|/tagged/TAG|/day/YYYY/MM/DD|/likes|/following|/followers], https://www.tumblr.com/BLOG[/ID] or https://www.tumblr.com/search/QUERY",
         )
     };
-    if !matches!(url.scheme(), "http" | "https")
+    let custom = custom_blog(url);
+    if custom.is_none() && !matches!(url.scheme(), "http" | "https")
         || url.port().is_some()
         || !url.username().is_empty()
         || url.password().is_some()
     {
         return Err(unsupported());
     }
-    let host = url.host_str().ok_or_else(unsupported)?;
-    let all = segments(url);
-    let www = is_www(host);
+    let custom_segments;
+    let (host, all) = match &custom {
+        Some((domain, segments)) => {
+            custom_segments = segments.iter().map(String::as_str).collect::<Vec<_>>();
+            (domain.as_str(), custom_segments.clone())
+        }
+        None => (url.host_str().ok_or_else(unsupported)?, segments(url)),
+    };
+    let www = custom.is_none() && is_www(host);
     if www && let ["search", query, rest @ ..] = all.as_slice() {
         if rest.len() > 2 {
             return Err(unsupported());
@@ -311,7 +346,9 @@ pub fn target(url: &Url) -> Result<Target> {
             params,
         });
     }
-    let (blog, rest) = if www {
+    let (blog, rest) = if custom.is_some() {
+        (host, &all[..])
+    } else if www {
         let (blog, next) = www_blog(&all).ok_or_else(unsupported)?;
         (blog, &all[next..])
     } else {
@@ -1188,7 +1225,7 @@ impl Listing<'_> {
     /// identifies the listed blog by its host name.
     fn adopt_blog_info(&mut self, mut info: Value) {
         if let (Some(blog), Some(object)) = (&self.blog, info.as_object_mut()) {
-            object.insert("uuid".into(), format!("{blog}.tumblr.com").into());
+            object.insert("uuid".into(), blog_identifier(blog).into());
         }
         self.blog_info = Some(info);
     }
@@ -1398,7 +1435,7 @@ impl Tumblr {
 
     /// Blog info (`/v2/blog/BLOG/info`), as upstream `TumblrAPI.info`.
     async fn info(&self, blog: &str) -> Result<Value> {
-        let url = self.endpoint(&format!("v2/blog/{blog}.tumblr.com/info"));
+        let url = self.endpoint(&format!("v2/blog/{}/info", blog_identifier(blog)));
         let mut response = self.api(&url).await?;
         match response.get_mut("blog") {
             Some(blog) if blog.is_object() => Ok(blog.take()),
@@ -1410,7 +1447,7 @@ impl Tumblr {
     /// `avatar_url`), which is resolved here so the API key never becomes
     /// part of a downloadable media URL.
     async fn avatar(&self, blog: &str) -> Result<Url> {
-        let url = self.endpoint(&format!("v2/blog/{blog}.tumblr.com/avatar/512"));
+        let url = self.endpoint(&format!("v2/blog/{}/avatar/512", blog_identifier(blog)));
         let reply = tokio::time::timeout(self.timeout, self.fetch(&url, None, false))
             .await
             .map_err(|_| error("native Tumblr extraction timed out"))??;
@@ -1576,7 +1613,7 @@ impl Tumblr {
             queue,
         };
         let posts_params = |listing: &mut Listing, blog: String| {
-            listing.path = format!("v2/blog/{blog}.tumblr.com/posts");
+            listing.path = format!("v2/blog/{}/posts", blog_identifier(&blog));
             listing.params = vec![
                 ("npf".into(), "false".into()),
                 ("reblog_info".into(), "true".into()),
@@ -1609,7 +1646,7 @@ impl Tumblr {
                 listing.before = Some(start + 86400);
             }
             Target::Likes { blog } => {
-                listing.path = format!("v2/blog/{blog}.tumblr.com/likes");
+                listing.path = format!("v2/blog/{}/likes", blog_identifier(&blog));
                 listing.key = "liked_posts";
                 listing.strategy = Strategy::Liked;
                 listing.page_blog = false;
@@ -1913,13 +1950,15 @@ impl Tumblr {
                     .map(Item::Event),
                 );
             }
-            if let Some((url, fields)) = parsed.external
-                && let Some(events) = (listing.queue)(url)
-            {
-                items.push(Item::Child(child_job(
-                    ChildMetadata::from_raw("tumblr", listing.route.subcategory, &fields),
-                    move || events,
-                )));
+            if let Some((url, fields)) = parsed.external {
+                let raw = url.to_string();
+                if let Some(events) = (listing.queue)(url) {
+                    items.push(Item::Child(child_job(
+                        ChildMetadata::from_raw("tumblr", listing.route.subcategory, &fields)
+                            .with_url(&raw),
+                        move || events,
+                    )));
+                }
             }
         }
         if listing.single.is_some() && !found {
@@ -1944,7 +1983,7 @@ impl Tumblr {
                 let Some(offset) = offset else {
                     return Ok(None);
                 };
-                let mut url = self.endpoint(&format!("v2/blog/{blog}.tumblr.com/{which}"));
+                let mut url = self.endpoint(&format!("v2/blog/{}/{which}", blog_identifier(&blog)));
                 url.query_pairs_mut()
                     .append_pair("limit", &BLOG_PAGE_SIZE.to_string())
                     .append_pair("offset", &offset.to_string());
@@ -2517,6 +2556,23 @@ mod tests {
         assert_eq!(t("https://alice.tumblr.com/post/123/slug").unwrap(), single);
         assert_eq!(t("https://www.tumblr.com/alice/123").unwrap(), single);
         assert_eq!(t("https://www.tumblr.com/alice/123/slug").unwrap(), single);
+        // Upstream `tumblr:` custom-domain blogs.
+        assert_eq!(
+            t("tumblr:https://blog.example.com/post/123").unwrap(),
+            Target::Post {
+                blog: "blog.example.com".into(),
+                id: "123".into(),
+            }
+        );
+        assert_eq!(
+            t("tumblr:blog.example.com").unwrap(),
+            Target::Posts {
+                blog: "blog.example.com".into(),
+            }
+        );
+        assert_eq!(blog_identifier("blog.example.com"), "blog.example.com");
+        assert_eq!(blog_identifier("alice"), "alice.tumblr.com");
+        assert!(crate::extract::http_url("tumblr:https://blog.example.com/").is_ok());
         assert_eq!(
             t("https://alice.tumblr.com/tagged/cute-cats%21").unwrap(),
             Target::Tagged {
