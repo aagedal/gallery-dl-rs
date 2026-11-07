@@ -624,7 +624,9 @@ fn format_string_dialects_follow_upstream() {
     assert!(directory.render(&media).unwrap().is_some());
     assert!(FilenameTemplate::parse("\u{c}X {id}").is_err());
     // `\fM` calls a Python function with the keywords (when python3 exists).
-    let python = std::process::Command::new("python3").arg("--version").output();
+    let python = std::process::Command::new("python3")
+        .arg("--version")
+        .output();
     if !python.is_ok_and(|output| output.status.success()) {
         return;
     }
