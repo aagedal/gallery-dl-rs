@@ -3,6 +3,7 @@
 //! Mirrors gallery_dl/extractor/bluesky.py: posts are read from the public,
 //! unauthenticated AppView, and files are downloaded as full-size blobs via
 //! `com.atproto.sync.getBlob`, with URLs built from validated DIDs and CIDs only.
+use crate::sites::{Route, SiteKeywords};
 use crate::{
     Result,
     dispatch::{self, Include},
@@ -18,7 +19,7 @@ use futures_util::{
     stream::{self, BoxStream},
 };
 use reqwest::{Client, StatusCode, header};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::Arc,
@@ -375,6 +376,44 @@ pub fn parse_post_view(post: &Value) -> Result<Vec<Media>> {
     parse_post_view_selected(post, Selection::default())
 }
 
+static POST: Route = Route::new(
+    "post",
+    "{createdAt[:19]}_{post_id}_{num}.{extension}",
+    &["{category}", "{author[handle]}"],
+    "{filename}",
+);
+
+/// Upstream `items`/`_prepare` keywords of a post view: the view with its
+/// record merged in, `author[instance]`, `instance`, `post_id`, `date`.
+fn post_keywords(post: &Value, rkey: &str) -> Map<String, Value> {
+    let mut data = post.as_object().cloned().unwrap_or_default();
+    if let Some(Value::Object(record)) = data.remove("record") {
+        data.extend(record);
+    }
+    if let Some(Value::Object(author)) = data.get_mut("author") {
+        let handle = author.get("handle").and_then(Value::as_str).unwrap_or("");
+        let parts: Vec<&str> = handle.rsplitn(3, '.').collect();
+        let instance = parts
+            .iter()
+            .take(2)
+            .rev()
+            .copied()
+            .collect::<Vec<_>>()
+            .join(".");
+        author.insert("instance".into(), instance.into());
+    }
+    data.insert("instance".into(), "bsky.app".into());
+    data.insert("post_id".into(), rkey.into());
+    let created = data.get("createdAt").and_then(Value::as_str).unwrap_or("");
+    let created = created.get(..19).unwrap_or(created);
+    let timestamp = crate::date::parse_date(created).ok();
+    data.insert(
+        "date".into(),
+        crate::filter::source_date_text(timestamp).into(),
+    );
+    data
+}
+
 pub fn parse_post_view_selected(post: &Value, selection: Selection) -> Result<Vec<Media>> {
     let uri = string(post, "uri").ok_or_else(|| error("Bluesky post is missing its URI"))?;
     let (did, rkey) = uri
@@ -393,6 +432,7 @@ pub fn parse_post_view_selected(post: &Value, selection: Selection) -> Result<Ve
     let caption: Option<Arc<str>> = string(record, "text").map(Arc::from);
     let timestamp = string(record, "createdAt").and_then(|d| crate::date::parse_date(d).ok());
     let embed = record.get("embed").unwrap_or(&Value::Null);
+    let data = post_keywords(post, rkey);
     let mut media = Vec::new();
     for (item, kind) in blobs(embed) {
         if kind == "video" && !selection.videos {
@@ -418,6 +458,19 @@ pub fn parse_post_view_selected(post: &Value, selection: Selection) -> Result<Ve
                 .filter(|v| *v > 0)
         };
         let index = media.len() + 1;
+        let mut fields = data.clone();
+        fields.insert("num".into(), index.into());
+        let alt = item.get("alt").and_then(Value::as_str).unwrap_or("");
+        fields.insert("description".into(), alt.into());
+        let dimension = |key: &str| item.pointer(&format!("/aspectRatio/{key}")).cloned();
+        fields.insert("width".into(), dimension("width").unwrap_or(0.into()));
+        fields.insert("height".into(), dimension("height").unwrap_or(0.into()));
+        fields.insert("filename".into(), cid.into());
+        let sub = mime
+            .and_then(|m| m.rsplit_once('/'))
+            .map_or("", |(_, sub)| sub);
+        let sub = crate::path_options::map_extension(sub).unwrap_or_else(|| sub.to_owned());
+        fields.insert("extension".into(), sub.into());
         media.push(Media {
             url,
             job: MediaJob::DirectHttp,
@@ -437,11 +490,27 @@ pub fn parse_post_view_selected(post: &Value, selection: Selection) -> Result<Ve
                 caption: caption.clone(),
                 timestamp,
                 index,
+                site_keywords: Some(Arc::new(SiteKeywords {
+                    route: &POST,
+                    fields,
+                })),
                 ..PostMetadata::default()
             }),
             headers: BTreeMap::new(),
             handoff: BTreeMap::new(),
         });
+    }
+    let count = media.len();
+    for item in &mut media {
+        if let Some(keywords) = item
+            .metadata
+            .as_mut()
+            .and_then(|m| m.site_keywords.as_mut())
+        {
+            Arc::make_mut(keywords)
+                .fields
+                .insert("count".into(), count.into());
+        }
     }
     Ok(media)
 }
@@ -729,6 +798,8 @@ struct SelectedState {
     post: Option<Value>,
     quote: Option<Quote>,
     quote_parent: Option<Value>,
+    /// Upstream `quote_id` and `quote_by` of the pending quote.
+    quote_by: Option<(String, Value)>,
     pending: VecDeque<ExtractionEvent>,
     seen: BTreeSet<String>,
     depth: usize,
@@ -740,6 +811,7 @@ impl SelectedState {
         Self {
             post: Some(post),
             quote: None,
+            quote_by: None,
             quote_parent: None,
             pending: VecDeque::new(),
             seen: BTreeSet::new(),
@@ -966,7 +1038,11 @@ impl Bluesky {
             // Invalid quote metadata must not erase an already-valid group.
             if let Some(parent) = state.quote_parent.take() {
                 state.quote = quoted_post(&parent)?;
+                let rkey = string(&parent, "uri").and_then(|uri| uri.rsplit('/').next());
+                let author = parent.get("author").cloned().unwrap_or(Value::Null);
+                state.quote_by = Some((rkey.unwrap_or_default().to_owned(), author));
             }
+            let mut quote_by = None;
             let post = match state.post.take() {
                 Some(post) => post,
                 None => match state.quote.take() {
@@ -979,6 +1055,7 @@ impl Bluesky {
                             return Err(error("Bluesky quoted-post chain exceeded 32 records"));
                         }
                         state.depth += 1;
+                        quote_by = state.quote_by.take();
                         match hydrated {
                             Some(post) => post,
                             None => {
@@ -1008,6 +1085,19 @@ impl Bluesky {
                 return Ok(None);
             }
             let mut media = parse_post_view_selected(&post, self.selection)?;
+            if let Some((id, author)) = quote_by {
+                for item in &mut media {
+                    let keywords = item
+                        .metadata
+                        .as_mut()
+                        .and_then(|m| m.site_keywords.as_mut());
+                    if let Some(keywords) = keywords {
+                        let fields = &mut Arc::make_mut(keywords).fields;
+                        fields.insert("quote_id".into(), id.clone().into());
+                        fields.insert("quote_by".into(), author.clone());
+                    }
+                }
+            }
             if self.selection.quoted {
                 state.quote_parent = Some(post);
             }
@@ -1615,6 +1705,26 @@ mod tests {
         );
         assert_eq!(media[0].filename, "3kabc_1.jpg");
         assert_eq!(media[1].filename, "3kabc_2.jpg");
+        let keywords = media[0]
+            .metadata
+            .as_ref()
+            .unwrap()
+            .site_keywords
+            .clone()
+            .unwrap();
+        let fields = &keywords.fields;
+        assert_eq!(fields["text"], "hello");
+        assert_eq!(fields["post_id"], "3kabc");
+        assert_eq!(fields["author"]["instance"], "bsky.social");
+        assert_eq!(fields["date"], "2024-01-02 03:04:05");
+        assert_eq!(
+            (fields["num"].clone(), fields["count"].clone()),
+            (json!(1), json!(2))
+        );
+        assert_eq!(fields["filename"], CID1);
+        assert_eq!(fields["extension"], "jpg");
+        assert_eq!(fields["description"], "first");
+        assert!(!fields.contains_key("record"));
         let meta = media[0].metadata.as_ref().unwrap();
         assert_eq!(meta.post_id, "3kabc");
         assert_eq!(meta.media_id, CID1);
