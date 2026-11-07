@@ -176,6 +176,8 @@ enum Op {
     Limit {
         max: usize,
         replacement: String,
+        /// `Lb`: count UTF-8 bytes.
+        bytes: bool,
     },
     Join(String),
     Replace {
@@ -320,7 +322,24 @@ impl Field {
             let value = match source {
                 Source::Literal(value) => Value::Str(value.clone()),
                 Source::Path { name, accessors } => {
-                    let mut value = lookup(name).unwrap_or_else(|| default.clone());
+                    // Upstream's `_lit[TEXT]` global yields TEXT itself.
+                    let (mut value, accessors) = match (name.as_str(), accessors.split_first()) {
+                        ("_lit", Some((Accessor::Key(text), rest))) => {
+                            (Value::Str(text.clone()), rest)
+                        }
+                        ("_env", Some((Accessor::Key(variable), rest))) => (
+                            std::env::var(variable).map_or(Value::Missing, Value::Str),
+                            rest,
+                        ),
+                        ("_now", _) => (
+                            Value::Date(time::OffsetDateTime::now_utc()),
+                            accessors.as_slice(),
+                        ),
+                        _ => (
+                            lookup(name).unwrap_or_else(|| default.clone()),
+                            accessors.as_slice(),
+                        ),
+                    };
                     for accessor in accessors {
                         value = access(value, accessor);
                     }
@@ -439,12 +458,21 @@ fn apply(ops: &[Op], spec: &str, value: Value) -> Result<Option<String>> {
                 .map(|text| bounded(format!("{before}{text}{after}")))
                 .transpose();
         }
-        Op::Limit { max, replacement } => {
+        Op::Limit {
+            max,
+            replacement,
+            bytes,
+        } => {
             let Some(text) = apply(rest, spec, value)? else {
                 return Ok(None);
             };
             // Upstream replaces, rather than truncates, overlong output.
-            if text.chars().count() <= *max {
+            let length = if *bytes {
+                text.len()
+            } else {
+                text.chars().count()
+            };
+            if length <= *max {
                 return Ok(Some(text));
             }
             let text = replacement.clone();
@@ -546,9 +574,14 @@ fn apply_identity(ops: &[Op], spec: &str, value: Value) -> Result<Value> {
             let value = apply_identity(rest, spec, value)?;
             return bounded(format!("{before}{}{after}", identity_text(&value))).map(Value::Str);
         }
-        Op::Limit { max, replacement } => {
+        Op::Limit {
+            max,
+            replacement,
+            bytes,
+        } => {
             let value = apply_identity(rest, spec, value)?;
             let length = match &value {
+                Value::Str(v) if *bytes => v.len(),
                 Value::Str(v) => v.chars().count(),
                 Value::List(v) => v.len(),
                 Value::Map(v) => v.len(),
@@ -1070,6 +1103,33 @@ fn access(value: Value, accessor: &Accessor) -> Value {
         }
         _ => Value::Missing,
     }
+}
+
+/// A `[start:stop:step]` slice, with `b` slicing UTF-8 bytes.
+fn slice_accessor(indices: &str) -> Result<Accessor> {
+    let integer = |text: &str| -> Result<Option<i64>> {
+        if text.is_empty() {
+            return Ok(None);
+        }
+        text.parse()
+            .map(Some)
+            .map_err(|_| error("invalid template slice"))
+    };
+    let (bytes, indices) = match indices.strip_prefix('b') {
+        Some(indices) => (true, indices),
+        None => (false, indices),
+    };
+    let mut parts = indices.splitn(3, ':');
+    let start = integer(parts.next().unwrap_or_default())?;
+    let stop = integer(parts.next().unwrap_or_default())?;
+    let step = integer(parts.next().unwrap_or_default())?;
+    Ok(match step {
+        Some(0) => return Err(error("invalid template slice")),
+        None | Some(1) if bytes => Accessor::ByteSlice(start, stop),
+        None | Some(1) => Accessor::Slice(start, stop),
+        Some(_) if bytes => return Err(error("invalid template slice")),
+        Some(step) => Accessor::Stepped(start, stop, step),
+    })
 }
 
 /// Upstream `M`, `D` and `X` specifiers.
@@ -1651,7 +1711,8 @@ fn parse_source(text: &str, known: &impl Fn(&str) -> bool) -> Result<Source> {
     if !identifier(name) && !known(name) {
         return Err(error("invalid template field name"));
     }
-    if !known(name) {
+    let global = matches!(name, "_lit" | "_env") && text[end..].starts_with('[') || name == "_now";
+    if !known(name) && !global {
         return Err(error(format!("unknown filename template field: {name}")));
     }
     let mut accessors = Vec::new();
@@ -1675,31 +1736,16 @@ fn parse_source(text: &str, known: &impl Fn(&str) -> bool) -> Result<Source> {
                 .find(']')
                 .ok_or_else(|| error("unclosed template field accessor"))?;
             let inner = &after[..end];
-            let integer = |text: &str| -> Result<Option<i64>> {
-                if text.is_empty() {
-                    return Ok(None);
-                }
-                text.parse()
-                    .map(Some)
-                    .map_err(|_| error("invalid template slice"))
-            };
             let quoted = inner.len() >= 2
                 && (inner.starts_with('\'') && inner.ends_with('\'')
                     || inner.starts_with('"') && inner.ends_with('"'));
-            let parts: Vec<&str> = inner.splitn(3, ':').collect();
             accessors.push(match inner.split_once(':') {
                 _ if quoted => Accessor::Key(inner[1..inner.len() - 1].into()),
-                _ if parts.len() == 3 && !parts[2].is_empty() => {
-                    let step = integer(parts[2])?
-                        .filter(|step| *step != 0)
-                        .ok_or_else(|| error("invalid template slice"))?;
-                    Accessor::Stepped(integer(parts[0])?, integer(parts[1])?, step)
+                // `_lit[TEXT]`/`_env[NAME]` take any text up to the bracket.
+                _ if matches!(name, "_lit" | "_env") && accessors.is_empty() => {
+                    Accessor::Key(inner.into())
                 }
-                _ if parts.len() == 3 => Accessor::Slice(integer(parts[0])?, integer(parts[1])?),
-                Some((start, stop)) if start.starts_with('b') => {
-                    Accessor::ByteSlice(integer(&start[1..])?, integer(stop)?)
-                }
-                Some((start, stop)) => Accessor::Slice(integer(start)?, integer(stop)?),
+                Some(_) => slice_accessor(inner)?,
                 None if inner.parse::<i64>().is_ok() => Accessor::Index(inner.parse()?),
                 None if identifier(inner) => Accessor::Key(inner.into()),
                 None => return Err(error("invalid template field key")),
@@ -1715,19 +1761,31 @@ fn parse_source(text: &str, known: &impl Fn(&str) -> bool) -> Result<Source> {
     })
 }
 
+/// Upstream `format-separator`: the specifier argument separator.
+static SEPARATOR: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Install the global `format-separator` (default `/`); later calls are
+/// ignored.
+pub fn set_separator(separator: &str) {
+    if !separator.is_empty() {
+        let _ = SEPARATOR.set(separator.to_owned());
+    }
+}
+
 fn parse_ops(mut spec: &str) -> Result<(Vec<Op>, String)> {
     let mut ops = Vec::new();
+    let separator = SEPARATOR.get().map_or("/", String::as_str);
     // Each specifier consumes `/`-terminated arguments, like upstream.
     let take = |spec: &mut &str| -> Result<String> {
         let (argument, rest) = spec
-            .split_once('/')
+            .split_once(separator)
             .ok_or_else(|| error("template specifier is missing a / terminator"))?;
         *spec = rest;
         Ok(argument.into())
     };
     // Single-argument specifiers use `partition`: the `/` is optional.
     let rest = |spec: &mut &str| -> String {
-        let (argument, rest) = spec.split_once('/').unwrap_or((spec, ""));
+        let (argument, rest) = spec.split_once(separator).unwrap_or((spec, ""));
         *spec = rest;
         argument.into()
     };
@@ -1745,14 +1803,19 @@ fn parse_ops(mut spec: &str) -> Result<(Vec<Op>, String)> {
                 before: take(&mut spec)?,
                 after: take(&mut spec)?,
             },
-            'L' => Op::Limit {
-                max: take(&mut spec)?
-                    .parse()
-                    .ok()
-                    .filter(|max| *max <= MAX_TEXT)
-                    .ok_or_else(|| error("invalid template length limit"))?,
-                replacement: take(&mut spec)?,
-            },
+            'L' => {
+                let limit = take(&mut spec)?;
+                let (bytes, limit) = match limit.strip_prefix('b') {
+                    Some(limit) => (true, limit.to_owned()),
+                    None => (false, limit),
+                };
+                Op::Limit {
+                    // Like upstream's `text.parse_int`, invalid numbers are 0.
+                    max: limit.parse().unwrap_or(0).min(MAX_TEXT),
+                    replacement: take(&mut spec)?,
+                    bytes,
+                }
+            }
             'J' => Op::Join(rest(&mut spec)),
             'R' => Op::Replace {
                 old: take(&mut spec)?,
@@ -1780,15 +1843,12 @@ fn parse_ops(mut spec: &str) -> Result<(Vec<Op>, String)> {
                 }
                 Op::Convert(conversions)
             }
+            // Upstream sorts descending when the argument contains d or r.
             'S' => Op::Sort {
-                reverse: match rest(&mut spec).as_str() {
-                    "" | "a" => false,
-                    "r" | "d" => true,
-                    _ => return Err(error("template sort order must be a, r, or d")),
-                },
+                reverse: rest(&mut spec).contains(['d', 'r']),
             },
             'O' => {
-                let (argument, rest) = spec.split_once('/').unwrap_or((spec, ""));
+                let (argument, rest) = spec.split_once(separator).unwrap_or((spec, ""));
                 spec = rest;
                 Op::Offset(source_offset::Offset::parse(argument)?)
             }
@@ -1815,19 +1875,7 @@ fn parse_ops(mut spec: &str) -> Result<(Vec<Op>, String)> {
                     .split_once(']')
                     .ok_or_else(|| error("unclosed template slice specifier"))?;
                 spec = rest;
-                let integer = |text: &str| -> Result<Option<i64>> {
-                    if text.is_empty() {
-                        return Ok(None);
-                    }
-                    text.parse()
-                        .map(Some)
-                        .map_err(|_| error("invalid template slice"))
-                };
-                let (start, stop) = indices.split_once(':').unwrap_or((indices, ""));
-                Op::Slice(match start.strip_prefix('b') {
-                    Some(start) => Accessor::ByteSlice(integer(start)?, integer(stop)?),
-                    None => Accessor::Slice(integer(start)?, integer(stop)?),
-                })
+                Op::Slice(slice_accessor(indices)?)
             }
             _ => unreachable!(),
         });

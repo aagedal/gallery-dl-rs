@@ -660,6 +660,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     "path-strip",
     "path-convert",
     "path-extended",
+    "format-separator",
     "skip",
     "download",
     "cookies-update",
@@ -1653,6 +1654,10 @@ impl Config {
                     }
                 }
             }
+        }
+        // Templates below are parsed with upstream's `format-separator`.
+        if let Some(separator) = globals.get("format-separator").and_then(Value::as_str) {
+            crate::naming::format::set_separator(separator);
         }
         let mut sections = serde_json::Map::new();
         let mut root_extra = serde_json::Map::new();

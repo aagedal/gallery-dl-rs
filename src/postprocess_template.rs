@@ -423,6 +423,14 @@ mod tests {
             ("{big:.2g}", "1.2e+08"),
             ("{id:n}", "12345"),
             ("{title:Cnu/}", "ERR"),
+            ("{_lit[f.o.o]}", "f.o.o"),
+            ("{_lit[foobar][:3]}", "foo"),
+            ("{title:[1:10:2]}", "el ol"),
+            ("{title:[::]}", "Hello World"),
+            ("{jp[b::]}", "日本語テキスト"),
+            ("{title:Lb5/x/}", "x"),
+            ("{title:Lab/x/}", "x"),
+            ("{tags:Sort-reverse}", "['c', 'b', 'a']"),
         ] {
             let result = Template::parse(template).and_then(|t| t.render(context));
             match expected {

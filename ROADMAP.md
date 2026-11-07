@@ -1618,7 +1618,12 @@ function) run in an external `python3` (`$GALLERY_DL_PYTHON`), like the
 added the `!a`, `!n`, `!q`, `!Q`, `!L` and `!R` conversions, the `D`
 (strptime), `M` (map) and `X` (truncate with hint) specifiers, sorting of
 strings, quoted keys, `start:stop:step` field slices and Python's
-`g`/`G`/`n` number formats (2026-11-07). Filter expressions gained
+`g`/`G`/`n` number formats (2026-11-07). Replaying upstream's
+`test_formatter.py` cases also added `Lb` byte limits, lenient `L` numbers,
+upstream's loose `S` arguments, stepped `:[a:b:c]` specifiers, the `_lit`,
+`_env` and `_now` globals and the root `format-separator` option; only
+`_nul`, attribute access on numbers and Jinja (without the module) differ.
+Filter expressions gained
 upstream's documented globals (`datetime(...)`, `datetime.now()`,
 `timedelta(...)` with keyword arguments and date arithmetic, `re.search`/
 `match`/`fullmatch`/`findall`/`sub`/`split`, `print`, `parse_int`), common
