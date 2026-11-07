@@ -83,6 +83,11 @@ pub enum Target {
         host: String,
         feed: Collection,
     },
+    /// A Pleroma/Akkoma `objects/UUID` link that redirects to a status.
+    Object {
+        host: String,
+        id: String,
+    },
     /// Accounts a user follows, queued as user jobs.
     Following {
         host: String,
@@ -188,6 +193,7 @@ impl Target {
             Self::Status { host, .. }
             | Self::User { host, .. }
             | Self::Collection { host, .. }
+            | Self::Object { host, .. }
             | Self::Following { host, .. } => host,
         }
     }
@@ -268,6 +274,14 @@ fn target_on(url: &Url, custom: bool) -> Result<Target> {
     };
     match segments {
         ["statuses", id] | ["notice", id] | ["users", _, "statuses", id] => status(id),
+        ["objects", id]
+            if !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') =>
+        {
+            Ok(Target::Object {
+                host: host.clone(),
+                id: (*id).into(),
+            })
+        }
         ["users", name, "following"] => following(name),
         [name, "following"] if name.starts_with('@') => following(name),
         ["users", name] | ["users", name, "media"] => user(name),
@@ -844,29 +858,8 @@ impl Mastodon {
         };
         match target {
             Target::Following { host, acct } => self.following(host, acct),
-            Target::Status { host, id } => stream::once(async move {
-                let root = self.root(&host);
-                let (body, _) = self
-                    .call(&root, &format!("api/v1/statuses/{id}"), &[])
-                    .await?;
-                let status = json(&body)?;
-                if id_of(&status) != Some(id.as_str()) {
-                    return Err(error(
-                        "Mastodon response does not match the requested status",
-                    ));
-                }
-                let events = self.status_events(&status, &host);
-                if events.is_empty() && selected(&status, self.selection) {
-                    return Err(error("Mastodon status contains no supported media"));
-                }
-                Ok::<_, crate::Error>(stream::iter(events.into_iter().map(Ok)))
-            })
-            .map(|result| match result {
-                Ok(events) => events.boxed(),
-                Err(e) => stream::once(async move { Err(e) }).boxed(),
-            })
-            .flatten()
-            .boxed(),
+            Target::Status { host, id } => self.single(host, id, false),
+            Target::Object { host, id } => self.single(host, id, true),
             target => stream::unfold(Some((target, None)), move |state| async move {
                 let (target, state) = state?;
                 let mut state: TimelineState = match state {
@@ -890,6 +883,68 @@ impl Mastodon {
             })
             .boxed(),
         }
+    }
+
+    /// One status; Pleroma/Akkoma `objects/ID` links are first resolved
+    /// through their redirect to the status ID, like upstream.
+    fn single(
+        &self,
+        host: String,
+        id: String,
+        object: bool,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::once(async move {
+            let id = if object {
+                self.resolve_object(&host, &id).await?
+            } else {
+                id
+            };
+            let root = self.root(&host);
+            let (body, _) = self
+                .call(&root, &format!("api/v1/statuses/{id}"), &[])
+                .await?;
+            let status = json(&body)?;
+            if id_of(&status) != Some(id.as_str()) {
+                return Err(error(
+                    "Mastodon response does not match the requested status",
+                ));
+            }
+            let events = self.status_events(&status, &host);
+            if events.is_empty() && selected(&status, self.selection) {
+                return Err(error("Mastodon status contains no supported media"));
+            }
+            Ok::<_, crate::Error>(stream::iter(events.into_iter().map(Ok)))
+        })
+        .map(|result| match result {
+            Ok(events) => events.boxed(),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
+    async fn resolve_object(&self, host: &str, id: &str) -> Result<String> {
+        let url = self
+            .root(host)
+            .join(&format!("objects/{id}"))
+            .map_err(|_| error("invalid Mastodon object URL"))?;
+        let response = tokio::time::timeout(
+            self.timeout,
+            self.client.get(url).timeout(self.request_timeout).send(),
+        )
+        .await
+        .map_err(|_| error("native Mastodon extraction timed out"))?
+        .map_err(|_| error("Mastodon request failed; check network access"))?;
+        response
+            .status()
+            .is_redirection()
+            .then(|| response.headers().get(header::LOCATION))
+            .flatten()
+            .and_then(|location| location.to_str().ok())
+            .and_then(|location| location.trim_end_matches('/').rsplit('/').next())
+            .filter(|id| valid_id(id))
+            .map(str::to_owned)
+            .ok_or_else(|| error("Mastodon object did not redirect to a status"))
     }
 
     /// An account's ID: `id:ID`, else `accounts/lookup`.
@@ -1023,7 +1078,7 @@ impl Mastodon {
                 };
                 (host, path, false)
             }
-            Target::Status { .. } | Target::Following { .. } => {
+            Target::Status { .. } | Target::Object { .. } | Target::Following { .. } => {
                 unreachable!("statuses and followings do not have timeline state")
             }
         };
@@ -1944,6 +1999,28 @@ mod tests {
             .with_network(&NetworkOptions::new(Some(String::new()), None).unwrap())
             .unwrap()
             .with_api_root(root)
+    }
+
+    #[tokio::test]
+    async fn object_links_resolve_their_status_redirect() {
+        let (root, server) = serve(vec![
+            response(
+                "302 Found",
+                "Location: https://pleroma.example/notice/100\r\n",
+                b"",
+            ),
+            response("200 OK", "", status("100").to_string().as_bytes()),
+        ]);
+        let url = Url::parse("mastodon:https://pleroma.example/objects/0b2e-4f1a").unwrap();
+        assert!(matches!(
+            target(&url),
+            Ok(Target::Object { ref id, .. }) if id == "0b2e-4f1a"
+        ));
+        let media: Vec<_> = mastodon(root).stream(&url).collect().await;
+        assert_eq!(media.len(), 2);
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET /objects/0b2e-4f1a "));
+        assert!(requests[1].starts_with("GET /api/v1/statuses/100 "));
     }
 
     #[tokio::test]

@@ -676,7 +676,8 @@ Since 2026-10-31 `mastodon:https://HOST/...` reads any other instance
 anonymously (category `mastodon`, where upstream uses the host name; tokens
 stay bound to the built-in instances), including Pleroma/Akkoma `notice`
 links and alphanumeric flake IDs; followed accounts on such hosts are queued
-with the prefix. Pleroma `objects/UUID` redirects are not followed yet.
+with the prefix. Pleroma `objects/UUID` links resolve through their status
+redirect (2026-11-07).
 Configured instances (`extractor.mastodon.NAME.root`, also for misskey,
 moebooru, szurubooru, shimmie2, foolfuuka, vichan and lynxchan) route plain
 URLs on their hosts to the `BASE:` readers (2026-11-07).
