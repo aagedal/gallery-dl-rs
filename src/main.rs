@@ -2131,6 +2131,9 @@ fn extract_input<'a>(
                             gallery_dl_rs::instagram::set_warn_images(
                                 options.site_options.as_deref().and_then(|o| o.get("warn-images")),
                             );
+                            gallery_dl_rs::instagram::set_audio(
+                                options.site_options.as_deref().and_then(|o| o.get("audio")),
+                            );
                             gallery_dl_rs::instagram::set_warn_videos(
                                 options.site_options.as_deref().and_then(|o| o.get("warn-videos")),
                             );

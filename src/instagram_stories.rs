@@ -563,7 +563,7 @@ fn parse_reel_with(data: &Value, expected: &Reel, static_videos: bool) -> Result
     Ok(media)
 }
 
-fn shortcode_from_id(mut id: u64) -> String {
+pub(super) fn shortcode_from_id(mut id: u64) -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut bytes = Vec::new();
     while id > 0 {

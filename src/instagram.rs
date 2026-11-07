@@ -1330,8 +1330,19 @@ fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
     };
     let only_video =
         children.len() == 1 && children[0].get("media_type").and_then(Value::as_u64) == Some(2);
-    let data = post_keywords(post, code, children.len(), only_video);
-    children
+    let music = post
+        .pointer("/music_metadata/music_info")
+        .and_then(|info| audio_keywords(post, info));
+    let mut data = post_keywords(
+        post,
+        code,
+        children.len() + usize::from(music.as_ref().is_some_and(|m| m.file.is_some())),
+        only_video,
+    );
+    if let Some(music) = &music {
+        data.extend(music.post.clone());
+    }
+    let mut media = children
         .iter()
         .enumerate()
         .map(|(index, item)| {
@@ -1475,7 +1486,126 @@ fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
                 ]),
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+    if let Some((url, file)) = music.and_then(|music| music.file)
+        && AUDIO.load(std::sync::atomic::Ordering::Relaxed)
+        && let Some(last) = media.last()
+    {
+        let mut fields = data;
+        fields.extend(file);
+        // Upstream numbers the audio like the post's last file.
+        let num = media.len();
+        fields.insert("num".into(), num.into());
+        let (filename, extension) = crate::sites::nameext(&url);
+        let extension = crate::path_options::map_extension(&extension).unwrap_or(extension);
+        fields.insert("filename".into(), filename.into());
+        fields.insert("extension".into(), extension.clone().into());
+        let media_id = fields
+            .get("media_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let mut metadata = last.metadata.clone().unwrap_or_default();
+        metadata.file = None;
+        metadata.media_id = media_id.clone();
+        metadata.index = num;
+        metadata.site_keywords = Some(std::sync::Arc::new(crate::sites::SiteKeywords {
+            route: &POST,
+            fields,
+        }));
+        media.push(Media {
+            url,
+            job: crate::extract::MediaJob::DirectHttp,
+            handoff: BTreeMap::new(),
+            category: "instagram".into(),
+            filename: format!("{post_id}_{media_id}.{extension}"),
+            metadata: Some(metadata),
+            headers: BTreeMap::from([
+                ("User-Agent".into(), "Mozilla/5.0".into()),
+                ("Referer".into(), "https://www.instagram.com/".into()),
+            ]),
+        });
+    }
+    Ok(media)
+}
+
+/// Upstream `audio`: download a post's music track (its keywords are
+/// always added).
+static AUDIO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_audio(value: Option<&Value>) {
+    AUDIO.store(
+        value.is_some_and(crate::postprocess::truthy),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+struct Music {
+    /// `audio_*` keywords of the post.
+    post: serde_json::Map<String, Value>,
+    /// The track and its file keywords, when downloadable.
+    file: Option<(Url, serde_json::Map<String, Value>)>,
+}
+
+/// Upstream `_extract_audio`.
+fn audio_keywords(src: &Value, info: &Value) -> Option<Music> {
+    let audio = info.get("music_asset_info").filter(|a| a.is_object())?;
+    let consumption = info
+        .get("music_consumption_info")
+        .filter(|c| c.is_object())
+        .unwrap_or(audio);
+    let get = |key: &str| audio.get(key).cloned().unwrap_or(Value::Null);
+    let either = |key: &str| {
+        audio
+            .get(key)
+            .filter(|v| crate::postprocess::truthy(v))
+            .or_else(|| consumption.get(key))
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    let duration = audio
+        .get("duration_in_ms")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0)
+        / 1000.0;
+    let mut post = serde_json::Map::new();
+    post.insert("audio_title".into(), get("title"));
+    post.insert("audio_duration".into(), duration.into());
+    post.insert(
+        "audio_timestamps".into(),
+        get("highlight_start_times_in_ms"),
+    );
+    post.insert("audio_artist".into(), either("display_artist"));
+    post.insert("audio_user".into(), either("ig_artist"));
+    let file = audio
+        .get("progressive_download_url")
+        .and_then(Value::as_str)
+        .filter(|url| !url.is_empty())
+        .and_then(|url| http_url(url).ok())
+        .map(|url| {
+            let id = get("id");
+            let numeric = id
+                .as_str()
+                .and_then(|id| id.parse::<u64>().ok())
+                .or_else(|| id.as_u64());
+            let mut file = post.clone();
+            file.insert(
+                "date".into(),
+                crate::filter::source_date_text(src.get("taken_at").and_then(Value::as_i64)).into(),
+            );
+            file.insert("media_id".into(), id.clone());
+            file.insert(
+                "shortcode".into(),
+                numeric.map_or(Value::Null, |id| stories::shortcode_from_id(id).into()),
+            );
+            file.insert("display_url".into(), get("cover_artwork_uri"));
+            file.insert("audio_url".into(), url.as_str().into());
+            for key in ["width", "width_original", "height", "height_original"] {
+                file.insert(key.into(), 0.into());
+            }
+            (url, file)
+        });
+    Some(Music { post, file })
 }
 
 /// Upstream `warn-images`: 0 warns when either dimension is below the
@@ -1606,6 +1736,49 @@ mod file_option_tests {
         assert_eq!(lowered_dimensions(640, 1080, (1080, 1080)), 1);
         assert_eq!(lowered_dimensions(640, 640, (1080, 1080)), 2);
         assert_eq!(lowered_dimensions(1000, 1000, (1080, 1080)), 0);
+    }
+
+    #[test]
+    fn music_tracks_add_keywords_and_optional_audio_files() {
+        let mut data: Value =
+            serde_json::from_slice(include_bytes!("../tests/fixtures/instagram/photo.json"))
+                .unwrap();
+        data["items"][0]["music_metadata"] = serde_json::json!({"music_info": {
+            "music_asset_info": {"id": "1234", "title": "Song", "duration_in_ms": 15000,
+                "display_artist": "Artist", "cover_artwork_uri": "https://cdn.example/cover.jpg",
+                "progressive_download_url": "https://cdn.example/track.m4a"},
+            "music_consumption_info": {"ig_artist": {"username": "artist"}}}});
+        let fields = |media: &Media| {
+            media
+                .metadata
+                .as_ref()
+                .unwrap()
+                .site_keywords
+                .as_ref()
+                .unwrap()
+                .fields
+                .clone()
+        };
+        let media = parse_value_with(&data, "BA", true).unwrap();
+        assert_eq!(media.len(), 1);
+        let photo = fields(&media[0]);
+        assert_eq!(photo["audio_title"], "Song");
+        assert_eq!(photo["audio_duration"], 15.0);
+        assert_eq!(photo["audio_user"]["username"], "artist");
+        assert_eq!(photo["count"], 2);
+        set_audio(Some(&Value::Bool(true)));
+        let media = parse_value_with(&data, "BA", true).unwrap();
+        set_audio(None);
+        assert_eq!(media.len(), 2);
+        assert_eq!(media[1].url.as_str(), "https://cdn.example/track.m4a");
+        assert_eq!(media[1].filename, "64_1234.m4a");
+        let audio = fields(&media[1]);
+        assert_eq!(audio["num"], 1);
+        assert_eq!(audio["media_id"], "1234");
+        assert_eq!(audio["shortcode"], "TS");
+        assert_eq!(audio["audio_url"], "https://cdn.example/track.m4a");
+        assert_eq!(audio["width"], 0);
+        assert_eq!(audio["extension"], "m4a");
     }
 
     #[test]
