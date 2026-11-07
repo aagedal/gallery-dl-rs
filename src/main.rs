@@ -2511,6 +2511,7 @@ fn extract_input<'a>(
                             gallery_dl_rs::weasyl::Weasyl::new(backend.timeout).and_then(|native| {
                                 native
                                     .with_api_key(options.api_key.as_deref())
+                                    .with_metadata(options.metadata.unwrap_or(false))
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)

@@ -7,6 +7,7 @@
 //! null (capped at 200 pages). An optional `api-key` is sent as the
 //! `X-Weasyl-API-Key` header. Non-visual submissions without
 //! `media.submission` are skipped. Media must be HTTPS on `*.weasyl.com`.
+use crate::sites::{Route, SiteKeywords};
 use crate::{
     Result, error,
     event::{ExtractionEvent, group},
@@ -21,7 +22,7 @@ use futures_util::{
     stream::{self, BoxStream},
 };
 use reqwest::{Client, StatusCode};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     sync::Arc,
@@ -183,8 +184,57 @@ fn id_string(value: &Value) -> Option<String> {
     }
 }
 
+const FILENAME: &str = "{submitid} {title}.{extension}";
+const DIRECTORY: &[&str] = &["{category}", "{owner_login}"];
+static SUBMISSION: Route = Route::new("submission", FILENAME, DIRECTORY, "{submitid}");
+static SUBMISSIONS: Route = Route::new("submissions", FILENAME, DIRECTORY, "{submitid}");
+static FOLDER: Route = Route::new(
+    "folder",
+    FILENAME,
+    &["{category}", "{owner_login}", "{folder_name}"],
+    "{submitid}",
+);
+static FAVORITE: Route = Route::new(
+    "favorite",
+    FILENAME,
+    &["{category}", "{user}", "Favorites"],
+    "{submitid}",
+);
+const JOURNAL_FILENAME: &str = "{journalid} {title}.{extension}";
+static JOURNAL: Route = Route::new("journal", JOURNAL_FILENAME, DIRECTORY, "{journalid}");
+static JOURNALS: Route = Route::new("journals", JOURNAL_FILENAME, DIRECTORY, "{journalid}");
+
+fn iso_date(item: &Map<String, Value>, limit: usize) -> Value {
+    let posted = item.get("posted_at").and_then(Value::as_str).unwrap_or("");
+    let posted = posted.get(..limit).unwrap_or(posted);
+    let timestamp = crate::date::parse_date(posted).ok();
+    crate::filter::source_date_text(timestamp).into()
+}
+
+/// Upstream `populate_submission`: `url`, `date` and URL name parts.
+fn submission_keywords(item: &Value, url: &Url, extra: &Map<String, Value>) -> Map<String, Value> {
+    let mut data = item.as_object().cloned().unwrap_or_default();
+    data.insert("url".into(), url.as_str().into());
+    let date = iso_date(&data, 19);
+    data.insert("date".into(), date);
+    let (filename, extension) = crate::sites::nameext(url);
+    let extension = crate::path_options::map_extension(&extension).unwrap_or(extension);
+    data.insert("filename".into(), filename.into());
+    data.insert("extension".into(), extension.into());
+    data.extend(extra.clone());
+    data
+}
+
 /// Convert one API submission object; `None` when it has no submission file.
 pub fn submission_media(item: &Value) -> Option<Media> {
+    submission_media_with(item, &SUBMISSION, &Map::new())
+}
+
+fn submission_media_with(
+    item: &Value,
+    route: &'static Route,
+    extra: &Map<String, Value>,
+) -> Option<Media> {
     let id = id_string(item.get("submitid")?)?;
     let url = item
         .pointer("/media/submission/0/url")
@@ -223,6 +273,10 @@ pub fn submission_media(item: &Value) -> Option<Media> {
                 .and_then(Value::as_str)
                 .and_then(|d| crate::date::parse_date(d).ok()),
             index: 1,
+            site_keywords: Some(Arc::new(SiteKeywords {
+                route,
+                fields: submission_keywords(item, &url, extra),
+            })),
             ..PostMetadata::default()
         }),
         url,
@@ -255,11 +309,14 @@ pub struct Weasyl {
     request_timeout: Duration,
     retries: u8,
     rate_limits: RateLimits,
+    metadata: bool,
 }
 
 struct GalleryState {
     user: String,
     folder: Option<String>,
+    /// The folder's name, from its first submission's details.
+    folder_name: Option<Value>,
     next: Option<String>,
     page: u64,
     done: bool,
@@ -278,7 +335,14 @@ impl Weasyl {
             request_timeout: timeout,
             retries: 0,
             rate_limits: RateLimits::default(),
+            metadata: false,
         })
+    }
+
+    /// Upstream `metadata`: fetch each gallery submission's full details.
+    pub fn with_metadata(mut self, metadata: bool) -> Self {
+        self.metadata = metadata;
+        self
     }
 
     /// Apply proxy and user-agent settings to requests and emitted media.
@@ -328,8 +392,17 @@ impl Weasyl {
     }
 
     async fn submission(&self, id: &str) -> Result<VecDeque<ExtractionEvent>> {
+        self.submission_with(id, &SUBMISSION, &Map::new()).await
+    }
+
+    async fn submission_with(
+        &self,
+        id: &str,
+        route: &'static Route,
+        extra: &Map<String, Value>,
+    ) -> Result<VecDeque<ExtractionEvent>> {
         let body = self.call(&format!("api/submissions/{id}/view")).await?;
-        let media = submission_media(&json(&body)?)
+        let media = submission_media_with(&json(&body)?, route, extra)
             .ok_or_else(|| error("Weasyl submission has no downloadable file"))?;
         Ok(self.emit(media))
     }
@@ -349,8 +422,40 @@ impl Weasyl {
             path.push_str(&params.join("&"));
         }
         let (items, next) = parse_gallery(&self.call(&path).await?)?;
-        for item in &items {
-            if let Some(media) = submission_media(item)
+        let route = if state.folder.is_some() {
+            &FOLDER
+        } else {
+            &SUBMISSIONS
+        };
+        for item in items {
+            let id = item.get("submitid").and_then(id_string);
+            let details = match &id {
+                Some(id)
+                    if self.metadata || state.folder.is_some() && state.folder_name.is_none() =>
+                {
+                    Some(json(
+                        &self.call(&format!("api/submissions/{id}/view")).await?,
+                    )?)
+                }
+                _ => None,
+            };
+            if state.folder_name.is_none()
+                && let Some(details) = &details
+            {
+                state.folder_name =
+                    Some(details.get("folder_name").cloned().unwrap_or(Value::Null));
+            }
+            let item = match details {
+                Some(details) if self.metadata => details,
+                _ => item,
+            };
+            let mut extra = Map::new();
+            let folder = state.folder.clone().map_or(Value::Null, Value::from);
+            extra.insert("folderid".into(), folder);
+            if let Some(name) = &state.folder_name {
+                extra.insert("folder_name".into(), name.clone());
+            }
+            if let Some(media) = submission_media_with(&item, route, &extra)
                 && state
                     .seen
                     .insert(media.metadata.as_ref().unwrap().media_id.clone())
@@ -364,7 +469,7 @@ impl Weasyl {
     }
 
     /// Upstream `retrieve_journal`: the journal's HTML content as a text file.
-    async fn journal(&self, id: &str) -> Result<VecDeque<ExtractionEvent>> {
+    async fn journal(&self, id: &str, route: &'static Route) -> Result<VecDeque<ExtractionEvent>> {
         let item = json(&self.call(&format!("api/journals/{id}/view")).await?)?;
         let content = item
             .get("content")
@@ -399,6 +504,17 @@ impl Weasyl {
                     .and_then(Value::as_str)
                     .and_then(|d| crate::date::parse_date(d).ok()),
                 index: 1,
+                site_keywords: Some(Arc::new(SiteKeywords {
+                    route,
+                    fields: {
+                        let mut data = item.as_object().cloned().unwrap_or_default();
+                        data.insert("extension".into(), "html".into());
+                        data.insert("html".into(), format!("text:{content}").into());
+                        let date = iso_date(&data, usize::MAX);
+                        data.insert("date".into(), date);
+                        data
+                    },
+                })),
                 ..PostMetadata::default()
             }),
             headers: BTreeMap::new(),
@@ -422,15 +538,20 @@ impl Weasyl {
     fn per_id<'a>(
         &'a self,
         ids: Vec<String>,
-        journal: bool,
+        route: &'static Route,
+        extra: Map<String, Value>,
     ) -> BoxStream<'a, Result<ExtractionEvent>> {
         stream::iter(ids)
-            .then(move |id| async move {
-                if journal {
-                    self.journal(&id).await
-                } else {
-                    // Like upstream, posts without a submission file are skipped.
-                    self.submission(&id).await.or_else(|_| Ok(VecDeque::new()))
+            .then(move |id| {
+                let extra = extra.clone();
+                async move {
+                    if route.archive == "{journalid}" {
+                        self.journal(&id, route).await
+                    } else {
+                        // Like upstream, posts without a submission file are skipped.
+                        let events = self.submission_with(&id, route, &extra).await;
+                        events.or_else(|_| Ok(VecDeque::new()))
+                    }
                 }
             })
             .map(|result: Result<VecDeque<ExtractionEvent>>| match result {
@@ -449,7 +570,7 @@ impl Weasyl {
             Ok::<_, crate::Error>(Self::linked_ids(&page, "href=\"/journal/"))
         })
         .map(move |result| match result {
-            Ok(ids) => self.per_id(ids, true),
+            Ok(ids) => self.per_id(ids, &JOURNALS, Map::new()),
             Err(e) => stream::once(async move { Err(e) }).boxed(),
         })
         .flatten()
@@ -469,6 +590,17 @@ impl Weasyl {
                 .find("id=\"favorites-content\"")
                 .ok_or_else(|| error("Weasyl favorites page has no favorites"))?;
             let ids = Self::linked_ids(&page[start..], "/submissions/");
+            // Upstream `user`: the named favorites owner, else the page's.
+            let owner = path
+                .strip_prefix("favorites/")
+                .map(|user| user.split(['?', '/']).next().unwrap_or(user).to_owned())
+                .or_else(|| {
+                    let start = page.find("<a href=\"/~")? + 11;
+                    let end = page[start..].find('"')?;
+                    Some(page[start..start + end].to_owned())
+                });
+            let mut extra = Map::new();
+            extra.insert("user".into(), owner.map_or(Value::Null, Value::from));
             let next = page[start..].find("\">Next (").and_then(|end| {
                 let end = start + end;
                 let href = page[..end].rfind("href=\"")? + 6;
@@ -478,7 +610,10 @@ impl Weasyl {
                         .to_owned(),
                 )
             });
-            Ok::<_, crate::Error>(Some((self.per_id(ids, false), (next, pages + 1))))
+            Ok::<_, crate::Error>(Some((
+                self.per_id(ids, &FAVORITE, extra),
+                (next, pages + 1),
+            )))
         })
         .map(|result| match result {
             Ok(events) => events,
@@ -497,7 +632,7 @@ impl Weasyl {
         let (user, folder) = match target(url) {
             Ok(Target::Gallery { user }) => (user, None),
             Ok(Target::Folder { user, folder }) => (user, Some(folder)),
-            Ok(Target::Journal { id }) => return self.per_id(vec![id], true),
+            Ok(Target::Journal { id }) => return self.per_id(vec![id], &JOURNAL, Map::new()),
             Ok(Target::Journals { user }) => return self.journals(user),
             Ok(Target::Favorites { path }) => return self.favorites(path),
             Ok(Target::Submission { id }) => {
@@ -514,6 +649,7 @@ impl Weasyl {
         let state = GalleryState {
             user,
             folder,
+            folder_name: None,
             next: None,
             page: 0,
             done: false,
@@ -855,5 +991,37 @@ mod tests {
                 .contains("x-weasyl-api-key")
         );
         assert!(requests[1].starts_with("GET /api/users/alice/gallery?nextid=7 "));
+    }
+
+    #[tokio::test]
+    async fn folder_files_carry_upstream_keywords_and_folder_name() {
+        let page = format!(
+            r#"{{"submissions":[{}],"nextid":null}}"#,
+            submission_json(42)
+        );
+        let details = submission_json(42).replacen('{', r#"{"folder_name":"Sketches","#, 1);
+        let (root, server) = serve(vec![
+            response("200 OK", page.as_bytes()),
+            response("200 OK", details.as_bytes()),
+        ]);
+        let media: Vec<_> = weasyl(root)
+            .stream(&Url::parse("https://www.weasyl.com/submissions/alice?folderid=9").unwrap())
+            .collect()
+            .await;
+        let media = media.into_iter().next().unwrap().unwrap();
+        let keywords = media.metadata.unwrap().site_keywords.unwrap();
+        let fields = &keywords.fields;
+        assert_eq!(
+            keywords.route.directory,
+            ["{category}", "{owner_login}", "{folder_name}"]
+        );
+        assert_eq!(fields["folder_name"], "Sketches");
+        assert_eq!(fields["folderid"], "9");
+        assert_eq!(fields["submitid"], 42);
+        assert_eq!(fields["date"], "2023-09-21 13:23:00");
+        assert_eq!(fields["filename"], "alice-big");
+        assert_eq!(fields["extension"], "png");
+        let requests = server.join().unwrap();
+        assert!(requests[1].starts_with("GET /api/submissions/42/view "));
     }
 }
