@@ -2573,7 +2573,10 @@ mod tests {
         assert_eq!(blog_identifier("blog.example.com"), "blog.example.com");
         assert_eq!(blog_identifier("alice"), "alice.tumblr.com");
         assert!(crate::extract::http_url("tumblr:https://blog.example.com/").is_ok());
-        for input in ["tumblr:blog.example.com", "tumblr:https://blog.example.com/"] {
+        for input in [
+            "tumblr:blog.example.com",
+            "tumblr:https://blog.example.com/",
+        ] {
             let url = Url::parse(input).unwrap();
             assert_eq!(crate::extract::social_site(&url), Some("tumblr"), "{input}");
         }
