@@ -636,6 +636,7 @@ struct TimelineState {
     max_id: Option<String>,
     pages: usize,
     done: bool,
+    moved_checked: bool,
     pending: VecDeque<ExtractionEvent>,
 }
 
@@ -818,6 +819,12 @@ impl Mastodon {
             || state.pages >= MAX_PAGES;
         state.max_id = next;
         for status in entries {
+            if state.account_query && !state.moved_checked {
+                state.moved_checked = true;
+                if let Some(account) = status.get("account") {
+                    warn_moved(account);
+                }
+            }
             state
                 .pending
                 .extend(self.status_events(status, &state.host));
@@ -890,17 +897,38 @@ impl Mastodon {
         if let Some(id) = acct.strip_prefix("id:") {
             return Ok(id.to_owned());
         }
+        let root = self.root(host);
+        let lookup = self
+            .call(&root, "api/v1/accounts/lookup", &[("acct", acct)])
+            .await
+            .and_then(|(body, _)| json(&body));
+        if let Some(id) = lookup.as_ref().ok().and_then(id_of) {
+            return Ok(id.to_owned());
+        }
+        // Upstream falls back to an account search when lookup fails.
+        let handle = if acct.contains('@') {
+            format!("@{acct}")
+        } else {
+            format!("@{acct}@{host}")
+        };
         let (body, _) = self
             .call(
-                &self.root(host),
-                "api/v1/accounts/lookup",
-                &[("acct", acct)],
+                &root,
+                "api/v1/accounts/search",
+                &[("q", handle.as_str()), ("limit", "1")],
             )
             .await?;
-        let account = json(&body)?;
-        Ok(id_of(&account)
-            .ok_or_else(|| error("Mastodon account lookup returned no account ID"))?
-            .to_owned())
+        let accounts = json(&body)?;
+        accounts
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|account| string(account, "acct") == Some(acct))
+            .and_then(|account| {
+                warn_moved(account);
+                id_of(account).map(str::to_owned)
+            })
+            .ok_or_else(|| error("Mastodon account not found"))
     }
 
     /// Upstream `MastodonFollowingExtractor`: queue each followed account as
@@ -1008,6 +1036,7 @@ impl Mastodon {
             max_id: None,
             pages: 0,
             done: false,
+            moved_checked: false,
             pending: VecDeque::new(),
         })
     }
@@ -1107,6 +1136,19 @@ impl Mastodon {
             body.extend_from_slice(&chunk);
         }
         Ok((body, link))
+    }
+}
+
+/// Upstream `_check_moved`: a truthy `moved` field means the account
+/// migrated elsewhere.
+fn moved_target(account: &Value) -> Option<(&str, &str)> {
+    let moved = account.get("moved").filter(|m| m.is_object())?;
+    Some((string(account, "acct")?, string(moved, "acct")?))
+}
+
+fn warn_moved(account: &Value) {
+    if let Some((from, to)) = moved_target(account) {
+        eprintln!("[mastodon][warning] Account '{from}' moved to '{to}'");
     }
 }
 
@@ -1905,6 +1947,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn failed_lookups_fall_back_to_account_search() {
+        let accounts = serde_json::json!([
+            {"id": "8", "acct": "bob"},
+            {"id": "9", "acct": "alice", "moved": {"acct": "alice@elsewhere"}},
+        ]);
+        let (root, server) = serve(vec![
+            response("404 Not Found", "", b"{}"),
+            response("200 OK", "", accounts.to_string().as_bytes()),
+            response("200 OK", "", b"[]"),
+        ]);
+        let media: Vec<_> = mastodon(root)
+            .with_retries(0)
+            .stream(&Url::parse("https://mastodon.social/@alice").unwrap())
+            .collect()
+            .await;
+        assert!(media.is_empty(), "{media:?}");
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET /api/v1/accounts/lookup?acct=alice "));
+        assert!(
+            requests[1]
+                .starts_with("GET /api/v1/accounts/search?q=%40alice%40mastodon.social&limit=1 ")
+        );
+        assert!(requests[2].starts_with("GET /api/v1/accounts/9/statuses?"));
+        assert_eq!(
+            moved_target(&accounts[1]),
+            Some(("alice", "alice@elsewhere"))
+        );
+        assert_eq!(
+            moved_target(&serde_json::json!({"acct": "a", "moved": null})),
+            None
+        );
+    }
+
+    #[tokio::test]
     async fn fetches_status_with_retries() {
         let (root, server) = serve(vec![
             response("429 Too Many Requests", "Retry-After: 0\r\n", b""),
@@ -1949,7 +2025,10 @@ mod tests {
 
     #[tokio::test]
     async fn terminal_errors_are_not_retried() {
-        let (root, server) = serve(vec![response("404 Not Found", "", b"{}")]);
+        let (root, server) = serve(vec![
+            response("404 Not Found", "", b"{}"),
+            response("200 OK", "", b"[]"),
+        ]);
         let error = mastodon(root)
             .with_retries(3)
             .stream(&Url::parse("https://pawoo.net/@nobody").unwrap())
@@ -1959,6 +2038,6 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("not found"));
         assert!(!error.to_string().contains("127.0.0.1"));
-        assert_eq!(server.join().unwrap().len(), 1);
+        assert_eq!(server.join().unwrap().len(), 2);
     }
 }

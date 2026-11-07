@@ -679,8 +679,9 @@ with the prefix. Pleroma `objects/UUID` redirects are not followed yet.
 Configured instances (`extractor.mastodon.NAME.root`, also for misskey,
 moebooru, szurubooru, shimmie2, foolfuuka, vichan and lynxchan) route plain
 URLs on their hosts to the `BASE:` readers (2026-11-07).
-Remaining: OAuth/cache discovery, followed views,
-account-search fallback/moved handling, and fuller metadata/default
+Failed account lookups fall back to `accounts/search` and moved accounts
+warn like upstream (2026-11-07).
+Remaining: OAuth/cache discovery, followed views, and fuller metadata/default
 naming. Authenticated live verification and real captures remain required.
 
 **Implemented experimental native Kemono/Coomer:** posts, creator post listings
