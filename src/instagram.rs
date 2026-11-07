@@ -1103,6 +1103,209 @@ pub(crate) fn parse_post_with(post: &Value, code: &str, static_videos: bool) -> 
     parse_post(&post, code)
 }
 
+static POST: crate::sites::Route = crate::sites::Route::new(
+    "post",
+    "{sidecar_media_id:?/_/}{media_id}.{extension}",
+    &["{category}", "{username}"],
+    "{media_id}",
+);
+
+/// Upstream `_parse_post_rest` post keywords of a regular post.
+fn post_keywords(
+    post: &Value,
+    code: &str,
+    files: usize,
+    video: bool,
+) -> serde_json::Map<String, Value> {
+    let get = |key: &str| post.get(key).cloned().unwrap_or(Value::Null);
+    let mut data = serde_json::Map::new();
+    data.insert("post_id".into(), get("pk"));
+    data.insert("post_shortcode".into(), code.into());
+    data.insert(
+        "likes".into(),
+        post.get("like_count").cloned().unwrap_or(0.into()),
+    );
+    data.insert(
+        "liked".into(),
+        post.get("has_liked").cloned().unwrap_or(false.into()),
+    );
+    let pinned = post
+        .get("timeline_pinned_user_ids")
+        .filter(|v| crate::postprocess::truthy(v))
+        .or_else(|| post.get("clips_tab_pinned_user_ids"))
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    data.insert("pinned".into(), pinned);
+    let description = post
+        .pointer("/caption/text")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    data.insert("description".into(), description.into());
+    let tags: std::collections::BTreeSet<&str> = crate::sites::gdl::re!(r"#\w+")
+        .find_iter(description)
+        .map(|m| m.as_str())
+        .collect();
+    if !tags.is_empty() {
+        data.insert("tags".into(), tags.into_iter().collect::<Vec<_>>().into());
+    }
+    if let Some(location) = post.get("location").filter(|l| l.is_object()) {
+        let slug = location
+            .get("short_name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .replace(' ', "-")
+            .to_lowercase();
+        let id = location.get("pk").cloned().unwrap_or(Value::Null);
+        let url = format!(
+            "https://www.instagram.com/explore/locations/{}/{slug}/",
+            crate::sites::scalar(&id)
+        );
+        data.insert("location_id".into(), id);
+        data.insert("location_slug".into(), slug.into());
+        data.insert("location_url".into(), url.into());
+    }
+    if let Some(coauthors) = post
+        .get("coauthor_producers")
+        .and_then(Value::as_array)
+        .filter(|c| !c.is_empty())
+    {
+        let coauthors: Vec<Value> = coauthors
+            .iter()
+            .map(|user| {
+                serde_json::json!({
+                    "id": user.get("pk"),
+                    "username": user.get("username"),
+                    "full_name": user.get("full_name"),
+                })
+            })
+            .collect();
+        data.insert("coauthors".into(), coauthors.into());
+    }
+    if post
+        .get("carousel_media")
+        .is_some_and(|c| c.as_array().is_some_and(|c| !c.is_empty()))
+    {
+        data.insert("sidecar_media_id".into(), get("pk"));
+        data.insert("sidecar_shortcode".into(), code.into());
+    }
+    let owner = post.get("user").unwrap_or(&Value::Null);
+    data.insert(
+        "owner_id".into(),
+        owner.get("pk").cloned().unwrap_or(Value::Null),
+    );
+    data.insert(
+        "username".into(),
+        owner.get("username").cloned().unwrap_or(Value::Null),
+    );
+    data.insert(
+        "fullname".into(),
+        owner.get("full_name").cloned().unwrap_or(Value::Null),
+    );
+    let taken = post
+        .get("taken_at")
+        .or_else(|| post.get("created_at"))
+        .and_then(Value::as_i64);
+    let date: Value = crate::filter::source_date_text(taken).into();
+    data.insert("post_date".into(), date.clone());
+    data.insert("date".into(), date);
+    if let Some(visibility) = post.get("subscription_media_visibility") {
+        data.insert("subscription".into(), visibility.clone());
+    }
+    let (kind, path) = if files == 1 && video {
+        ("reel", "reel")
+    } else {
+        ("post", "p")
+    };
+    data.insert("type".into(), kind.into());
+    data.insert(
+        "post_url".into(),
+        format!("https://www.instagram.com/{path}/{code}/").into(),
+    );
+    data.insert("count".into(), files.into());
+    data
+}
+
+/// Upstream per-file keywords of one post item.
+fn file_keywords(
+    item: &Value,
+    post: &Value,
+    num: usize,
+    url: &Url,
+    video: bool,
+) -> serde_json::Map<String, Value> {
+    let image = item
+        .pointer("/image_versions2/candidates/0")
+        .unwrap_or(&Value::Null);
+    let videos = item.get("video_versions").and_then(Value::as_array);
+    let best_video = videos.and_then(|v| {
+        v.iter().max_by_key(|v| {
+            (
+                v.get("width").and_then(Value::as_u64).unwrap_or(0),
+                v.get("height").and_then(Value::as_u64).unwrap_or(0),
+                v.get("type").and_then(Value::as_u64).unwrap_or(0),
+            )
+        })
+    });
+    let source = if video {
+        best_video.unwrap_or(image)
+    } else {
+        image
+    };
+    let mut file = serde_json::Map::new();
+    file.insert("num".into(), num.into());
+    let taken = item
+        .get("taken_at")
+        .or_else(|| post.get("taken_at"))
+        .and_then(Value::as_i64);
+    file.insert("date".into(), crate::filter::source_date_text(taken).into());
+    file.insert(
+        "media_id".into(),
+        item.get("pk").cloned().unwrap_or(Value::Null),
+    );
+    let code = item.get("code").cloned().unwrap_or(Value::Null);
+    file.insert("shortcode".into(), code);
+    file.insert(
+        "display_url".into(),
+        image.get("url").cloned().unwrap_or(Value::Null),
+    );
+    let video_url = if video {
+        best_video.and_then(|v| v.get("url")).cloned()
+    } else {
+        None
+    };
+    file.insert("video_url".into(), video_url.unwrap_or(Value::Null));
+    file.insert(
+        "width".into(),
+        source.get("width").cloned().unwrap_or(0.into()),
+    );
+    file.insert(
+        "height".into(),
+        source.get("height").cloned().unwrap_or(0.into()),
+    );
+    let original = |key: &str| item.get(key).cloned().unwrap_or(0.into());
+    file.insert("width_original".into(), original("original_width"));
+    file.insert("height_original".into(), original("original_height"));
+    for (key, field) in [
+        ("owner", "owner"),
+        ("author", "reshared_story_media_author"),
+        ("subscription", "subscription_media_visibility"),
+        ("audience", "audience"),
+    ] {
+        if let Some(value) = item.get(field) {
+            file.insert(key.into(), value.clone());
+        }
+    }
+    let (filename, extension) = crate::sites::nameext(url);
+    let extension = if extension == "webp" && url.as_str().contains("stp=dst-jpg") {
+        "jpg".to_owned()
+    } else {
+        crate::path_options::map_extension(&extension).unwrap_or(extension)
+    };
+    file.insert("filename".into(), filename.into());
+    file.insert("extension".into(), extension.into());
+    file
+}
+
 fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
     let post_id = identifier(post.get("pk"))?;
     let kind = post.get("media_type").and_then(Value::as_u64);
@@ -1123,6 +1326,9 @@ fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
     } else {
         vec![post]
     };
+    let only_video =
+        children.len() == 1 && children[0].get("media_type").and_then(Value::as_u64) == Some(2);
+    let data = post_keywords(post, code, children.len(), only_video);
     children
         .iter()
         .enumerate()
@@ -1162,7 +1368,7 @@ fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
                 }
             };
             Ok(Media {
-                url,
+                url: url.clone(),
                 job: crate::extract::MediaJob::DirectHttp,
                 handoff: BTreeMap::new(),
                 category: "instagram".into(),
@@ -1220,7 +1426,20 @@ fn parse_post(post: &Value, code: &str) -> Result<Vec<Media>> {
                     reposted_by_id: None,
                     article: None,
                     instance: None,
-                    site_keywords: None,
+                    site_keywords: Some(std::sync::Arc::new(crate::sites::SiteKeywords {
+                        route: &POST,
+                        fields: {
+                            let mut fields = data.clone();
+                            fields.extend(file_keywords(
+                                item,
+                                post,
+                                index + 1,
+                                &url,
+                                kind == Some(2),
+                            ));
+                            fields
+                        },
+                    })),
                     post_id: post_id.clone(),
                     media_id,
                     shortcode: code.into(),
@@ -1285,6 +1504,46 @@ fn identifier(value: Option<&Value>) -> Result<String> {
 #[cfg(test)]
 mod file_option_tests {
     use super::*;
+
+    #[test]
+    fn carousel_files_carry_upstream_keywords() {
+        let data: Value =
+            serde_json::from_slice(include_bytes!("../tests/fixtures/instagram/carousel.json"))
+                .unwrap();
+        let media = parse_value_with(&data, "BA", true).unwrap();
+        let fields = |i: usize| {
+            media[i]
+                .metadata
+                .as_ref()
+                .unwrap()
+                .site_keywords
+                .as_ref()
+                .unwrap()
+                .fields
+                .clone()
+        };
+        let first = fields(0);
+        assert_eq!(first["post_id"], "64");
+        assert_eq!(first["post_shortcode"], "BA");
+        assert_eq!(first["sidecar_media_id"], "64");
+        assert_eq!(first["username"], "fixture_user");
+        assert_eq!(first["description"], "Synthetic public post");
+        assert_eq!(first["date"], "2023-11-14 22:13:20");
+        assert_eq!(first["type"], "post");
+        assert_eq!(first["post_url"], "https://www.instagram.com/p/BA/");
+        assert_eq!(
+            (first["num"].clone(), first["count"].clone()),
+            (1.into(), 3.into())
+        );
+        assert_eq!(first["media_id"], "65");
+        let video = fields(1);
+        assert_eq!(video["video_url"], "https://cdn.example/66.mp4");
+        assert_eq!(
+            (video["width"].clone(), video["height"].clone()),
+            (1920.into(), 1080.into())
+        );
+        assert_eq!(video["extension"], "mp4");
+    }
 
     #[test]
     fn order_files_reverses_and_static_videos_become_photos() {
