@@ -1015,15 +1015,16 @@ overview, upstream's `flash`, `format` and `include` options, and tags/rating/
 score metadata.
 
 **Implemented experimental native Fur Affinity:** submissions, galleries and
-scraps via page scraping with optional `a`/`b` session cookies. Remaining:
-favorites, search, user profile/journals, followed users, upstream's
-`descriptions`, `external`, `include` and `layout` options, and tags/
-description metadata.
+scraps via page scraping with optional `a`/`b` session cookies; favorites,
+search, folders, submissions and followed users followed. Since 2026-11-07
+files carry upstream `_parse_post` keywords (both upstream layouts and the
+site's 2025 markup) with the `descriptions` and `layout` options.
+Remaining: `external` link queueing.
 
 **Implemented experimental native Weasyl:** submissions and user galleries via
-the API with an optional `api-key`. Remaining: folders, journals, favorites,
-characters, multi-file/non-visual submissions, and upstream's `metadata`
-option.
+the API with an optional `api-key`; folders, journals and favorites followed,
+and since 2026-11-07 upstream keywords and the `metadata` option. Remaining:
+characters and multi-file/non-visual submissions.
 
 **Implemented experimental native ArtStation:** projects and user portfolios
 via site JSON with browser-like headers. Listings, challenges, following and
