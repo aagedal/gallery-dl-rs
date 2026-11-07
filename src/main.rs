@@ -901,15 +901,18 @@ async fn run(args: Args) -> Result<()> {
                 .or_else(|| value.get("path").and_then(serde_json::Value::as_str))?;
             Some(gallery_dl_rs::postprocess::expand_path(raw))
         };
+        // Like upstream, files that cannot be opened only produce a warning.
         if args.write_log.is_none()
             && let Some(file) = path("logfile")
+            && let Err(e) = gallery_dl_rs::logfile::start(&file)
         {
-            gallery_dl_rs::logfile::start(&file)?;
+            eprintln!("[gallery-dl][warning] logfile: {e}");
         }
         if args.write_unsupported.is_none()
             && let Some(file) = path("unsupportedfile")
+            && let Err(e) = gallery_dl_rs::unsupported::set_file(&file)
         {
-            gallery_dl_rs::unsupported::set_file(&file)?;
+            eprintln!("[gallery-dl][warning] unsupportedfile: {e}");
         }
         if args.error_file.is_none() {
             args.error_file = path("errorfile");
@@ -2058,6 +2061,15 @@ impl Extractors {
     async fn cookie_jar(&self, settings: &Settings, site: &str) -> Result<CookieJar> {
         if let Some(browser) = &settings.browser {
             return browser.load(site).await;
+        }
+        if let Some(pairs) = &settings.options.inline_cookies {
+            // Netscape lines for the site's domain and its subdomains.
+            let domain = site.trim_start_matches('.');
+            let lines: String = pairs
+                .iter()
+                .map(|(name, value)| format!(".{domain}\tTRUE\t/\tTRUE\t0\t{name}\t{value}\n"))
+                .collect();
+            return CookieJar::parse(&lines);
         }
         match &settings.options.cookies {
             Some(path) => CookieJar::parse(&tokio::fs::read_to_string(path).await?),
@@ -3800,7 +3812,11 @@ async fn resolved_settings(
         ("sleep-429", &args.sleep_429),
     ] {
         if let Some(value) = value {
-            gallery_dl_rs::sleep::SleepRange::parse(value)?;
+            if key == "sleep-request" {
+                gallery_dl_rs::sleep::SleepRange::parse(value)?;
+            } else {
+                gallery_dl_rs::sleep::RetrySleep::from_value(&value.as_str().into())?;
+            }
             Arc::make_mut(site_options.get_or_insert_with(Default::default))
                 .insert(key.into(), value.clone().into());
         }
@@ -3988,6 +4004,7 @@ async fn resolved_settings(
         },
         directory_conditions: None,
         cookies: args.cookies.clone(),
+        inline_cookies: None,
         browser_cookies: None,
         retweets: None,
         quoted: None,

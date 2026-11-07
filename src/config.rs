@@ -213,6 +213,9 @@ pub struct Options {
     /// Ordered `(filter, components)` pairs from an object-valued `directory`.
     pub directory_conditions: Option<Vec<(String, Vec<String>)>>,
     pub cookies: Option<PathBuf>,
+    /// Upstream `cookies` given as a `{"name": "value"}` object, set for the
+    /// site's cookie domain.
+    pub inline_cookies: Option<std::sync::Arc<Vec<(String, String)>>>,
     /// Browser cookie specification (`firefox:PATH`, `helium:Profile 1`, ...)
     /// selected by an upstream-style `cookies` array.
     /// Mutually exclusive with the cookie file during scope resolution.
@@ -472,17 +475,24 @@ impl Options {
             } else {
                 self.directory_conditions.clone()
             },
-            cookies: if overrides.browser_cookies.is_some() {
+            cookies: if overrides.browser_cookies.is_some() || overrides.inline_cookies.is_some() {
                 None
             } else {
                 overrides.cookies.clone().or_else(|| self.cookies.clone())
             },
             browser_cookies: if overrides.browser_cookies.is_some() {
                 overrides.browser_cookies.clone()
-            } else if overrides.cookies.is_some() {
+            } else if overrides.cookies.is_some() || overrides.inline_cookies.is_some() {
                 None
             } else {
                 self.browser_cookies.clone()
+            },
+            inline_cookies: if overrides.inline_cookies.is_some() {
+                overrides.inline_cookies.clone()
+            } else if overrides.cookies.is_some() || overrides.browser_cookies.is_some() {
+                None
+            } else {
+                self.inline_cookies.clone()
             },
             proxy: overrides.proxy.clone().or_else(|| self.proxy.clone()),
             user_agent: overrides
@@ -1475,20 +1485,6 @@ impl Config {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
                     return Err(error("native configuration category must be a JSON object"));
                 }
-                if !matches!(name, "danbooru" | "e621")
-                    && extractor
-                        .get(name)
-                        .and_then(Value::as_object)
-                        .is_some_and(|settings| {
-                            ["tag", "artist", "artist-search"]
-                                .iter()
-                                .any(|key| settings.contains_key(*key))
-                        })
-                {
-                    return Err(error(
-                        "native class settings are only supported for danbooru and e621",
-                    ));
-                }
             }
         }
         let mut raw_classes = Vec::new();
@@ -1941,14 +1937,13 @@ impl Config {
         .into_iter()
         .chain(site_scopes)
         {
-            if !matches!(name, "danbooru" | "e621")
-                && (settings.tag.is_some()
-                    || settings.artist.is_some()
-                    || settings.artist_search.is_some())
-            {
-                return Err(error(
-                    "native class settings are only supported for danbooru and e621",
-                ));
+            settings.normalize();
+            // Settings native extractors of this category do not use are
+            // ignored (upstream configurations set them for every site).
+            if !matches!(name, "danbooru" | "e621") {
+                settings.tag = None;
+                settings.artist = None;
+                settings.artist_search = None;
             }
             if !matches!(
                 name,
@@ -1960,33 +1955,21 @@ impl Config {
                     | "gelbooru"
                     | "safebooru"
             ) && !crate::sites::site(name).is_some_and(|site| site.api_key)
-                && settings.api_key.0.is_some()
             {
-                return Err(error(
-                    "native configuration api-key is only supported for tumblr, flickr, wallhaven, weasyl, pixeldrain, gelbooru and safebooru",
-                ));
+                settings.api_key.0 = None;
             }
-            if !matches!(name, "danbooru" | "e621") && settings.threshold.0.is_some() {
-                return Err(error(
-                    "native configuration threshold is only supported for danbooru and e621",
-                ));
+            if !matches!(name, "danbooru" | "e621") {
+                settings.threshold.0 = None;
             }
-            if !matches!(name, "danbooru" | "e621" | "bluesky" | "kemono" | "coomer")
-                && (settings.username.0.is_some() || settings.password.0.is_some())
-            {
-                return Err(error(
-                    "native configuration username/password are only supported for danbooru, e621, bluesky, kemono and coomer",
-                ));
+            if !matches!(name, "danbooru" | "e621" | "bluesky" | "kemono" | "coomer") {
+                settings.username.0 = None;
+                settings.password.0 = None;
             }
-            if !matches!(name, "gelbooru" | "safebooru") && settings.user_id.0.is_some() {
-                return Err(error(
-                    "native configuration user-id is only supported for gelbooru and safebooru",
-                ));
+            if !matches!(name, "gelbooru" | "safebooru") {
+                settings.user_id.0 = None;
             }
-            if name != "bluesky" && settings.api_server.0.is_some() {
-                return Err(error(
-                    "native configuration api-server is only supported for bluesky",
-                ));
+            if name != "bluesky" {
+                settings.api_server.0 = None;
             }
             let bluesky_endpoint = if name == "bluesky" {
                 match settings.endpoint.0.take() {
@@ -2027,27 +2010,18 @@ impl Config {
             } else {
                 None
             };
-            if !matches!(name, "mastodon.social" | "pawoo" | "baraag" | "tumblr")
-                && settings.access_token.0.is_some()
-            {
-                return Err(error(
-                    "native configuration access-token requires a tumblr, mastodon.social, pawoo or baraag scope",
-                ));
+            // Tokens stay bound to the instance scopes that use them.
+            if !matches!(name, "mastodon.social" | "pawoo" | "baraag" | "tumblr") {
+                settings.access_token.0 = None;
             }
-            if !matches!(name, "pixiv" | "pixiv-novel" | "reddit")
-                && settings.refresh_token.0.is_some()
-            {
-                return Err(error(
-                    "native configuration refresh-token is only supported for pixiv, pixiv-novel or reddit",
-                ));
+            if !matches!(name, "pixiv" | "pixiv-novel" | "reddit" | "deviantart") {
+                settings.refresh_token.0 = None;
             }
-            if !matches!(name, "deviantart" | "reddit") && settings.client_id.0.is_some()
-                || name != "deviantart" && settings.client_secret.0.is_some()
-            {
-                return Err(error(
-                    "native configuration client-id is only supported for deviantart or reddit, \
-                     and client-secret for deviantart",
-                ));
+            if !matches!(name, "deviantart" | "reddit") {
+                settings.client_id.0 = None;
+            }
+            if name != "deviantart" {
+                settings.client_secret.0 = None;
             }
             if name == "deviantart"
                 && settings
@@ -2258,7 +2232,45 @@ impl Config {
 }
 
 impl RawOptions {
-    fn resolve(self, directory: &Path, _parent_keywords: &[String]) -> Result<Options> {
+    /// Upstream treats a scoped `null` as "use the default". Credentials
+    /// become explicitly empty, so a parent scope's secret is never
+    /// inherited; other settings inherit. `cursor: true` is the default.
+    fn normalize(&mut self) {
+        let null = |field: &Field| matches!(field.0, Some(Value::Null));
+        for field in [
+            &mut self.cookies,
+            &mut self.proxy,
+            &mut self.user_agent,
+            &mut self.archive,
+            &mut self.max_posts,
+        ] {
+            if null(field) {
+                field.0 = None;
+            }
+        }
+        for field in [
+            &mut self.username,
+            &mut self.password,
+            &mut self.api_key,
+            &mut self.refresh_token,
+            &mut self.client_id,
+            &mut self.client_secret,
+            &mut self.user_id,
+        ] {
+            if null(field) {
+                field.0 = Some(Value::String(String::new()));
+            }
+        }
+        if null(&self.access_token) {
+            self.access_token.0 = Some(Value::Bool(false));
+        }
+        if matches!(self.cursor.0, Some(Value::Bool(true))) {
+            self.cursor.0 = None;
+        }
+    }
+
+    fn resolve(mut self, directory: &Path, _parent_keywords: &[String]) -> Result<Options> {
+        self.normalize();
         let primary_filter = filter_clauses(self.file_filter, "file-filter")?;
         let alias_filter = filter_clauses(self.image_filter, "image-filter")?;
         let file_filter = match primary_filter {
@@ -2696,6 +2708,7 @@ impl RawOptions {
         };
         let api_key = match self.api_key.0 {
             None => None,
+            Some(Value::String(key)) if key.is_empty() => Some(key),
             Some(Value::String(key))
                 if (1..=128).contains(&key.len())
                     && key.bytes().all(|b| b.is_ascii_alphanumeric()) =>
@@ -2710,6 +2723,7 @@ impl RawOptions {
         };
         let refresh_token = match self.refresh_token.0 {
             None => None,
+            Some(Value::String(token)) if token.is_empty() => Some(token),
             Some(Value::String(token))
                 if (1..=256).contains(&token.len())
                     && token
@@ -2728,6 +2742,7 @@ impl RawOptions {
         // Reddit identifiers with '-' and '_'.
         let credential = |field: Field, name: &str, identifier: bool| match field.0 {
             None => Ok(None),
+            Some(Value::String(value)) if value.is_empty() => Ok(Some(value)),
             Some(Value::String(value))
                 if (1..=128).contains(&value.len())
                     && value.bytes().all(|b| {
@@ -2867,6 +2882,29 @@ impl RawOptions {
         };
         let user_agent = network_string(self.user_agent)?;
         NetworkOptions::new(proxy.clone(), user_agent.clone())?;
+        let inline_cookies = match &self.cookies.0 {
+            Some(Value::Object(values)) => {
+                let invalid = || error("native configuration cookies must map names to strings");
+                let mut pairs = Vec::new();
+                for (name, value) in values {
+                    let value = match value {
+                        Value::String(value) => value.clone(),
+                        Value::Number(value) => value.to_string(),
+                        _ => return Err(invalid()),
+                    };
+                    if name.is_empty()
+                        || name.contains(['\t', '\n', '\r', ';', '='])
+                        || value.contains(['\t', '\n', '\r'])
+                    {
+                        return Err(invalid());
+                    }
+                    pairs.push((name.clone(), value));
+                }
+                self.cookies.0 = None;
+                Some(std::sync::Arc::new(pairs))
+            }
+            _ => None,
+        };
         let (cookies, browser_cookies) = cookie_source(self.cookies, directory)?;
         Ok(Options {
             init: self
@@ -2888,6 +2926,7 @@ impl RawOptions {
             user_agent,
             base_directory: path(self.base_directory, directory, "base-directory")?,
             cookies,
+            inline_cookies,
             browser_cookies,
             archive: archive_path(self.archive, directory)?,
             filename,
@@ -2990,6 +3029,8 @@ fn range_spec(field: Field, name: &str) -> Result<Option<String>> {
         ))
     };
     let spec = match value {
+        // `null`, like an empty range, selects everything.
+        Value::Null => ":".into(),
         Value::String(spec) if spec.is_empty() => ":".into(),
         Value::String(spec) => spec,
         Value::Array(values) if values.is_empty() => ":".into(),
@@ -3014,6 +3055,7 @@ fn filter_clauses(field: Field, name: &str) -> Result<Option<Vec<String>>> {
         return Ok(None);
     };
     let clauses = match value {
+        Value::Null => Vec::new(),
         Value::String(value) if value.is_empty() => Vec::new(),
         Value::String(value) => vec![value],
         Value::Array(values) if values.len() <= 32 => values

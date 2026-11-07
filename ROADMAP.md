@@ -1726,6 +1726,15 @@ environment variables. The `output` section's `logfile`, `unsupportedfile`, `err
 `{"path": ...}`), `mode: null`/`false` and `skip: false` apply.
 `archive` also accepts upstream's list-of-segments form with `{category}`,
 and archive parent directories are created on demand.
+Since 2026-11-07 both of upstream's sample configurations
+(`docs/gallery-dl.conf`, `docs/gallery-dl-example.conf`) load: a scoped
+`null` means the default (credentials become explicitly empty rather than
+inherited), credential and class settings for categories that do not use
+them natively are ignored instead of rejected, `cookies` may be a
+`{"name": "value"}` object, `sleep-retries`/`sleep-429` accept
+`lin[:START[:MAX]]=`/`exp[:BASE[:START[:MAX]]]=` backoff, `cursor: true` is
+the default, and unopenable `output` files only warn. Per-subcategory
+settings (`CATEGORY.SUBCATEGORY.option`) still apply only to Danbooru/e621.
 Registry sites apply user `keywords`/`keywords-global` (with `keywords-eval`
 format strings), `metadata-url` and `metadata-version`; `cookies-update` with
 a path writes session cookies there (rewriting the input file with `true` is

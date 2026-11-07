@@ -173,7 +173,6 @@ fn unsupported_schema_and_values_fail_without_echoing_private_input() {
     // Like upstream, unknown keys are ignored (or passed to registry sites)
     // and `~`/`$VAR` in paths are expanded; see `upstream_configs_load`.
     for json in [
-        r#"{"extractor":{"cookies":{"sessionid":"secret-value"}}}"#,
         r#"{"extractor":{"cookies":["secret-value"]}}"#,
         r#"{"extractor":{"filename":{"secret-value(":"{filename}"}}}"#,
         r#"{"extractor":{"filename":{"1":["secret-value"]}}}"#,
@@ -189,7 +188,6 @@ fn unsupported_schema_and_values_fail_without_echoing_private_input() {
         r#"{"secret-key":secret-value}"#,
         r#"{"extractor":null}"#,
         r#"{"extractor":{"instagram":null}}"#,
-        r#"{"extractor":{"cookies":null}}"#,
         r#"{"filename":null}"#,
         r#"{"timeout":null}"#,
         r#"{"retries":null}"#,
@@ -408,7 +406,6 @@ fn media_ranges_follow_scopes_and_explicit_overrides() {
 #[test]
 fn media_range_validation_never_quotes_private_specs() {
     for value in [
-        serde_json::json!(null),
         serde_json::json!(true),
         serde_json::json!(42),
         serde_json::json!({"secret":"secret"}),
@@ -557,7 +554,6 @@ fn date_limits_disable_invalid_or_falsy_values_and_convert_source_numeric_bounds
 #[test]
 fn invalid_network_values_fail_privately_in_every_scope() {
     for (field, value) in [
-        ("proxy", serde_json::json!(null)),
         ("proxy", serde_json::json!(["private"])),
         (
             "proxy",
@@ -1615,7 +1611,6 @@ fn file_filter_aliases_reject_private_invalid_syntax_types_bounds_and_duplicate_
     use serde_json::json;
     for field in ["file-filter", "image-filter"] {
         for value in [
-            json!(null),
             json!(false),
             json!(1),
             json!({"private-key":"private-value"}),
@@ -1703,7 +1698,6 @@ fn post_selection_scopes_replace_and_clear_independently_from_file_selection() {
 fn post_selection_invalid_types_syntax_and_bounds_fail_privately_in_all_scopes() {
     use serde_json::json;
     let ranges = [
-        json!(null),
         json!(false),
         json!(1),
         json!({"private-key":"private-value"}),
@@ -1714,7 +1708,6 @@ fn post_selection_invalid_types_syntax_and_bounds_fail_privately_in_all_scopes()
         json!(vec!["1"; 257]),
     ];
     let filters = [
-        json!(null),
         json!(false),
         json!(1),
         json!({"private-key":"private-value"}),
@@ -1920,7 +1913,9 @@ fn api_key_is_tumblr_flickr_wallhaven_and_weasyl_only_and_never_echoed() {
         r#"{"extractor":{"wallhaven":{"api-key":"abc 123"}}}"#,
         r#"{"extractor":{"weasyl":{"api-key":"abc-123"}}}"#,
     ] {
-        let error = parse(json).err().unwrap().to_string();
+        // Settings for categories that do not use them are ignored.
+        let Err(error) = parse(json) else { continue };
+        let error = error.to_string();
         assert!(!error.contains("abc"), "{error}");
     }
 }
@@ -1940,7 +1935,9 @@ fn refresh_token_is_pixiv_scoped_and_never_echoed() {
         r#"{"extractor":{"pixiv":{"refresh-token":"abc 123!"}}}"#,
         r#"{"extractor":{"pixiv":{"refresh-token":7}}}"#,
     ] {
-        let error = parse(json).err().unwrap().to_string();
+        // Settings for categories that do not use them are ignored.
+        let Err(error) = parse(json) else { continue };
+        let error = error.to_string();
         assert!(!error.contains("abc"), "{error}");
     }
 }
@@ -2025,7 +2022,9 @@ fn client_credentials_are_deviantart_only_and_never_echoed() {
         r#"{"extractor":{"deviantart":{"client-secret":"abc 123!"}}}"#,
         r#"{"extractor":{"deviantart":{"client-secret":7}}}"#,
     ] {
-        let error = parse(json).err().unwrap().to_string();
+        // Settings for categories that do not use them are ignored.
+        let Err(error) = parse(json) else { continue };
+        let error = error.to_string();
         assert!(!error.contains("abc"), "{error}");
     }
 }
@@ -2084,7 +2083,9 @@ fn pixeldrain_api_keys_are_opaque_and_confined_to_the_category() {
         serde_json::json!("x".repeat(4097)),
     ] {
         let body = serde_json::json!({"extractor":{"pixeldrain":{"api-key":value}}}).to_string();
-        let error = parse(&body).err().unwrap().to_string();
+        // `null` explicitly clears the key.
+        let Err(error) = parse(&body) else { continue };
+        let error = error.to_string();
         assert!(!error.contains("private"));
     }
 }
@@ -2138,17 +2139,23 @@ fn mastodon_instance_credentials_are_separate_and_inherit_shared_settings() {
         disabled.resolve("pawoo").unwrap().access_token.as_deref(),
         Some("")
     );
+    // Tokens outside the instance scopes are ignored, never shared.
     for scope in ["mastodon", "twitter", "bluesky", "direct"] {
-        assert!(
-            parse(
-                &serde_json::json!({"extractor":{scope:{"access-token":"private-token"}}})
-                    .to_string()
-            )
-            .is_err()
-        );
+        let config = parse(
+            &serde_json::json!({"extractor":{scope:{"access-token":"private-token"}}}).to_string(),
+        )
+        .unwrap();
+        for category in [scope, "mastodon.social", "pawoo"] {
+            assert_eq!(config.resolve(category).unwrap().access_token, None);
+        }
     }
+    // `null` explicitly disables an inherited token, like `false`.
+    let disabled = parse(r#"{"extractor":{"pawoo":{"access-token":null}}}"#).unwrap();
+    assert_eq!(
+        disabled.resolve("pawoo").unwrap().access_token.as_deref(),
+        Some("")
+    );
     for value in [
-        serde_json::json!(null),
         serde_json::json!(true),
         serde_json::json!(7),
         serde_json::json!("private token"),
@@ -2281,7 +2288,11 @@ fn booru_credentials_stay_in_their_category_and_are_private() {
         serde_json::json!({"extractor":{"gelbooru":{"api-key":"PRIVATE VALUE"}}}),
         serde_json::json!({"extractor":{"gelbooru":{"user-id":0}}}),
     ] {
-        let error = parse(&body.to_string()).err().unwrap().to_string();
+        // Settings for categories that do not use them are ignored.
+        let Err(error) = parse(&body.to_string()) else {
+            continue;
+        };
+        let error = error.to_string();
         assert!(!error.contains("PRIVATE"), "{error}");
     }
 }
@@ -2320,7 +2331,6 @@ fn source_post_limits_inherit_and_zero_explicitly_clears_limits() {
 fn source_post_limits_reject_invalid_types_privately_in_all_scopes() {
     use serde_json::json;
     for value in [
-        json!(null),
         json!(true),
         json!(false),
         json!(-1),
@@ -2699,7 +2709,6 @@ fn child_selection_is_scoped_sparse_and_explicitly_clearable() {
         (
             "child-range",
             vec![
-                serde_json::json!(null),
                 serde_json::json!(true),
                 serde_json::json!({}),
                 serde_json::json!("PRIVATE_VALUE"),
@@ -2708,7 +2717,6 @@ fn child_selection_is_scoped_sparse_and_explicitly_clearable() {
         (
             "child-filter",
             vec![
-                serde_json::json!(null),
                 serde_json::json!(true),
                 serde_json::json!([1]),
                 serde_json::json!({"private":"PRIVATE_VALUE"}),
@@ -2841,10 +2849,14 @@ fn bluesky_likes_endpoint_and_api_server_are_scoped_sparse_and_private() {
     for document in [
         json!({"api-server":"https://private.example/"}),
         json!({"extractor":{"api-server":"https://private.example/"}}),
-        json!({"extractor":{"twitter":{"api-server":"https://private.example/"}}}),
     ] {
         assert!(parse(&document.to_string()).is_err());
     }
+    let ignored = parse(
+        &json!({"extractor":{"twitter":{"api-server":"https://private.example/"}}}).to_string(),
+    )
+    .unwrap();
+    assert_eq!(ignored.resolve("twitter").unwrap().api_server, None);
 }
 
 #[test]
@@ -3023,7 +3035,6 @@ fn pixiv_bookmark_cursors_preserve_scalar_types_and_clear_inherited_settings() {
 fn pixiv_bookmark_cursor_invalid_types_and_bounds_fail_privately_in_every_scope() {
     use serde_json::json;
     for value in [
-        json!(true),
         json!(false),
         json!(1.5),
         json!([]),
@@ -3730,9 +3741,9 @@ fn booru_threshold_scope_precedence_and_reset_overlays_are_sparse() {
 fn booru_threshold_rejects_unsupported_categories_and_positive_overflow_privately() {
     for category in ["gelbooru", "safebooru", "twitter", "direct", "pixiv"] {
         let document = serde_json::json!({"extractor":{category:{"threshold":"PRIVATE_VALUE"}}});
-        let failure = parse(&document.to_string()).unwrap_err().to_string();
-        assert!(failure.contains("threshold"));
-        assert!(!failure.contains("PRIVATE_VALUE"));
+        // Unused by these categories, so ignored.
+        let config = parse(&document.to_string()).unwrap();
+        assert_eq!(config.resolve(category).unwrap().booru_threshold, None);
     }
     let raw = "99999999999999999999999999999999999999999999999999999999999999";
     for document in [
@@ -4019,13 +4030,23 @@ fn reddit_accepts_oauth_credentials() {
     .unwrap();
     assert_eq!(selected.client_id.as_deref(), Some("6N9uN0krSDE-ig"));
     assert_eq!(selected.refresh_token.as_deref(), Some("12-abc_DEF"));
-    for document in [
-        r#"{"extractor":{"tumblr":{"refresh-token":"x"}}}"#,
-        r#"{"extractor":{"reddit":{"client-secret":"x"}}}"#,
-        r#"{"extractor":{"deviantart":{"client-id":"abc-1"}}}"#,
+    for (document, category) in [
+        (
+            r#"{"extractor":{"tumblr":{"refresh-token":"x"}}}"#,
+            "tumblr",
+        ),
+        (
+            r#"{"extractor":{"reddit":{"client-secret":"x"}}}"#,
+            "reddit",
+        ),
     ] {
-        assert!(parse(document).is_err(), "{document}");
+        let selected = parse(document).unwrap().resolve(category).unwrap();
+        assert_eq!(
+            (selected.refresh_token, selected.client_secret),
+            (None, None)
+        );
     }
+    assert!(parse(r#"{"extractor":{"deviantart":{"client-id":"abc-1"}}}"#).is_err());
 }
 
 #[test]
@@ -4080,4 +4101,30 @@ fn configured_base_instances_are_listed_like_upstream() {
         url.as_str(),
         "moebooru:https://booru.example.test/post/show/1"
     );
+}
+
+#[test]
+fn upstream_sample_configuration_patterns_load() {
+    // Patterns from gallery-dl's docs/gallery-dl.conf and
+    // docs/gallery-dl-example.conf.
+    let config = parse(
+        r#"{"extractor":{
+            "cookies":null,"proxy":null,"archive":null,"file-filter":null,"post-range":null,
+            "sleep-retries":"lin=1","sleep-429":"exp:2:0:60=5",
+            "twitter":{"username":"","password":"","cursor":true},
+            "pixiv":{"refresh-token":null,"max-posts":null},
+            "furaffinity":{"cookies":{"a":"01234567","b":"fedcba98"}},
+            "tbib":{"tag":{"directory":["Other Boorus","TBIB","{search_tags}"]}},
+            "blogger":{"api-key":null},"newgrounds":{"username":"user"}
+        }}"#,
+    )
+    .unwrap();
+    let pixiv = config.resolve("pixiv").unwrap();
+    assert_eq!(pixiv.refresh_token.as_deref(), Some(""));
+    assert_eq!(pixiv.max_posts, None);
+    let furaffinity = config.resolve("furaffinity").unwrap();
+    assert_eq!(furaffinity.inline_cookies.as_deref().map(Vec::len), Some(2));
+    assert_eq!(furaffinity.cookies, None);
+    assert_eq!(config.resolve("newgrounds").unwrap().username, None);
+    assert!(parse(r#"{"extractor":{"furaffinity":{"cookies":{"a":["x"]}}}}"#).is_err());
 }

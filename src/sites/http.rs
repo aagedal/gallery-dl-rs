@@ -44,8 +44,8 @@ pub struct Http {
     ytdl_cookies: Option<crate::cookies::YtdlCookies>,
     /// Upstream `sleep-request`, `sleep-retries` and `sleep-429`.
     sleep_request: Option<SleepRange>,
-    sleep_retries: Option<SleepRange>,
-    sleep_429: Option<SleepRange>,
+    sleep_retries: Option<crate::sleep::RetrySleep>,
+    sleep_429: Option<crate::sleep::RetrySleep>,
 }
 
 /// Upstream `--print-traffic`: show requests and responses on stderr.
@@ -273,10 +273,18 @@ impl Http {
                 })
             })
         };
+        let retry = |key: &str| {
+            self.option(key).and_then(|value| {
+                crate::sleep::RetrySleep::from_value(value).unwrap_or_else(|_| {
+                    eprintln!("warning: invalid '{key}' value; ignoring it");
+                    None
+                })
+            })
+        };
         let (request, retries, too_many) = (
             sleep("sleep-request"),
-            sleep("sleep-retries"),
-            sleep("sleep-429"),
+            retry("sleep-retries"),
+            retry("sleep-429"),
         );
         self.sleep_request = request;
         self.sleep_retries = retries;
@@ -702,9 +710,10 @@ impl Http {
                         } else {
                             self.sleep_retries
                         };
-                        tokio::time::sleep(
-                            configured.map_or_else(|| backoff(attempt), |range| range.sample()),
-                        )
+                        tokio::time::sleep(configured.map_or_else(
+                            || backoff(attempt),
+                            |sleep| sleep.delay(u32::from(attempt) + 1),
+                        ))
                         .await;
                     }
                     Err(failure) => return Err(failure.error),
