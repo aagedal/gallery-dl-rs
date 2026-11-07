@@ -1154,7 +1154,7 @@ impl ArtStation {
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
         let mut post = None;
         let mut route = &USER;
-        let mut metadata = Metadata::Other(Map::new());
+        let metadata;
         let path = match target(url) {
             Ok(Target::User { user }) => {
                 metadata = Metadata::User(user.clone());

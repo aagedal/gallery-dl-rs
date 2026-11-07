@@ -2532,6 +2532,11 @@ fn extract_input<'a>(
                             )
                             .and_then(|native| {
                                 native
+                                    .with_post_options(
+                                        gallery_dl_rs::furaffinity::PostOptions::from_options(
+                                            options.site_options.as_deref(),
+                                        ),
+                                    )
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
