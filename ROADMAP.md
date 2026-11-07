@@ -1162,7 +1162,7 @@ than Python runtime datetime/sentinel objects. Novel runtime fixtures exercise
 conversion/arithmetic results through later file and child counter increments.
 Keyword-driven pre-download selection and request/text-fetch changes remain open.
 Remaining: PostgreSQL processor archives and further default-key coverage,
-additional encodings/open modes and formatter dialects, Unicode
+additional encodings/open modes, the `\fJ` (Jinja) and `\fM` (Python module) formatter dialects, Unicode
 decimal/underscore-float parsing, nested-container sorting, runtime Python
 datetime/sentinel object identity, arbitrary native filename fields,
 keyword-driven archive identity and pre-download selection changes, further
@@ -1596,6 +1596,12 @@ path) or `expression` (`mode: eval`) in an external `python3`
 (`$GALLERY_DL_PYTHON`), exchanging the keywords as JSON; `archive` works.
 `compression: lzma` writes LZMA (method 14) entries built natively and
 copied into the archive, readable by Python's `zipfile` (2026-10-28).
+
+**Implemented format string dialects, 2026-11-07:** filename, directory
+and postprocessor templates accept upstream's `\fE` (expression), `\fF`
+(f-string), `\fT`/`\fTF` (template file) and `\fS` formats, evaluated by
+the native expression engine (the same Python subset as filters, which now
+also accepts `start:stop:step` slices). `\fJ` and `\fM` need Python.
 
 **Implemented extraction options, 2026-11-07:** `path-convert`,
 `file-unique`/`image-unique`, `child-unique`/`chapter-unique` and
