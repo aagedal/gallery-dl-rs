@@ -3251,6 +3251,80 @@ fn extract_input<'a>(
                 .boxed(),
             None => input,
         };
+        // Upstream Fur Affinity `external`: queue links of each description
+        // after its post.
+        let input = if matches!(extractor, Extractor::Native)
+            && extract::social_site(&url) == Some("furaffinity")
+            && settings
+                .get(settings_key(&url, extractor))
+                .and_then(|s| s.options.site_options.as_deref())
+                .and_then(|o| o.get("external"))
+                .is_some_and(gallery_dl_rs::postprocess::truthy)
+        {
+            let queue = child_queue(extractors, backend, extractor, settings);
+            let description = Arc::new(std::sync::Mutex::new(None::<String>));
+            input
+                .flat_map(move |event| {
+                    let mut children = Vec::new();
+                    match &event {
+                        Ok(ExtractionEvent::Media(media)) => {
+                            let text = media
+                                .metadata
+                                .as_ref()
+                                .and_then(|m| m.site_keywords.as_ref())
+                                .and_then(|k| k.fields.get("_description"))
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_owned);
+                            *description.lock().unwrap_or_else(|e| e.into_inner()) = text;
+                        }
+                        Ok(ExtractionEvent::EndPost) => {
+                            let text = description
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .take()
+                                .unwrap_or_default();
+                            for part in text.split("href=\"http").skip(1) {
+                                let Some(end) = part.find('"') else { continue };
+                                let link = format!("http{}", &part[..end]);
+                                let Ok(mut link) = url::Url::parse(&link) else { continue };
+                                // Current markup wraps outbound links.
+                                if link.path().starts_with("/externalurl")
+                                    && let Some(target) = link
+                                        .query_pairs()
+                                        .find(|(key, _)| key == "q")
+                                        .and_then(|(_, value)| url::Url::parse(&value).ok())
+                                {
+                                    link = target;
+                                }
+                                let raw = link.to_string();
+                                let Some(events) = queue(link) else {
+                                    // Like registry sites: recorded, then skipped.
+                                    gallery_dl_rs::unsupported::record(&raw);
+                                    continue;
+                                };
+                                {
+                                    children.push(event::child_job(
+                                        event::ChildMetadata::from_raw(
+                                            "furaffinity",
+                                            "post",
+                                            &serde_json::Map::new(),
+                                        )
+                                        .with_url(&raw),
+                                        move || events,
+                                    ));
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    stream::iter([event])
+                        .chain(stream::iter(children).flatten())
+                        .boxed()
+                })
+                .boxed()
+        } else {
+            input
+        };
         // Files of single-format dedicated extractors carry their job's
         // upstream class (`subcategory`); child jobs use their own URL's.
         let input = if matches!(extractor, Extractor::Native) && dedicated_class(&url).is_some() {

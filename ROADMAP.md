@@ -1030,8 +1030,10 @@ score metadata.
 scraps via page scraping with optional `a`/`b` session cookies; favorites,
 search, folders, submissions and followed users followed. Since 2026-11-07
 files carry upstream `_parse_post` keywords (both upstream layouts and the
-site's 2025 markup) with the `descriptions` and `layout` options.
-Remaining: `external` link queueing.
+site's 2025 markup) with the `descriptions` and `layout` options, and
+`external` queues description links after each post (unwrapping the
+site's `/externalurl/?q=` redirects; unsupported links are recorded by
+`--write-unsupported`).
 
 **Implemented experimental native Weasyl:** submissions and user galleries via
 the API with an optional `api-key`; folders, journals and favorites followed,
@@ -1812,9 +1814,7 @@ replaced). Exit codes follow upstream's
 bit flags: 4 for download and extraction errors, 8 for bot challenges, 16 for
 authentication, 32 for format errors, 64 for unsupported URLs and 128 for
 local file errors (extraction errors are classified by their messages).
-**Remaining divergences:** direct links keep `direct/<digest>_NAME` paths
-(request-identity separation) rather than `directlink/{domain}_{path}_NAME`;
-`metadata-extractor`, `parent-*`, `category-transfer`,
+**Remaining divergences:** `metadata-extractor`, `parent-*`, `category-transfer`,
 `file-unique`/`child-unique`, `path-extended`/`path-convert`,
 `tls12: false` (TLS 1.3 only) and `truststore` (system certificates) apply
 to every native client; `ciphers` restricts connections to the listed
