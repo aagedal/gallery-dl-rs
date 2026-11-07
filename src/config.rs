@@ -762,6 +762,74 @@ pub fn set_format(path: &Path, format: Format) {
         .push((path.to_path_buf(), format));
 }
 
+/// Upstream `subconfigs`: load each listed file (a path or list of paths,
+/// with `~` and variables expanded) after the current one, merging its values
+/// over it; subconfigs may name further subconfigs.
+fn with_subconfigs(bytes: Vec<u8>, depth: usize) -> Result<Vec<u8>> {
+    let normalized = crate::source_date_json::normalize(&bytes);
+    let Ok(Value::Object(mut root)) =
+        serde_json::from_slice::<Value>(normalized.as_deref().unwrap_or(&bytes))
+    else {
+        return Ok(bytes);
+    };
+    let Some(subconfigs) = root.remove("subconfigs") else {
+        return Ok(bytes);
+    };
+    if depth >= 8 {
+        return Err(error("native configuration subconfigs nest too deeply"));
+    }
+    let paths = match subconfigs {
+        Value::String(path) => vec![path],
+        Value::Array(paths) => paths
+            .into_iter()
+            .map(|path| match path {
+                Value::String(path) => Ok(path),
+                _ => Err(error("native configuration subconfigs must be paths")),
+            })
+            .collect::<Result<_>>()?,
+        Value::Null => Vec::new(),
+        _ => return Err(error("native configuration subconfigs must be paths")),
+    };
+    let mut root = Value::Object(root);
+    for path in paths {
+        let path = std::path::absolute(crate::postprocess::expand_path(&path))
+            .map_err(|_| error("cannot resolve native configuration subconfig"))?;
+        let mut bytes = Vec::new();
+        std::fs::File::open(&path)
+            .and_then(|file| {
+                use std::io::Read;
+                file.take((MAX_CONFIG_BYTES + 1) as u64)
+                    .read_to_end(&mut bytes)
+            })
+            .map_err(|_| error("cannot read native configuration subconfig"))?;
+        let bytes = with_subconfigs(to_json(&path, bytes)?, depth + 1)?;
+        let normalized = crate::source_date_json::normalize(&bytes);
+        let sub: Value = serde_json::from_slice(normalized.as_deref().unwrap_or(&bytes))
+            .map_err(|_| error("invalid native configuration subconfig"))?;
+        combine(&mut root, sub);
+    }
+    serde_json::to_vec(&root).map_err(|_| error("invalid native configuration"))
+}
+
+/// Upstream `util.combine_dict`: nested objects merge, other values replace.
+fn combine(base: &mut Value, other: Value) {
+    match (base, other) {
+        (Value::Object(base), Value::Object(other)) => {
+            for (key, value) in other {
+                match base.get_mut(&key) {
+                    Some(existing @ Value::Object(_)) if value.is_object() => {
+                        combine(existing, value)
+                    }
+                    _ => {
+                        base.insert(key, value);
+                    }
+                }
+            }
+        }
+        (base, other) => *base = other,
+    }
+}
+
 /// Convert YAML and TOML configuration files to JSON. The format is declared
 /// with [`set_format`] or follows the `.yaml`/`.yml`/`.toml` extension.
 fn to_json(path: &Path, bytes: Vec<u8>) -> Result<Vec<u8>> {
@@ -1259,7 +1327,7 @@ impl Config {
             .read_to_end(&mut bytes)
             .await
             .map_err(|_| error("cannot read native configuration"))?;
-        let bytes = to_json(&absolute, bytes)?;
+        let bytes = with_subconfigs(to_json(&absolute, bytes)?, 0)?;
         Self::parse(&bytes, &parent)
     }
 
@@ -1289,7 +1357,7 @@ impl Config {
             .read_to_end(&mut bytes)
             .await
             .map_err(|_| error("cannot read native configuration"))?;
-        let bytes = to_json(&absolute, bytes)?;
+        let bytes = with_subconfigs(to_json(&absolute, bytes)?, 0)?;
         Self::parse_with_options(&bytes, &parent, options)
     }
 
@@ -3343,6 +3411,38 @@ fn value_truthy(value: &Value) -> bool {
 
 #[cfg(test)]
 mod site_scope_tests {
+    #[tokio::test]
+    async fn subconfigs_merge_over_the_main_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sub.json");
+        let nested = dir.path().join("nested.json");
+        std::fs::write(
+            &sub,
+            serde_json::json!({
+                "subconfigs": nested.to_str().unwrap(),
+                "extractor": {"twitter": {"retries": 5}}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(&nested, br#"{"extractor":{"twitter":{"timeout":7}}}"#).unwrap();
+        let main = dir.path().join("main.json");
+        std::fs::write(
+            &main,
+            serde_json::json!({
+                "subconfigs": [sub.to_str().unwrap()],
+                "extractor": {"twitter": {"retries": 1, "timeout": 2}, "reddit": {"retries": 3}}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let config = super::Config::load(&main).await.unwrap();
+        let twitter = config.resolve("twitter").unwrap();
+        assert_eq!(twitter.retries, Some(5));
+        assert_eq!(twitter.timeout, Some(std::time::Duration::from_secs(7)));
+        assert_eq!(config.resolve("reddit").unwrap().retries, Some(3));
+    }
+
     #[test]
     fn directlink_scope_is_an_alias_for_direct() {
         let dir = std::env::temp_dir();
