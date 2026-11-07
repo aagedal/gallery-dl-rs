@@ -625,14 +625,15 @@ downloads. Document compatibility differences as features land.
 **Implemented upstream keyword dictionaries (2026-11-07):** files of the
 native Pinterest, Tumblr, Reddit, Flickr, Kemono/Coomer, Wallhaven, Imgur,
 Weasyl, VSCO, ArtStation, Fur Affinity, Newgrounds, Mastodon, Bluesky,
-DeviantArt, Twitter and Instagram (regular posts) extractors carry upstream's per-file keyword dictionaries
+DeviantArt, Twitter, Instagram (posts, stories and highlights), Facebook,
+Pixeldrain (files, albums and folders), Catbox albums, imgbox and Postimg
+extractors carry upstream's per-file keyword dictionaries
 (`PostMetadata.site_keywords`), so upstream filename/directory templates,
 filters and postprocessor keywords work unchanged, and default paths follow
 upstream's per-subcategory formats. Fur Affinity also parses the site's
 current (2025) markup, which upstream's parsers no longer match. Twitter keywords omit raw `article` objects and community dictionaries,
-which may carry malformed or private payloads. Remaining: Facebook,
-Instagram stories/highlights and Pixiv (whose typed metadata already maps
-most upstream names) still expose native keywords.
+which may carry malformed or private payloads. Remaining: Pixiv (whose typed metadata already maps most upstream names)
+still exposes native keywords.
 
 **Implemented experimental native Imgur:** single images, albums and gallery
 posts via the public `post/v1` API, with shared retries, timeouts, network
@@ -653,9 +654,10 @@ user-id/api-key credentials, with same-origin redirects and no credentials in
 media metadata. API-reported file size, rating and signed score are exposed.
 The `[booru]` `tags` (per-type `tags_TYPE`) and `notes` options read post pages
 for the gelbooru_v02 and moebooru engines (2026-11-07). Danbooru's `metadata`
-includes (boolean, string or list) are merged per page for native tag
-listings. Remaining: other favorites, `metadata` for pool/favorite-group and
-e621 listings, and authenticated live verification.
+includes (boolean, string or list) are merged per page for tag, pool,
+favorite-group, favorites and popular listings and into single posts, on
+Danbooru and e621/e926. Remaining: other favorites and authenticated live
+verification.
 
 **Implemented experimental native Mastodon:** statuses, user timelines,
 bookmarks, favourites, list timelines and Unicode hashtags on mastodon.social,
@@ -675,13 +677,14 @@ Since 2026-10-31 `mastodon:https://HOST/...` reads any other instance
 anonymously (category `mastodon`, where upstream uses the host name; tokens
 stay bound to the built-in instances), including Pleroma/Akkoma `notice`
 links and alphanumeric flake IDs; followed accounts on such hosts are queued
-with the prefix. Pleroma `objects/UUID` redirects are not followed yet.
+with the prefix. Pleroma `objects/UUID` links resolve through their status
+redirect (2026-11-07).
 Configured instances (`extractor.mastodon.NAME.root`, also for misskey,
 moebooru, szurubooru, shimmie2, foolfuuka, vichan and lynxchan) route plain
 URLs on their hosts to the `BASE:` readers (2026-11-07).
-Remaining: OAuth/cache discovery, followed views,
-account-search fallback/moved handling, and fuller metadata/default
-naming. Authenticated live verification and real captures remain required.
+Failed account lookups fall back to `accounts/search` and moved accounts
+warn like upstream (2026-11-07).
+Remaining: fuller metadata/default naming. Authenticated live verification and real captures remain required.
 
 **Implemented experimental native Kemono/Coomer:** posts, creator post listings
 and global `/posts` feeds with deduplicated files. Creator/global listings accept
@@ -806,9 +809,9 @@ and image pages. Catbox album dates accept upstream's `Created Month DD YYYY`
 and the previously accepted `Uploaded DD Month YYYY` format; invalid optional dates do not
 change media selection. Pixeldrain API keys authenticate API requests and file downloads.
 Pixeldrain filesystem (`/d/`) folders (with `recursive`) followed, and since
-2026-11-07 Postimg galleries list every image through `json?action=list`.
-Remaining: other Pixeldrain domains; Catbox file `/c/` descriptions; imgbox
-per-image metadata (width/height).
+2026-11-07 Postimg galleries list every image through `json?action=list`
+and Catbox album files carry the album `description` like upstream
+(upstream supports only `pixeldrain.com` and reports no imgbox dimensions).
 
 **Implemented experimental native Tumblr:** blog listings, single posts and
 tagged listings via API v2 with an overridable `api-key`, original-image token
@@ -1003,33 +1006,25 @@ search, popular, avatars/backgrounds, upstream's `original`/`quality` rewriting
 and metadata options, and upstream's `{title}_{index}` filenames.
 
 **Implemented experimental native Wallhaven:** wallpapers, searches, user
-uploads and collections via the API (optional `api-key`). Remaining: per-item
-`w/ID` metadata (tags/uploader) for listings, collection lists, upstream's
-`{category}_{id}_{resolution}` filenames and `metadata` option.
+uploads and collections via the API (optional `api-key`). Later additions (more views, keyword dictionaries and options) are described in the URL coverage, keyword dictionary and site option sections below.
 
 **Implemented experimental native Pinterest:** pins, boards, user pins and
-`pin.it` links via the resource API. Remaining: login/cookies and CSRF token,
-board sections, secret boards, search, related pins, created/saved/all-pins
-listings, embedded/external (ytdl) and HLS-only videos, upstream's `sections`,
-`videos` and `domain` options.
+`pin.it` links via the resource API. Later additions (more views, keyword dictionaries and options) are described in the URL coverage, keyword dictionary and site option sections below.
 
 **Implemented experimental native VSCO:** single media and user galleries via
-the page preloaded state and `medias/profile` API. Remaining: HLS videos
-(upstream ytdl), collections, journals, spaces, avatars, and upstream's
-`videos` option.
+the page preloaded state and `medias/profile` API. Later additions (more views, keyword dictionaries and options) are described in the URL coverage, keyword dictionary and site option sections below.
 
 **Implemented experimental native Newgrounds:** art posts and user art
-listings via page scraping and XHR listing pages. Remaining: login/cookies
-(adult posts), audio, movies/games, favorites, following, search, user
-overview, upstream's `flash`, `format` and `include` options, and tags/rating/
-score metadata.
+listings via page scraping and XHR listing pages. Later additions (more views, keyword dictionaries and options) are described in the URL coverage, keyword dictionary and site option sections below.
 
 **Implemented experimental native Fur Affinity:** submissions, galleries and
 scraps via page scraping with optional `a`/`b` session cookies; favorites,
 search, folders, submissions and followed users followed. Since 2026-11-07
 files carry upstream `_parse_post` keywords (both upstream layouts and the
-site's 2025 markup) with the `descriptions` and `layout` options.
-Remaining: `external` link queueing.
+site's 2025 markup) with the `descriptions` and `layout` options, and
+`external` queues description links after each post (unwrapping the
+site's `/externalurl/?q=` redirects; unsupported links are recorded by
+`--write-unsupported`).
 
 **Implemented experimental native Weasyl:** submissions and user galleries via
 the API with an optional `api-key`; folders, journals and favorites followed,
@@ -1612,7 +1607,25 @@ and postprocessor templates accept upstream's `\fE` (expression), `\fF`
 the native expression engine (the same Python subset as filters, which now
 also accepts `start:stop:step` slices). `\fJ` (Jinja) and `\fM` (module
 function) run in an external `python3` (`$GALLERY_DL_PYTHON`), like the
-`python` postprocessor.
+`python` postprocessor. A differential test against upstream's formatter
+added the `!a`, `!n`, `!q`, `!Q`, `!L` and `!R` conversions, the `D`
+(strptime), `M` (map) and `X` (truncate with hint) specifiers, sorting of
+strings, quoted keys, `start:stop:step` field slices and Python's
+`g`/`G`/`n` number formats (2026-11-07). Replaying upstream's
+`test_formatter.py` cases also added `Lb` byte limits, lenient `L` numbers,
+upstream's loose `S` arguments, stepped `:[a:b:c]` specifiers, the `_lit`,
+`_env` and `_now` globals and the root `format-separator` option; only
+`_nul`, attribute access on numbers and Jinja (without the module) differ.
+Filter expressions gained
+upstream's documented globals (`datetime(...)`, `datetime.now()`,
+`timedelta(...)` with keyword arguments and date arithmetic, `re.search`/
+`match`/`fullmatch`/`findall`/`sub`/`split`, `print`, `parse_int`), common
+builtins (`sum`, `sorted(reverse=)`, `reversed`, `list`, `tuple`, `range`,
+`enumerate`, `zip`, `divmod`, `pow`, `hex`/`oct`/`bin`, `chr`, `ord`) and
+string/list/dict methods, plus list/dict comprehensions and generator
+expressions (one `for` clause with optional `if` filters) and printf-style
+`%` formatting; `str.format`, f-strings, `isinstance` and sets remain
+unsupported.
 
 **Implemented extraction options, 2026-11-07:** `path-convert`,
 `file-unique`/`image-unique`, `child-unique`/`chapter-unique` and
@@ -1627,13 +1640,15 @@ library), and `downloader.http.consume-content` (connection reuse).
 only that child (`parent-skip` makes children count toward their input).
 Remaining: `parent-session` (native extractors keep per-site sessions).
 
+Facebook `author-followups` fetches the author's photo replies after each
+photo (2026-11-07).
 **Remaining site options (2026-11-07):** documented upstream options without
 native behavior yet: DeviantArt `auto-watch`/`auto-unwatch` (account
 actions) and `comments-avatars` avatar queueing (comments themselves are
-supported); Facebook `author-followups`; Instagram `audio`, `user-strategy`
-(native lookups use `web_profile_info`), `user-cache` (memory only) and
-`warn-videos` (`warn-images` is supported); Pixiv `work.related`; Twitter `locked`,
-`metadata-user` and `twitpic` (`retries-api` and `ads` are supported); `ytdl.deprecations` (yt-dlp
+supported); Instagram `user-strategy` (native lookups use
+`web_profile_info`) and `user-cache` (memory only) (post and story `audio`, `warn-images` and `warn-videos` are supported; Pixiv
+`work.related` is too); Twitter
+`metadata-user` (`retries-api`, `ads`, `locked` and `twitpic` are supported); `ytdl.deprecations` (yt-dlp
 diagnostics are never shown). Most need an account to verify.
 
 **Implemented input, auth and pacing options, 2026-10-28:** input files accept
@@ -1656,8 +1671,10 @@ root or `extractor` scope or `-o`, with `--restrict-filenames VALUE` and
 native filename templates kept the conservative ASCII cleaning (since
 2026-10-28 `path-restrict` defaults to `auto`). `{filename}`
 now excludes the extension for every extractor, as upstream.
-**Remaining divergences:** direct links (`direct/<digest>_NAME` versus
-upstream `directlink` with `{domain}`, `{path}`, `{query}` and `{fragment}`).
+Direct links follow upstream's `directlink` layout
+(`directlink/{domain}_{path}_{filename}.{extension}`, `{category}` is
+`directlink`, and `extractor.directlink` configures them) since 2026-11-07;
+manifests and other unnamed direct media keep the digest-prefixed name.
 The default base directory is `./gallery-dl/` like upstream (since
 2026-10-28; it was `downloads`).
 
@@ -1671,7 +1688,8 @@ configuration file. `-U/--update`, `--update-check` and `--update-to` report
 that self-updating is unsupported. `--xff` sends a random `X-Forwarded-For` address from CIDR blocks or
 country codes (upstream's table), `--blacklist`/`--whitelist` filter child
 extractors for external URLs by category, `--write-log` copies standard error
-(Unix), and the `--cache-*` commands report that no cache is kept. `-X` and
+(Unix), and the `--cache-status`/`-show`/`-clear`/`-vacuum` commands and
+`--cache-file` work on upstream's shared `cache.sqlite3` (2026-11-07). `-X` and
 `--compat` fail explicitly. `--tags-blacklist`/`--tags-whitelist` (and the
 `tags-*`/`*-tags` options) filter posts by tags with Danbooru-style rules;
 `/import` is unsupported. `-E/--extractor-info` prints each registry route's
@@ -1684,7 +1702,10 @@ registry responses to numbered files in the working directory, and
 extractors (Instagram, Twitter/X, Facebook, ...) do not report traffic.
 Configuration files may be YAML (`.yaml`/`.yml`) or TOML (`.toml`), or be
 declared with `--config-json`, `--config-yaml` or `--config-toml`;
-`--config-type` selects the `--config-create` format. Every upstream 1.32.17
+`--config-type` selects the `--config-create` format. `--list-extractors
+[CATEGORIES]` and `--list-modules` print upstream's class and module lists
+byte for byte (generated tables in `src/upstream_*`, 2026-11-07). `subconfigs` (a path
+or list) merges further files over the current one (2026-11-07). Every upstream 1.32.17
 command-line option is now accepted; `-X` and `--compat` fail explicitly and
 the update options report that self-updating is unsupported.
 
@@ -1692,13 +1713,31 @@ the update options report that self-updating is unsupported.
 configuration files now load typical upstream `config.json` files. Unknown
 keys are ignored by dedicated extractors and passed to registry sites with
 upstream's root → `extractor` → category inheritance; the `downloader`
-section's `rate`, `retries`, `timeout`, `verify` and `mtime` apply; `output`
+section's `rate`, `retries`, `timeout`, `verify`, `mtime` and (since
+2026-11-07) `http.headers` apply, and registry sites send an object-valued
+`extractor.*.headers` (not credential headers, nor the browser presets); `output`
 and `cache` are ignored. Credentials stay confined to supporting categories,
 and `base-directory`, `archive` and cookie-file paths expand `~` and
 environment variables. The `output` section's `logfile`, `unsupportedfile`, `errorfile` (paths or
 `{"path": ...}`), `mode: null`/`false` and `skip: false` apply.
 `archive` also accepts upstream's list-of-segments form with `{category}`,
 and archive parent directories are created on demand.
+Since 2026-11-07 both of upstream's sample configurations
+(`docs/gallery-dl.conf`, `docs/gallery-dl-example.conf`) load: a scoped
+`null` means the default (credentials become explicitly empty rather than
+inherited), credential and class settings for categories that do not use
+them natively are ignored instead of rejected, `cookies` may be a
+`{"name": "value"}` object, `sleep-retries`/`sleep-429` accept
+`lin[:START[:MAX]]=`/`exp[:BASE[:START[:MAX]]]=` backoff, `cursor: true` is
+the default, and unopenable `output` files only warn.
+`extractor.CATEGORY.SUBCATEGORY` scopes (named after upstream's extractor
+classes) now work for every category: their template, filter, range, date
+and postprocessor options apply to files of that class (other options in
+them are ignored; Danbooru/e621 keep their stricter class handling). Files
+of Mastodon, Bluesky, Twitter, Kemono/Coomer and Instagram now carry their
+job's upstream class (e.g. Mastodon `user`, Kemono's service name, Instagram
+dispatch children `posts`/`reels`/...), and dedicated extractors expose
+`{subcategory}`.
 Registry sites apply user `keywords`/`keywords-global` (with `keywords-eval`
 format strings), `metadata-url` and `metadata-version`; `cookies-update` with
 a path writes session cookies there (rewriting the input file with `true` is
@@ -1734,7 +1773,12 @@ code), `oauth:deviantart`, `oauth:reddit`, `oauth:mastodon:INSTANCE`
 (registering an application for unknown instances), `oauth:tumblr`,
 `oauth:smugmug` and `oauth:flickr` (OAuth 1.0a) open the authorization page,
 receive the callback on `localhost:6414` (`extractor.oauth.host`/`port`), and
-print the token with the configuration key to set. Tokens are never cached.
+print the token with the configuration key to set. Since 2026-11-07 they also
+store it in upstream's `cache.sqlite3` (`cache.file`, same keys and pickled
+string values, so tokens are shared with Python gallery-dl), and Pixiv,
+DeviantArt (including rotated refresh tokens), Reddit and Mastodon read it
+when their token setting is absent or `"cache"`. Login sessions and cookies
+are not cached.
 
 **Implemented special inputs, 2026-10-28:** `recursive:URL`/`r:URL` (also
 `file://` documents) queues every URL found, and `ytdl:URL` hands any HTTP(S)
@@ -1750,8 +1794,9 @@ extraction failures, exec warnings) with `print`, `status`, `level`, `exec`,
 `exit`; `status` and `exit` set the exit status. `flag` and signal actions
 are not supported. `keywords-default` fills missing path keywords.
 Existing Python gallery-dl archives (an `archive` table of `entry` keys)
-are read and updated with upstream keys (category + `archive_fmt`); new
-archives keep the native schema. `archive-event` (`file`, `skip`, `after`;
+are read and updated with upstream keys (category + `archive_fmt`, or the
+configured `archive-prefix` + `archive-format`; `archive-table` is not
+supported); new archives keep the native schema. `archive-event` (`file`, `skip`, `after`;
 upstream archives default to `file`, native ones also record existing
 files), `archive-mode: memory` (written after a run without errors) and
 `skip-filter` are supported. Downloader `adjust-extensions` (file signature
@@ -1764,9 +1809,7 @@ replaced). Exit codes follow upstream's
 bit flags: 4 for download and extraction errors, 8 for bot challenges, 16 for
 authentication, 32 for format errors, 64 for unsupported URLs and 128 for
 local file errors (extraction errors are classified by their messages).
-**Remaining divergences:** direct links keep `direct/<digest>_NAME` paths
-(request-identity separation) rather than `directlink/{domain}_{path}_NAME`;
-`metadata-extractor`, `parent-*`, `category-transfer`,
+**Remaining divergences:** `metadata-extractor`, `parent-*`, `category-transfer`,
 `file-unique`/`child-unique`, `path-extended`/`path-convert`,
 `tls12: false` (TLS 1.3 only) and `truststore` (system certificates) apply
 to every native client; `ciphers` restricts connections to the listed
@@ -1793,6 +1836,16 @@ native keywords (`post_id`, `media_id`, `username`, `caption`, `num`).
 Files lacking a required field, and direct links, keep the digest names.
 Exact keyword differences remain (e.g. DeviantArt's `{index}` is the UUID,
 Instagram omits the sidecar prefix, Reddit uses the user directory).
+
+A 2026-11-07 re-run of the URL sweep routed Pixiv image URLs
+(`i.pximg.net`, legacy `iN`/`img.pixiv.net`) to their works like upstream's
+`PixivWorkExtractor`, Pixeldrain `/d/` paths ending in a file name to the
+folder extractor, and fixed host-less `tumblr:DOMAIN` inputs. Reddit
+(`i.redd.it`, `preview.redd.it` rewritten to the original) and Catbox file
+links keep downloading directly but carry upstream's `reddit:image` and
+`catbox:file` classes and paths; Flickr static file and Wallhaven full-size
+URLs resolve their photo/wallpaper, and imgbox file URLs their image page
+(and so the original file), like upstream's image extractors.
 
 **Implemented upstream URL coverage for dedicated extractors, 2026-10-28:**
 a sweep of every `#url` in upstream's `test/results` (excluding `#fail` and

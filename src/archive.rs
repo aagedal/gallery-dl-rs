@@ -233,13 +233,16 @@ impl Archive {
                 None
             };
         let prepared = options.postprocessors.map(|pp| pp.prepared_media(media));
-        let identity = self.key(
-            generic
-                .as_ref()
-                .map(|job| &job.media)
-                .or(prepared.as_ref())
-                .unwrap_or(media),
-        );
+        let keyed = generic
+            .as_ref()
+            .map(|job| &job.media)
+            .or(prepared.as_ref())
+            .unwrap_or(media);
+        let identity = if self.upstream {
+            upstream_key_with(keyed, options.archive_prefix, options.archive_format)
+        } else {
+            self.key(keyed)
+        };
         // Serialize the same stable identity within this instance, without
         // suppressing a refreshed URL if a previous request failed. Weak entries
         // retain no per-item state once pending downloads have finished.
@@ -350,8 +353,19 @@ impl Archive {
 /// Upstream `DownloadArchive` key: `archive-prefix` (the category) and the
 /// extractor's `archive_fmt` rendered with the file's keywords.
 pub fn upstream_key(media: &Media) -> Option<String> {
+    upstream_key_with(media, None, None)
+}
+
+/// [`upstream_key`] with configured `archive-prefix`/`archive-format`,
+/// which upstream concatenates into one format string.
+pub fn upstream_key_with(
+    media: &Media,
+    prefix: Option<&str>,
+    format: Option<&str>,
+) -> Option<String> {
     let descriptor = crate::source_archive::for_media(media)?;
-    if descriptor.format.is_empty() {
+    let format = format.unwrap_or(&descriptor.format);
+    if format.is_empty() {
         return None;
     }
     let keywords = match media
@@ -362,11 +376,21 @@ pub fn upstream_key(media: &Media) -> Option<String> {
         Some(keywords) => keywords.fields.clone(),
         None => crate::postprocess::context(media),
     };
-    let key = crate::postprocess::template::Template::parse(&descriptor.format)
+    let mut keywords = keywords;
+    keywords
+        .entry("category")
+        .or_insert_with(|| descriptor.category.clone().into());
+    let template = match prefix {
+        Some(prefix) => format!("{prefix}{format}"),
+        None => format!(
+            "{}{format}",
+            descriptor.category.replace('{', "{{").replace('}', "}}")
+        ),
+    };
+    crate::postprocess::template::Template::parse(&template)
         .ok()?
         .render(&keywords)
-        .ok()?;
-    Some(format!("{}{key}", descriptor.category))
+        .ok()
 }
 
 /// Open an archive, creating a native one in a new or empty database.
@@ -458,6 +482,15 @@ mod tests {
             handoff: Default::default(),
         };
         assert_eq!(archive.key(&media(42)).as_deref(), Some("bunkr42_1"));
+        // Configured `archive-prefix`/`archive-format` form one format.
+        assert_eq!(
+            upstream_key_with(&media(42), Some("x-{category}-"), Some("{id}")).as_deref(),
+            Some("x-bunkr-42")
+        );
+        assert_eq!(
+            upstream_key_with(&media(42), None, Some("{id}")).as_deref(),
+            Some("bunkr42")
+        );
         assert!(archive.contains("bunkr42_1").await.unwrap());
         let key = archive.key(&media(7)).unwrap();
         assert!(!archive.contains(&key).await.unwrap());

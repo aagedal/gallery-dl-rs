@@ -58,6 +58,9 @@ pub struct DownloadClient {
     pub(crate) validate_html: bool,
     /// Upstream `retry-codes`: further HTTP status codes to retry.
     pub(crate) retry_codes: std::sync::Arc<[u16]>,
+    /// Upstream `downloader.http.headers`: sent with every file request,
+    /// overriding file-specific headers.
+    headers: std::sync::Arc<[(String, String)]>,
     /// Upstream `downloader.progress`: show progress on standard error for
     /// downloads that take longer than this.
     pub(crate) progress: Option<Duration>,
@@ -340,6 +343,12 @@ impl DownloadClient {
         self
     }
 
+    /// Upstream `downloader.http.headers`.
+    pub fn with_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.headers = headers.into();
+        self
+    }
+
     /// Show download progress after this delay (`downloader.progress`).
     pub fn with_progress(mut self, delay: Option<Duration>) -> Self {
         self.progress = delay;
@@ -421,6 +430,7 @@ pub fn client(timeout: Duration) -> Result<DownloadClient> {
         adjust_extensions: true,
         validate_html: true,
         retry_codes: std::sync::Arc::new([]),
+        headers: std::sync::Arc::new([]),
         part_directory: None,
         progress: None,
         enumerate: false,
@@ -445,7 +455,7 @@ fn content_disposition_filename(value: &str) -> Option<String> {
 }
 
 /// Upstream `util.format_value`: `1234567` → `1.23M`.
-fn format_value(value: u64) -> String {
+pub fn format_value(value: u64) -> String {
     let text = value.to_string();
     if text.len() < 4 {
         return text;
@@ -532,11 +542,44 @@ pub fn destination(root: &Path, media: &Media) -> PathBuf {
     {
         return root.join(directory).join(name);
     }
+    // Upstream `directlink`: `{domain}/{path}/{filename}.{extension}` as one
+    // cleaned segment (separators become `_`) under the category directory.
+    if let Some(name) = directlink_name(media) {
+        return root.join("directlink").join(name);
+    }
     // Hash URL and job/request context so different manifests or authenticated
     // representations cannot share a path. This is not a stable archive identity.
     let digest = format!("{:x}", Sha256::digest(media.identity().as_bytes()));
-    root.join(safe_component(&media.category))
+    root.join(category_directory(media))
         .join(format!("{digest}_{}", safe_component(&media.filename)))
+}
+
+/// The default `{category}` directory; direct links use upstream's name.
+fn category_directory(media: &Media) -> String {
+    match media.category.as_str() {
+        "direct" => "directlink".into(),
+        category => safe_component(category),
+    }
+}
+
+fn directlink_name(media: &Media) -> Option<String> {
+    use std::sync::OnceLock;
+    if media.category != "direct"
+        || media.metadata.is_some()
+        || !matches!(media.job, crate::extract::MediaJob::DirectHttp)
+        || crate::extract::direct(&media.url).is_none()
+    {
+        return None;
+    }
+    static TEMPLATE: OnceLock<FilenameTemplate> = OnceLock::new();
+    TEMPLATE
+        .get_or_init(|| {
+            FilenameTemplate::parse("{domain}_{path}_{filename}.{extension}")
+                .expect("valid directlink template")
+        })
+        .render_optional(media)
+        .ok()
+        .flatten()
 }
 
 /// Custom names replace the default digest-prefixed basename. Publication still
@@ -565,7 +608,7 @@ pub fn destination_with_templates(
         .transpose()?
         .flatten()
     {
-        Some(name) => root.join(safe_component(&media.category)).join(name),
+        Some(name) => root.join(category_directory(media)).join(name),
         None => destination(root, media),
     };
     match directory
@@ -621,7 +664,7 @@ pub(crate) fn directory_with_keywords(
         .flatten();
     Ok(match directory {
         Some(directory) => root.join(directory),
-        None => root.join(safe_component(&media.category)),
+        None => root.join(category_directory(media)),
     })
 }
 
@@ -652,6 +695,10 @@ pub struct DownloadOptions<'a> {
     pub write_metadata: bool,
     /// Inclusive limits on the complete HTTP representation size.
     pub limits: SizeLimits,
+    /// Upstream `archive-prefix` and `archive-format` for keys of upstream
+    /// download archives.
+    pub archive_prefix: Option<&'a str>,
+    pub archive_format: Option<&'a str>,
 }
 
 pub async fn download(
@@ -1156,7 +1203,9 @@ async fn download_media(
             Ok(()) => {
                 tokio::fs::create_dir_all(parent).await?;
                 let mut headers = HeaderMap::new();
-                for (name, value) in &candidate.headers {
+                // General headers follow and override file-specific ones.
+                let general = client.headers.iter().map(|(n, v)| (n, v));
+                for (name, value) in candidate.headers.iter().chain(general) {
                     let name = HeaderName::from_bytes(name.as_bytes())?;
                     if matches!(
                         name.as_str(),
@@ -2158,6 +2207,39 @@ mod kemono_redirect_tests {
             media.url = url::Url::parse(url).unwrap();
             assert!(!kemono_public_redirects(&media, &HeaderMap::new()));
         }
+    }
+}
+
+#[cfg(test)]
+mod directlink_tests {
+    #[test]
+    fn hosted_files_use_their_sites_class() {
+        for (url, expected) in [
+            ("https://i.redd.it/abc.jpg", "out/reddit/abc.jpg"),
+            (
+                "https://preview.redd.it/abc.jpg?width=640&s=x",
+                "out/reddit/abc.jpg",
+            ),
+            ("https://files.catbox.moe/abc.png", "out/catbox/abc.png"),
+        ] {
+            let media = crate::extract::direct(&url::Url::parse(url).unwrap()).unwrap();
+            assert_eq!(
+                super::destination(std::path::Path::new("out"), &media),
+                std::path::Path::new(expected),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn direct_links_use_upstream_directlink_layout() {
+        let url = url::Url::parse("https://en.wikipedia.org/static/images/enwiki.PNG?x=1").unwrap();
+        let media = crate::extract::direct(&url).unwrap();
+        let path = super::destination(std::path::Path::new("out"), &media);
+        assert_eq!(
+            path,
+            std::path::Path::new("out/directlink/en.wikipedia.org_static_images_enwiki.png")
+        );
     }
 }
 

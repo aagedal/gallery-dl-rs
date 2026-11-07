@@ -1,0 +1,923 @@
+# Upstream gallery-dl 1.32 extractor classes for --list-extractors, generated from
+# gallery_dl.extractor.extractors(): name, docstring, category, subcategory,
+# example URL, basecategory (tab-separated; backslash escapes).
+AcidimgImageExtractor	Extractor for single images from acidimg.cc	acidimg	image	https://acidimg.cc/img-abc123.html	imagehost
+AdultempireGalleryExtractor	Extractor for image galleries from www.adultempire.com	adultempire	gallery	https://www.adultempire.com/12345/gallery.html	
+AgnphPostExtractor		agnph	post	https://agn.ph/gallery/post/show/12345/	booru
+AgnphTagExtractor		agnph	tag	https://agn.ph/gallery/post/?search=TAG	booru
+AhottieGalleryExtractor		ahottie	gallery	https://ahottie.top/albums/1234567890	
+AhottieSearchExtractor		ahottie	search	https://ahottie.top/search?kw=QUERY	
+AhottieTagExtractor		ahottie	tag	https://ahottie.top/tags/TAG	
+AllporncomicChapterExtractor	Extractor for allporncomic manga chapters	allporncomic	chapter	https://allporncomic.com/porncomic/MANGA/123-TITLE/	
+AllporncomicMangaExtractor	Extractor for allporncomic manga	allporncomic	manga	https://allporncomic.com/porncomic/MANGA/	
+AllporncomicTagExtractor	Extractor for allporncomic tag search results	allporncomic	tag	https://allporncomic.com/porncomic-genre/GENRE/	
+Ao3SearchExtractor	Extractor for AO3 search results	ao3	search	https://archiveofourown.org/works/search?work_search[query]=air	
+Ao3SeriesExtractor	Extractor for AO3 works of a series	ao3	series	https://archiveofourown.org/series/12345	
+Ao3SubscriptionsExtractor	Extractor for your AO3 account's subscriptions	ao3	subscriptions	https://archiveofourown.org/users/USER/subscriptions	
+Ao3TagExtractor	Extractor for AO3 works by tag	ao3	tag	https://archiveofourown.org/tags/TAG/works	
+Ao3UserBookmarkExtractor	Extractor for bookmarked works of an AO3 user	ao3	user-bookmark	https://archiveofourown.org/users/USER/bookmarks	
+Ao3UserExtractor	Extractor for an AO3 user profile	ao3	user	https://archiveofourown.org/users/USER	
+Ao3UserSeriesExtractor	Extractor for series of an AO3 user	ao3	user-series	https://archiveofourown.org/users/USER/series	
+Ao3UserWorksExtractor	Extractor for works of an AO3 user	ao3	user-works	https://archiveofourown.org/users/USER/works	
+Ao3WorkExtractor	Extractor for an AO3 work	ao3	work	https://archiveofourown.org/works/12345	
+ArcaliveBoardExtractor	Extractor for an arca.live board's posts	arcalive	board	https://arca.live/b/breaking	
+ArcalivePostExtractor	Extractor for an arca.live post	arcalive	post	https://arca.live/b/breaking/123456789	
+ArcaliveUserExtractor	Extractor for an arca.live users's posts	arcalive	user	https://arca.live/u/@USER	
+ArchitizerFirmExtractor	Extractor for all projects of a firm	architizer	firm	https://architizer.com/firms/NAME/	
+ArchitizerProjectExtractor	Extractor for project pages on architizer.com	architizer	project	https://architizer.com/projects/NAME/	
+ArenaChannelExtractor	Extractor for are.na channels	arena	channel	https://are.na/evan-collins-1522646491/cassette-futurism	
+ArtstationAlbumExtractor	Extractor for all projects in an artstation album	artstation	album	https://www.artstation.com/USER/albums/12345	
+ArtstationArtworkExtractor	Extractor for projects on artstation's artwork page	artstation	artwork	https://www.artstation.com/artwork?sorting=SORT	
+ArtstationChallengeExtractor	Extractor for submissions of artstation challenges	artstation	challenge	https://www.artstation.com/challenges/NAME/categories/12345	
+ArtstationCollectionExtractor	Extractor for an artstation collection	artstation	collection	https://www.artstation.com/USER/collections/12345	
+ArtstationCollectionsExtractor	Extractor for an artstation user's collections	artstation	collections	https://www.artstation.com/USER/collections	
+ArtstationFollowingExtractor	Extractor for a user's followed users	artstation	following	https://www.artstation.com/USER/following	
+ArtstationImageExtractor	Extractor for images from a single artstation project	artstation	image	https://www.artstation.com/artwork/abcde	
+ArtstationLikesExtractor	Extractor for liked projects of an artstation user	artstation	likes	https://www.artstation.com/USER/likes	
+ArtstationSearchExtractor	Extractor for artstation search results	artstation	search	https://www.artstation.com/search?query=QUERY	
+ArtstationUserExtractor	Extractor for all projects of an artstation user	artstation	user	https://www.artstation.com/USER	
+AryionFavoriteExtractor	Extractor for a user's favorites gallery	aryion	favorite	https://aryion.com/g4/favorites/USER	
+AryionGalleryExtractor	Extractor for a user's gallery on eka's portal	aryion	gallery	https://aryion.com/g4/gallery/USER	
+AryionPostExtractor	Extractor for individual posts on eka's portal	aryion	post	https://aryion.com/g4/view/12345	
+AryionSearchExtractor	Extractor for searches on eka's portal	aryion	search	https://aryion.com/g4/search.php?q=TEXT&tags=TAGS&user=USER	
+AryionTagExtractor	Extractor for tag searches on eka's portal	aryion	tag	https://aryion.com/g4/tags.php?tag=TAG	
+AryionWatchExtractor	Extractor for your watched users and tags	aryion	watch	https://aryion.com/g4/messagepage.php	
+AudiochanAudioExtractor		audiochan	audio	https://audiochan.com/a/SLUG	
+AudiochanCollectionExtractor		audiochan	collection	https://audiochan.com/c/SLUG	
+AudiochanSearchExtractor		audiochan	search	https://audiochan.com/search?q=QUERY	
+AudiochanUserExtractor		audiochan	user	https://audiochan.com/u/USER	
+BbcGalleryExtractor	Extractor for a programme gallery on bbc.co.uk	bbc	gallery	https://www.bbc.co.uk/programmes/PATH	
+BbcProgrammeExtractor	Extractor for all galleries of a bbc programme	bbc	programme	https://www.bbc.co.uk/programmes/ID/galleries	
+BehanceCollectionExtractor	Extractor for a collection's galleries from www.behance.net	behance	collection	https://www.behance.net/collection/12345/TITLE	
+BehanceGalleryExtractor	Extractor for image galleries from www.behance.net	behance	gallery	https://www.behance.net/gallery/12345/TITLE	
+BehanceUserExtractor	Extractor for a user's galleries from www.behance.net	behance	user	https://www.behance.net/USER	
+BellazonForumExtractor		bellazon	forum	https://www.bellazon.com/main/forum/123-SLUG/	
+BellazonPostExtractor		bellazon	post	https://www.bellazon.com/main/topic/123-SLUG/#findComment-12345	
+BellazonThreadExtractor		bellazon	thread	https://www.bellazon.com/main/topic/123-SLUG/	
+BilibiliArticleExtractor	Extractor for a bilibili article	bilibili	article	https://www.bilibili.com/opus/12345	
+BilibiliUserArticlesExtractor	Extractor for a bilibili user's articles	bilibili	user-articles	https://space.bilibili.com/12345/article	
+BilibiliUserArticlesFavoriteExtractor		bilibili	user-articles-favorite	https://space.bilibili.com/12345/favlist?fid=opus	
+BloggerBlogExtractor	Extractor for an entire Blogger blog		blog	https://BLOG.blogspot.com/	blogger
+BloggerLabelExtractor	Extractor for Blogger posts by label		label	https://BLOG.blogspot.com/search/label/LABEL	blogger
+BloggerPostExtractor	Extractor for a single blog post		post	https://BLOG.blogspot.com/1970/01/TITLE.html	blogger
+BloggerSearchExtractor	Extractor for Blogger search resuls		search	https://BLOG.blogspot.com/search?q=QUERY	blogger
+BlueskyAvatarExtractor		bluesky	avatar	https://bsky.app/profile/HANDLE/avatar	
+BlueskyBackgroundExtractor		bluesky	background	https://bsky.app/profile/HANDLE/banner	
+BlueskyBookmarkExtractor		bluesky	bookmark	https://bsky.app/saved	
+BlueskyFeedExtractor		bluesky	feed	https://bsky.app/profile/HANDLE/feed/NAME	
+BlueskyFollowingExtractor		bluesky	following	https://bsky.app/profile/HANDLE/follows	
+BlueskyHashtagExtractor		bluesky	hashtag	https://bsky.app/hashtag/NAME	
+BlueskyInfoExtractor		bluesky	info	https://bsky.app/profile/HANDLE/info	
+BlueskyLikesExtractor		bluesky	likes	https://bsky.app/profile/HANDLE/likes	
+BlueskyListExtractor		bluesky	list	https://bsky.app/profile/HANDLE/lists/ID	
+BlueskyMediaExtractor		bluesky	media	https://bsky.app/profile/HANDLE/media	
+BlueskyPostExtractor		bluesky	post	https://bsky.app/profile/HANDLE/post/ID	
+BlueskyPostsExtractor		bluesky	posts	https://bsky.app/profile/HANDLE/posts	
+BlueskyRepliesExtractor		bluesky	replies	https://bsky.app/profile/HANDLE/replies	
+BlueskySearchExtractor		bluesky	search	https://bsky.app/search?q=QUERY	
+BlueskyUserExtractor		bluesky	user	https://bsky.app/profile/HANDLE	
+BlueskyVideoExtractor		bluesky	video	https://bsky.app/profile/HANDLE/video	
+BoostyDirectMessagesExtractor	Extractor for boosty.to direct messages	boosty	direct-messages	https://boosty.to/app/messages?dialogId=12345	
+BoostyFeedExtractor	Extractor for your boosty.to subscription feed	boosty	feed	https://boosty.to/	
+BoostyFollowingExtractor	Extractor for your boosty.to subscribed users	boosty	following	https://boosty.to/app/settings/subscriptions	
+BoostyMediaExtractor	Extractor for boosty.to user media	boosty	media	https://boosty.to/USER/media/all	
+BoostyPostExtractor	Extractor for boosty.to posts	boosty	post	https://boosty.to/USER/posts/01234567-89ab-cdef-0123-456789abcd	
+BoostyUserExtractor	Extractor for boosty.to user profiles	boosty	user	https://boosty.to/USER	
+BoothCategoryExtractor		booth	category	https://booth.pm/ja/browse/CATEGORY	
+BoothItemExtractor		booth	item	https://booth.pm/ja/items/12345	
+BoothShopExtractor		booth	shop	https://SHOP.booth.pm/	
+BunkrAlbumExtractor	Extractor for bunkr.si albums	bunkr	album	https://bunkr.si/a/ID	lolisafe
+BunkrMediaExtractor	Extractor for bunkr.si media links	bunkr	media	https://bunkr.si/f/FILENAME	lolisafe
+CatboxAlbumExtractor	Extractor for catbox albums	catbox	album	https://catbox.moe/c/ID	
+CatboxFileExtractor	Extractor for catbox files	catbox	file	https://files.catbox.moe/NAME.EXT	
+CfakeCategoryExtractor	Extractor for category image galleries from cfake.com	cfake	category	https://cfake.com/images/categories/NAME/123	
+CfakeCelebrityExtractor	Extractor for celebrity image galleries from cfake.com	cfake	celebrity	https://cfake.com/images/celebrity/NAME/123	
+CfakeCountryExtractor	Extractor for country image galleries from cfake.com	cfake	country	https://cfake.com/images/country/NAME/12345/123	
+CfakeCreatedExtractor	Extractor for 'created' image galleries from cfake.com	cfake	created	https://cfake.com/images/created/NAME/12345/123	
+CheveretoAlbumExtractor	Extractor for chevereto albums		album	https://jpg7.cr/album/TITLE.ID	chevereto
+CheveretoCategoryExtractor	Extractor for chevereto galleries		category	https://imglike.com/category/TITLE	chevereto
+CheveretoFileExtractor	Extractor for chevereto files		file	https://jpg7.cr/img/TITLE.ID	chevereto
+CheveretoUserExtractor	Extractor for chevereto users		user	https://jpg7.cr/USER	chevereto
+CienArticleExtractor		cien	article	https://ci-en.net/creator/123/article/12345	
+CienCreatorExtractor		cien	creator	https://ci-en.net/creator/123	
+CienFollowingExtractor		cien	following	https://ci-en.net/mypage/subscription	
+CienRecentExtractor		cien	recent	https://ci-en.net/mypage/recent	
+CivitaiCollectionExtractor		civitai	collection	https://civitai.com/collections/12345	
+CivitaiGeneratedExtractor	Extractor for your generated files feed	civitai	generated	https://civitai.com/generate	
+CivitaiImageExtractor		civitai	image	https://civitai.com/images/12345	
+CivitaiImagesExtractor		civitai	images	https://civitai.com/images	
+CivitaiModelExtractor		civitai	model	https://civitai.com/models/12345/TITLE	
+CivitaiModelsExtractor		civitai	models	https://civitai.com/models	
+CivitaiPostExtractor		civitai	post	https://civitai.com/posts/12345	
+CivitaiPostsExtractor		civitai	posts	https://civitai.com/posts	
+CivitaiSearchImagesExtractor		civitai	search-images	https://civitai.com/search/images?query=QUERY	
+CivitaiSearchModelsExtractor		civitai	search-models	https://civitai.com/search/models?query=QUERY	
+CivitaiTagExtractor		civitai	tag	https://civitai.com/tag/TAG	
+CivitaiUserCollectionsExtractor		civitai	user-collections	https://civitai.com/user/USER/collections	
+CivitaiUserExtractor		civitai	user	https://civitai.com/user/USER	
+CivitaiUserImagesExtractor		civitai	user-images	https://civitai.com/user/USER/images	
+CivitaiUserModelsExtractor		civitai	user-models	https://civitai.com/user/USER/models	
+CivitaiUserPostsExtractor		civitai	user-posts	https://civitai.com/user/USER/posts	
+CivitaiUserVideosExtractor		civitai	user-videos	https://civitai.com/user/USER/videos	
+CivitaiVideosExtractor		civitai	videos	https://civitai.com/videos	
+ComedywildlifephotoGalleryExtractor	Extractor for comedywildlifephoto galleries	comedywildlifephoto	gallery	https://www.comedywildlifephoto.com/gallery/SECTION/TITLE.php	
+ComickChapterExtractor	Extractor for comick.io manga chapters	comick	chapter	https://comick.io/comic/MANGA/ID-chapter-123-en	
+ComickCoversExtractor	Extractor for comick.io manga covers	comick	covers	https://comick.io/comic/MANGA/cover	
+ComickMangaExtractor	Extractor for comick.io manga	comick	manga	https://comick.io/comic/MANGA	
+ComicvineTagExtractor	Extractor for a gallery on comicvine.gamespot.com	comicvine	tag	https://comicvine.gamespot.com/TAG/123-45/images/	
+CyberdropAlbumExtractor	Extractor for cyberdrop albums	cyberdrop	album	https://cyberdrop.cr/a/ID	lolisafe
+CyberdropMediaExtractor	Extractor for cyberdrop media links	cyberdrop	media	https://cyberdrop.cr/f/ID	lolisafe
+CyberfileFileExtractor		cyberfile	file	https://cyberfile.me/AbCdE	
+CyberfileFolderExtractor		cyberfile	folder	https://cyberfile.me/folder/0123456789abcdef/NAME	
+CyberfileSharedExtractor		cyberfile	shared	https://cyberfile.me/shared/AbCdEfGhIjK	
+DanbooruArtistExtractor	Extractor for danbooru artists		artist	https://danbooru.donmai.us/artists/12345	Danbooru
+DanbooruArtistSearchExtractor	Extractor for danbooru artist searches		artist-search	https://danbooru.donmai.us/artists?QUERY	Danbooru
+DanbooruFavgroupExtractor	Extractor for Danbooru favorite groups		favgroup	https://danbooru.donmai.us/favorite_groups/12345	Danbooru
+DanbooruMediaassetExtractor	Extractor for a danbooru media asset		media-asset	https://danbooru.donmai.us/media_assets/12345	Danbooru
+DanbooruPoolExtractor	Extractor for Danbooru pools		pool	https://danbooru.donmai.us/pools/12345	Danbooru
+DanbooruPopularExtractor	Extractor for popular images from danbooru		popular	https://danbooru.donmai.us/explore/posts/popular	Danbooru
+DanbooruPostExtractor	Extractor for single danbooru posts		post	https://danbooru.donmai.us/posts/12345	Danbooru
+DanbooruRandomExtractor	Extractor for a random danbooru post		random	https://danbooru.donmai.us/posts/random?tags=TAG	Danbooru
+DanbooruTagExtractor	Extractor for danbooru posts from tag searches		tag	https://danbooru.donmai.us/posts?tags=TAG	Danbooru
+DandadanChapterExtractor	Extractor for dandadan manga chapters	dandadan	chapter	https://dandadan.net/manga/dandadan-chapter-123/	
+DandadanMangaExtractor	Extractor for dandadan manga	dandadan	manga	https://dandadan.net/	
+DankefuerslesenChapterExtractor	Extractor for Danke fürs Lesen manga chapters	dankefuerslesen	chapter	https://danke.moe/read/manga/TITLE/123/1/	
+DankefuerslesenMangaExtractor	Extractor for Danke fürs Lesen manga	dankefuerslesen	manga	https://danke.moe/read/manga/TITLE/	
+DesktopographyEntryExtractor	Extractor for all resolutions of a desktopography wallpaper	desktopography	entry	https://desktopography.net/portfolios/NAME/	
+DesktopographyExhibitionExtractor	Extractor for a yearly desktopography exhibition	desktopography	exhibition	https://desktopography.net/exhibition-2020/	
+DesktopographySiteExtractor	Extractor for all desktopography exhibitions 	desktopography	site	https://desktopography.net/	
+DeviantartAvatarExtractor	Extractor for an artist's avatar	deviantart	avatar	https://www.deviantart.com/USER/avatar/	
+DeviantartBackgroundExtractor	Extractor for an artist's banner	deviantart	background	https://www.deviantart.com/USER/banner/	
+DeviantartCollectionExtractor	Extractor for a single favorite collection	deviantart	collection	https://www.deviantart.com/USER/favourites/12345/TITLE	
+DeviantartDeviationExtractor	Extractor for single deviations	deviantart	deviation	https://www.deviantart.com/UsER/art/TITLE-12345	
+DeviantartFavoriteExtractor	Extractor for an artist's favorites	deviantart	favorite	https://www.deviantart.com/USER/favourites/	
+DeviantartFolderExtractor	Extractor for deviations inside an artist's gallery folder	deviantart	folder	https://www.deviantart.com/USER/gallery/12345/TITLE	
+DeviantartFollowingExtractor	Extractor for user's watched users	deviantart	following	https://www.deviantart.com/USER/about#watching	
+DeviantartGalleryExtractor	Extractor for all deviations from an artist's gallery	deviantart	gallery	https://www.deviantart.com/USER/gallery/	
+DeviantartGallerySearchExtractor	Extractor for deviantart gallery searches	deviantart	gallery-search	https://www.deviantart.com/USER/gallery?q=QUERY	
+DeviantartJournalExtractor	Extractor for an artist's journals	deviantart	journal	https://www.deviantart.com/USER/posts/journals/	
+DeviantartScrapsExtractor	Extractor for an artist's scraps	deviantart	scraps	https://www.deviantart.com/USER/gallery/scraps	
+DeviantartSearchExtractor	Extractor for deviantart search results	deviantart	search	https://www.deviantart.com/search?q=QUERY	
+DeviantartStashExtractor	Extractor for sta.sh-ed deviations	deviantart	stash	https://www.deviantart.com/stash/abcde	
+DeviantartStatusExtractor	Extractor for an artist's status updates	deviantart	status	https://www.deviantart.com/USER/posts/statuses/	
+DeviantartTagExtractor	Extractor for deviations from tag searches	deviantart	tag	https://www.deviantart.com/tag/TAG	
+DeviantartUserExtractor	Extractor for an artist's user profile	deviantart	user	https://www.deviantart.com/USER	
+DeviantartWatchExtractor	Extractor for Deviations from watched users	deviantart	watch	https://www.deviantart.com/watch/deviations	
+DeviantartWatchPostsExtractor	Extractor for Posts from watched users	deviantart	watch-posts	https://www.deviantart.com/watch/posts	
+DirectlinkExtractor	Extractor for direct links to images and other media files	directlink		https://en.wikipedia.org/static/images/project-logos/enwiki.png	
+DiscordChannelExtractor		discord	channel	https://discord.com/channels/1234567890/9876543210	
+DiscordDirectMessageExtractor		discord	direct-message	https://discord.com/channels/@me/1234567890/9876543210	
+DiscordDirectMessagesExtractor		discord	direct-messages	https://discord.com/channels/@me/1234567890	
+DiscordMessageExtractor		discord	message	https://discord.com/channels/1234567890/9876543210/2468013579	
+DiscordServerAssetsExtractor		discord	server-assets	https://discord.com/channels/1234567890/assets	
+DiscordServerExtractor		discord	server	https://discord.com/channels/1234567890	
+DiscordServerSearchExtractor		discord	server-search	https://discord.com/channels/1234567890/search?QUERY	
+DynastyscansAnthologyExtractor	Extractor for dynasty-scans anthologies	dynastyscans	anthology	https://dynasty-scans.com/anthologies/TITLE	
+DynastyscansChapterExtractor	Extractor for manga-chapters from dynasty-scans.com	dynastyscans	chapter	https://dynasty-scans.com/chapters/NAME	
+DynastyscansImageExtractor	Extractor for individual images on dynasty-scans.com	dynastyscans	image	https://dynasty-scans.com/images/12345	
+DynastyscansMangaExtractor		dynastyscans	manga	https://dynasty-scans.com/series/NAME	
+DynastyscansSearchExtractor	Extrator for image search results on dynasty-scans.com	dynastyscans	search	https://dynasty-scans.com/images?QUERY	
+E621ArtistExtractor	Extractor for e621 artists		artist	https://e621.net/artists/12345	E621
+E621ArtistSearchExtractor	Extractor for e621 artist searches		artist-search	https://e621.net/artists?QUERY	E621
+E621FavoriteExtractor	Extractor for e621 favorites		favorite	https://e621.net/favorites	E621
+E621FrontendExtractor	Extractor for alternative e621 frontends	e621	frontend	https://e621.cc/?tags=TAG	E621
+E621PoolExtractor	Extractor for e621 pools		pool	https://e621.net/pools/12345	E621
+E621PopularExtractor	Extractor for popular images from e621		popular	https://e621.net/explore/posts/popular	E621
+E621PostExtractor	Extractor for single e621 posts		post	https://e621.net/posts/12345	E621
+E621TagExtractor	Extractor for e621 posts from tag searches		tag	https://e621.net/posts?tags=TAG	E621
+EpornerGalleryExtractor	Extractor for image galleries from eporner.com	eporner	gallery	https://www.eporner.com/gallery/GID/SLUG/	
+EromeAlbumExtractor	Extractor for albums on erome.com	erome	album	https://www.erome.com/a/ID	
+EromeSearchExtractor		erome	search	https://www.erome.com/search?q=QUERY	
+EromeUserExtractor		erome	user	https://www.erome.com/USER	
+EveriaCategoryExtractor		everia	category	https://everia.club/category/CATEGORY	
+EveriaDateExtractor		everia	date	https://everia.club/0000/00/00	
+EveriaPostExtractor		everia	post	https://everia.club/0000/00/00/TITLE	
+EveriaSearchExtractor		everia	search	https://everia.club/?s=SEARCH	
+EveriaTagExtractor		everia	tag	https://everia.club/tag/TAG	
+FacebookAlbumsExtractor	Extractor for Facebook Profile albums	facebook	albums	https://www.facebook.com/USERNAME/photos_albums	
+FacebookAvatarExtractor	Extractor for Facebook Profile Avatars	facebook	avatar	https://www.facebook.com/USERNAME/avatar	
+FacebookInfoExtractor	Extractor for Facebook Profile data	facebook	info	https://www.facebook.com/USERNAME/info	
+FacebookPhotoExtractor	Base class for Facebook Photo extractors	facebook	photo	https://www.facebook.com/photo/?fbid=PHOTO_ID	
+FacebookPhotosExtractor	Extractor for Facebook Profile Photos	facebook	photos	https://www.facebook.com/USERNAME/photos	
+FacebookSetExtractor	Base class for Facebook Set extractors	facebook	set	https://www.facebook.com/media/set/?set=SET_ID	
+FacebookUserExtractor	Extractor for Facebook Profiles	facebook	user	https://www.facebook.com/USERNAME	
+FacebookVideoExtractor	Base class for Facebook Video extractors	facebook	video	https://www.facebook.com/watch/?v=VIDEO_ID	
+FanboxCreatorExtractor	Extractor for a pixivFANBOX creator's works	fanbox	creator	https://USER.fanbox.cc/	
+FanboxHomeExtractor	Extractor for your pixivFANBOX home feed	fanbox	home	https://fanbox.cc/	
+FanboxPostExtractor	Extractor for media from a single pixivFANBOX post	fanbox	post	https://USER.fanbox.cc/posts/12345	
+FanboxRedirectExtractor	Extractor for pixiv redirects to fanbox.cc	fanbox	redirect	https://www.pixiv.net/fanbox/creator/12345	
+FanboxSupportingExtractor	Extractor for your supported pixivFANBOX users feed	fanbox	supporting	https://fanbox.cc/home/supporting	
+FanboxTagExtractor	Extractor for a pixivFANBOX creator's tagged works	fanbox	tag	https://USER.fanbox.cc/tags/TAG	
+FanslyCreatorMediaExtractor		fansly	creator-media	https://fansly.com/CREATOR/media	
+FanslyCreatorPostsExtractor		fansly	creator-posts	https://fansly.com/CREATOR/posts	
+FanslyHomeExtractor		fansly	home	https://fansly.com/home	
+FanslyListExtractor		fansly	list	https://fansly.com/lists/1234567890	
+FanslyListsExtractor		fansly	lists	https://fansly.com/lists	
+FanslyPostExtractor		fansly	post	https://fansly.com/post/1234567890	
+FantiaCreatorExtractor	Extractor for a Fantia creator's works	fantia	creator	https://fantia.jp/fanclubs/12345	
+FantiaPostExtractor	Extractor for media from a single Fantia post	fantia	post	https://fantia.jp/posts/12345	
+FantiaSupportingExtractor	Extractor for free and paid supporting fanclubs for the current user	fantia	supporting	https://fantia.jp/mypage/users/plans	
+FapachiPostExtractor	Extractor for individual posts on fapachi.com	fapachi	post	https://fapachi.com/MODEL/media/12345	
+FapachiUserExtractor	Extractor for all posts from a fapachi user	fapachi	user	https://fapachi.com/MODEL	
+FapelloModelExtractor	Extractor for all posts from a fapello model	fapello	model	https://fapello.com/model/	
+FapelloPathExtractor	Extractor for models and posts from fapello.com paths	fapello	path	https://fapello.com/trending/	
+FapelloPostExtractor	Extractor for individual posts on fapello.com	fapello	post	https://fapello.com/MODEL/12345/	
+FappicImageExtractor	Extractor for single images from fappic.com	fappic	image	https://fappic.com/abcde12345/NAME.EXT	imagehost
+FikfapHashtagExtractor		fikfap	hashtag	https://fikfap.com/hash/HASH	
+FikfapPostExtractor		fikfap	post	https://fikfap.com/user/USER/post/12345	
+FikfapUserExtractor		fikfap	user	https://fikfap.com/user/USER	
+FilesterFileExtractor		filester	file	https://filester.me/d/ID	
+FilesterFolderExtractor		filester	folder	https://filester.me/f/ID	
+FitnakedgirlsBlogExtractor	Extractor for fitnakedgirls blog posts	fitnakedgirls	blog	https://fitnakedgirls.com/fitblog/MODEL-NAME/	
+FitnakedgirlsCategoryExtractor	Extractor for fitnakedgirls category pages	fitnakedgirls	category	https://fitnakedgirls.com/photos/gallery/category/CATEGORY/	
+FitnakedgirlsGalleryExtractor	Extractor for fitnakedgirls galleries	fitnakedgirls	gallery	https://fitnakedgirls.com/photos/gallery/MODEL-nude/	
+FitnakedgirlsTagExtractor	Extractor for fitnakedgirls tag pages	fitnakedgirls	tag	https://fitnakedgirls.com/photos/gallery/tag/TAG/	
+FitnakedgirlsVideoExtractor	Extractor for fitnakedgirls video posts	fitnakedgirls	video	https://fitnakedgirls.com/videos/2025/08/VIDEO-TITLE/	
+FlickrAlbumExtractor	Extractor for photo albums from flickr.com	flickr	album	https://www.flickr.com/photos/USER/albums/12345	
+FlickrFavoriteExtractor	Extractor for favorite photos of a flickr user	flickr	favorite	https://www.flickr.com/photos/USER/favorites	
+FlickrGalleryExtractor	Extractor for photo galleries from flickr.com	flickr	gallery	https://www.flickr.com/photos/USER/galleries/12345/	
+FlickrGroupExtractor	Extractor for group pools from flickr.com	flickr	group	https://www.flickr.com/groups/NAME/	
+FlickrImageExtractor	Extractor for individual images from flickr.com	flickr	image	https://www.flickr.com/photos/USER/12345	
+FlickrSearchExtractor	Extractor for flickr photos based on search results	flickr	search	https://flickr.com/search/?text=QUERY	
+FlickrUserExtractor	Extractor for the photostream of a flickr user	flickr	user	https://www.flickr.com/photos/USER/	
+FoolfuukaBoardExtractor	Base extractor for FoolFuuka based boards/archives		board	https://archived.moe/a/	foolfuuka
+FoolfuukaGalleryExtractor	Base extractor for FoolFuuka galleries		gallery	https://archived.moe/a/gallery	foolfuuka
+FoolfuukaSearchExtractor	Base extractor for search results on FoolFuuka based boards/archives		search	https://archived.moe/_/search/text/QUERY/	foolfuuka
+FoolfuukaThreadExtractor	Base extractor for threads on FoolFuuka based boards/archives		thread	https://archived.moe/a/thread/12345/	foolfuuka
+FoolslideChapterExtractor	Base class for chapter extractors for FoOlSlide based sites		chapter	https://read.powermanga.org/read/MANGA/en/0/123/	foolslide
+FoolslideMangaExtractor	Base class for manga extractors for FoOlSlide based sites		manga	https://read.powermanga.org/series/MANGA/	foolslide
+ForiioUserExtractor		foriio	user	https://foriio.com/USER	
+ForiioWorkExtractor		foriio	work	https://www.foriio.com/works/12345	
+FuraffinityFavoriteExtractor	Extractor for a furaffinity user's favorites	furaffinity	favorite	https://www.furaffinity.net/favorites/USER/	
+FuraffinityFolderExtractor	Extractor for a FurAffinity folder	furaffinity	folder	https://www.furaffinity.net/gallery/USER/folder/12345/FOLDER	
+FuraffinityFollowingExtractor	Extractor for a furaffinity user's watched users	furaffinity	following	https://www.furaffinity.net/watchlist/by/USER/	
+FuraffinityGalleryExtractor	Extractor for a furaffinity user's gallery	furaffinity	gallery	https://www.furaffinity.net/gallery/USER/	
+FuraffinityPostExtractor	Extractor for individual posts on furaffinity	furaffinity	post	https://www.furaffinity.net/view/12345/	
+FuraffinityScrapsExtractor	Extractor for a furaffinity user's scraps	furaffinity	scraps	https://www.furaffinity.net/scraps/USER/	
+FuraffinitySearchExtractor	Extractor for furaffinity search results	furaffinity	search	https://www.furaffinity.net/search/?q=QUERY	
+FuraffinitySubmissionsExtractor	Extractor for new furaffinity submissions	furaffinity	submissions	https://www.furaffinity.net/msg/submissions	
+FuraffinityUserExtractor	Extractor for furaffinity user profiles	furaffinity	user	https://www.furaffinity.net/user/USER/	
+Furry34PlaylistExtractor		furry34	playlist	https://furry34.com/playlists/view/12345	booru
+Furry34PostExtractor		furry34	post	https://furry34.com/post/12345	booru
+Furry34TagExtractor		furry34	tag	https://furry34.com/TAG	booru
+FuskatorGalleryExtractor	Extractor for image galleries on fuskator.com	fuskator	gallery	https://fuskator.com/thumbs/ID/	
+FuskatorSearchExtractor	Extractor for search results on fuskator.com	fuskator	search	https://fuskator.com/search/TAG/	
+GelbooruFavoriteExtractor	Extractor for gelbooru favorites	gelbooru	favorite	https://gelbooru.com/index.php?page=favorites&s=view&id=12345	booru
+GelbooruPoolExtractor	Extractor for gelbooru pools	gelbooru	pool	https://gelbooru.com/index.php?page=pool&s=show&id=12345	booru
+GelbooruPostExtractor	Extractor for single images from gelbooru.com	gelbooru	post	https://gelbooru.com/index.php?page=post&s=view&id=12345	booru
+GelbooruRedirectExtractor		gelbooru	redirect	https://gelbooru.com/redirect.php?s=BASE64	booru
+GelbooruTagExtractor	Extractor for images from gelbooru.com based on search-tags	gelbooru	tag	https://gelbooru.com/index.php?page=post&s=list&tags=TAG	booru
+GelbooruV01FavoriteExtractor			favorite	https://allgirl.booru.org/index.php?page=favorites&s=view&id=1	gelbooru_v01
+GelbooruV01PostExtractor			post	https://allgirl.booru.org/index.php?page=post&s=view&id=12345	gelbooru_v01
+GelbooruV01TagExtractor			tag	https://allgirl.booru.org/index.php?page=post&s=list&tags=TAG	gelbooru_v01
+GelbooruV02FavoriteExtractor			favorite	https://safebooru.org/index.php?page=favorites&s=view&id=12345	gelbooru_v02
+GelbooruV02PoolExtractor			pool	https://safebooru.org/index.php?page=pool&s=show&id=12345	gelbooru_v02
+GelbooruV02PostExtractor			post	https://safebooru.org/index.php?page=post&s=view&id=12345	gelbooru_v02
+GelbooruV02TagExtractor			tag	https://safebooru.org/index.php?page=post&s=list&tags=TAG	gelbooru_v02
+GenericExtractor	Extractor for images in a generic web page.	generic		generic:https://www.nongnu.org/lzip/	
+GirlsreleasedModelExtractor	Extractor for girlsreleased models	girlsreleased	model	https://girlsreleased.com/model/12345/MODEL	
+GirlsreleasedSetExtractor	Extractor for girlsreleased galleries	girlsreleased	set	https://girlsreleased.com/set/12345	
+GirlsreleasedSiteExtractor	Extractor for girlsreleased sites	girlsreleased	site	https://girlsreleased.com/site/SITE	
+GirlswithmusclePostExtractor	Extractor for individual posts on girlswithmuscle.com	girlswithmuscle	post	https://www.girlswithmuscle.com/12345/	
+GirlswithmuscleSearchExtractor	Extractor for search results on girlswithmuscle.com	girlswithmuscle	search	https://www.girlswithmuscle.com/images/?name=MODEL	
+GofileFolderExtractor		gofile	folder	https://gofile.io/d/ID	
+HatenablogArchiveExtractor	Extractor for a blog's archive page	hatenablog	archive	https://BLOG.hatenablog.com/archive/2024	
+HatenablogEntryExtractor	Extractor for a single entry URL	hatenablog	entry	https://BLOG.hatenablog.com/entry/PATH	
+HatenablogHomeExtractor	Extractor for a blog's home page	hatenablog	home	https://BLOG.hatenablog.com	
+HatenablogSearchExtractor	Extractor for a blog's search results	hatenablog	search	https://BLOG.hatenablog.com/search?q=QUERY	
+Hentai2readChapterExtractor	Extractor for a single manga chapter from hentai2read.com	hentai2read	chapter	https://hentai2read.com/TITLE/1/	
+Hentai2readMangaExtractor	Extractor for hmanga from hentai2read.com	hentai2read	manga	https://hentai2read.com/TITLE/	
+HentaicosplaysGalleryExtractor	Extractor for image galleries from\nhentai-cosplay-xxx.com, hentai-img-xxx.com, and porn-image.com		gallery	https://hentai-cosplay-xxx.com/image/TITLE/	hentaicosplays
+HentaihereChapterExtractor	Extractor for a single manga chapter from hentaihere.com	hentaihere	chapter	https://hentaihere.com/m/S12345/1/1/	
+HentaihereMangaExtractor	Extractor for hmanga from hentaihere.com	hentaihere	manga	https://hentaihere.com/m/S12345	
+HiperdexArtistExtractor	Extractor for an artists's manga on hiperdex	hiperdex	artist	https://hiperdex.com/manga-artist/NAME/	
+HiperdexChapterExtractor	Extractor for hiperdex manga chapters	hiperdex	chapter	https://hiperdex.com/manga/MANGA/CHAPTER/	
+HiperdexMangaExtractor	Extractor for hiperdex manga	hiperdex	manga	https://hiperdex.com/manga/MANGA/	
+HotleakCategoryExtractor	Extractor for hotleak categories	hotleak	category	https://hotleak.vip/photos	
+HotleakCreatorExtractor	Extractor for all posts from a hotleak creator	hotleak	creator	https://hotleak.vip/MODEL	
+HotleakPostExtractor	Extractor for individual posts on hotleak	hotleak	post	https://hotleak.vip/MODEL/photo/12345	
+HotleakSearchExtractor	Extractor for hotleak search results	hotleak	search	https://hotleak.vip/search?search=QUERY	
+IdolcomplexPoolExtractor	Extractor for idolcomplex pools	idolcomplex	pool	https://www.idolcomplex.com/en/pools/0123456789abcdef	booru
+IdolcomplexPostExtractor	Extractor for individual idolcomplex posts	idolcomplex	post	https://www.idolcomplex.com/en/posts/0123456789abcdef	booru
+IdolcomplexTagExtractor	Extractor for idolcomplex tag searches	idolcomplex	tag	https://www.idolcomplex.com/en/posts?tags=TAGS	booru
+ImagebamGalleryExtractor	Extractor for imagebam galleries	imagebam	gallery	https://www.imagebam.com/view/GID	
+ImagebamImageExtractor	Extractor for single imagebam images	imagebam	image	https://www.imagebam.com/view/MID	
+ImagechestGalleryExtractor	Extractor for image galleries from imgchest.com	imagechest	gallery	https://imgchest.com/p/abcdefghijk	
+ImagechestUserExtractor	Extractor for imgchest.com user profiles	imagechest	user	https://imgchest.com/u/USER	
+ImagefapFolderExtractor	Extractor for imagefap user folders	imagefap	folder	https://www.imagefap.com/organizer/12345	
+ImagefapGalleryExtractor	Extractor for image galleries from imagefap.com	imagefap	gallery	https://www.imagefap.com/gallery/12345	
+ImagefapImageExtractor	Extractor for single images from imagefap.com	imagefap	image	https://www.imagefap.com/photo/12345	
+ImagefapUserExtractor	Extractor for an imagefap user profile	imagefap	user	https://www.imagefap.com/profile/USER	
+ImagepondAlbumExtractor		imagepond	album	https://www.imagepond.net/a/ID	chevereto
+ImagepondFileExtractor		imagepond	file	https://www.imagepond.net/i/ID	chevereto
+ImagepondUserExtractor		imagepond	user	https://www.imagepond.net/user/USER	chevereto
+ImageshackGalleryExtractor		imageshack	gallery	https://imageshack.com/a/ID	
+ImageshackImageExtractor		imageshack	image	https://imageshack.com/i/ID	
+ImageshackUserExtractor		imageshack	user	https://imageshack.com/user/USER	
+ImagetwistGalleryExtractor	Extractor for galleries from imagetwist.com	imagetwist	gallery	https://imagetwist.com/p/USER/12345/TITLE	imagehost
+ImagetwistImageExtractor	Extractor for single images from imagetwist.com	imagetwist	image	https://imagetwist.com/123456abcdef/NAME.EXT	imagehost
+ImagevenueImageExtractor	Extractor for single images from imagevenue.com	imagevenue	image	https://www.imagevenue.com/ME123456789	imagehost
+ImgadultImageExtractor	Extractor for single images from imgadult.com	imgadult	image	https://imgadult.com/img-0123456789abc.html	imagehost
+ImgbbAlbumExtractor	Extractor for imgbb albums	imgbb	album	https://ibb.co/album/ID	
+ImgbbImageExtractor		imgbb	image	https://ibb.co/ID	
+ImgbbUserExtractor	Extractor for imgbb user profiles	imgbb	user	https://USER.imgbb.com	
+ImgboxGalleryExtractor	Extractor for image galleries from imgbox.com	imgbox	gallery	https://imgbox.com/g/12345abcde	
+ImgboxImageExtractor	Extractor for single images from imgbox.com	imgbox	image	https://imgbox.com/1234abcd	
+ImgclickImageExtractor	Extractor for single images from imgclick.net	imgclick	image	http://imgclick.net/abc123/NAME.EXT.html	imagehost
+ImgdriveImageExtractor	Extractor for single images from imgdrive.net	imgdrive	image	https://imgdrive.net/img-0123456789abc.html	imagehost
+ImgpilePostExtractor		imgpile	post	https://imgpile.com/p/AbCdEfG	
+ImgpileUserExtractor		imgpile	user	https://imgpile.com/u/USER	
+ImgpvImageExtractor	Extractor for imgpv.com images	imgpv	image	https://www.imgpv.com/a1b2c3d4f5g6/NAME.EXT.html	imagehost
+ImgspiceImageExtractor	Extractor for single images from imgspice.com	imgspice	image	https://imgspice.com/ID/NAME.EXT.html	imagehost
+ImgthGalleryExtractor	Extractor for image galleries from imgth.com	imgth	gallery	https://imgth.com/gallery/123/TITLE	
+ImgurAlbumExtractor	Extractor for imgur albums	imgur	album	https://imgur.com/a/abcde	
+ImgurFavoriteExtractor	Extractor for a user's favorites	imgur	favorite	https://imgur.com/user/USER/favorites	
+ImgurFavoriteFolderExtractor	Extractor for a user's favorites folder	imgur	favorite-folder	https://imgur.com/user/USER/favorites/folder/12345/TITLE	
+ImgurGalleryExtractor	Extractor for imgur galleries	imgur	gallery	https://imgur.com/gallery/abcde	
+ImgurImageExtractor	Extractor for individual images on imgur.com	imgur	image	https://imgur.com/abcdefg	
+ImgurMeExtractor	Extractor for your personal uploads	imgur	me	https://imgur.com/user/me	
+ImgurSearchExtractor	Extractor for imgur search results	imgur	search	https://imgur.com/search?q=UERY	
+ImgurSubredditExtractor	Extractor for a subreddits's imgur links	imgur	subreddit	https://imgur.com/r/SUBREDDIT	
+ImgurTagExtractor	Extractor for imgur tag searches	imgur	tag	https://imgur.com/t/TAG	
+ImgurUserExtractor	Extractor for all images posted by a user	imgur	user	https://imgur.com/user/USER	
+ImhentaiGalleryExtractor	Extractor for imhentai galleries		gallery	https://imhentai.xxx/gallery/12345/	IMHentai
+ImhentaiSearchExtractor	Extractor for imhentai search results		search	https://imhentai.xxx/search/?key=QUERY	IMHentai
+ImhentaiTagExtractor	Extractor for imhentai tag searches		tag	https://imhentai.xxx/tag/TAG/	IMHentai
+ImxtoGalleryExtractor	Extractor for image galleries from imx.to	imxto	gallery	https://imx.to/g/ID	imagehost
+ImxtoImageExtractor	Extractor for single images from imx.to	imxto	image	https://imx.to/i/ID	imagehost
+InkbunnyFavoriteExtractor	Extractor for inkbunny user favorites	inkbunny	favorite	https://inkbunny.net/userfavorites_process.php?favs_user_id=12345	
+InkbunnyFollowingExtractor	Extractor for inkbunny user watches	inkbunny	following	https://inkbunny.net/watchlist_process.php?mode=watching&user_id=12345	
+InkbunnyPoolExtractor	Extractor for inkbunny pools	inkbunny	pool	https://inkbunny.net/poolview_process.php?pool_id=12345	
+InkbunnyPostExtractor	Extractor for individual Inkbunny posts	inkbunny	post	https://inkbunny.net/s/12345	
+InkbunnySearchExtractor	Extractor for inkbunny search results	inkbunny	search	https://inkbunny.net/submissionsviewall.php?text=TAG&mode=search&type=	
+InkbunnyUnreadExtractor	Extractor for unread inkbunny submissions	inkbunny	unread	https://inkbunny.net/submissionsviewall.php?text=&mode=unreadsubs&type=	
+InkbunnyUserExtractor	Extractor for inkbunny user profiles	inkbunny	user	https://inkbunny.net/USER	
+InstagramAvatarExtractor	Extractor for an Instagram user's avatar	instagram	avatar	https://www.instagram.com/USER/avatar/	
+InstagramCollectionExtractor	Extractor for Instagram collection	instagram	collection	https://www.instagram.com/USER/saved/COLLECTION/12345	
+InstagramFollowersExtractor	Extractor for an Instagram user's followers	instagram	followers	https://www.instagram.com/USER/followers/	
+InstagramFollowingExtractor	Extractor for an Instagram user's followed users	instagram	following	https://www.instagram.com/USER/following/	
+InstagramGuideExtractor	Extractor for an Instagram guide	instagram	guide	https://www.instagram.com/USER/guide/NAME/12345	
+InstagramHighlightsExtractor	Extractor for an Instagram user's story highlights	instagram	highlights	https://www.instagram.com/USER/highlights/	
+InstagramInfoExtractor	Extractor for an Instagram user's profile data	instagram	info	https://www.instagram.com/USER/info/	
+InstagramPostExtractor	Extractor for an Instagram post	instagram	post	https://www.instagram.com/p/abcdefg/	
+InstagramPostsExtractor	Extractor for an Instagram user's posts	instagram	posts	https://www.instagram.com/USER/posts/	
+InstagramReelsExtractor	Extractor for an Instagram user's reels	instagram	reels	https://www.instagram.com/USER/reels/	
+InstagramSavedExtractor	Extractor for an Instagram user's saved media	instagram	saved	https://www.instagram.com/USER/saved/	
+InstagramStoriesExtractor	Extractor for Instagram stories	instagram	stories	https://www.instagram.com/stories/USER/	
+InstagramStoriesTrayExtractor	Extractor for your Instagram account's stories tray	instagram	stories-tray	https://www.instagram.com/stories/me/	
+InstagramTagExtractor	Extractor for Instagram tags	instagram	tag	https://www.instagram.com/explore/tags/TAG/	
+InstagramTaggedExtractor	Extractor for an Instagram user's tagged posts	instagram	tagged	https://www.instagram.com/USER/tagged/	
+InstagramUserExtractor	Extractor for an Instagram user profile	instagram	user	https://www.instagram.com/USER/	
+IssuuPublicationExtractor	Extractor for a single publication	issuu	publication	https://issuu.com/issuu/docs/TITLE/	
+IssuuUserExtractor	Extractor for all publications of a user/publisher	issuu	user	https://issuu.com/USER	
+ItakuBookmarksExtractor	Extractor for an itaku bookmarks folder	itaku	bookmarks	https://itaku.ee/profile/USER/bookmarks/image/12345	
+ItakuFollowersExtractor		itaku	followers	https://itaku.ee/profile/USER/followers	
+ItakuFollowingExtractor		itaku	following	https://itaku.ee/profile/USER/following	
+ItakuGalleryExtractor	Extractor for an itaku user's gallery	itaku	gallery	https://itaku.ee/profile/USER/gallery	
+ItakuImageExtractor		itaku	image	https://itaku.ee/images/12345	
+ItakuPostExtractor		itaku	post	https://itaku.ee/posts/12345	
+ItakuPostsExtractor	Extractor for an itaku user's posts	itaku	posts	https://itaku.ee/profile/USER/posts	
+ItakuSearchExtractor		itaku	search	https://itaku.ee/home/images?tags=SEARCH	
+ItakuStarsExtractor	Extractor for an itaku user's starred images	itaku	stars	https://itaku.ee/profile/USER/stars	
+ItakuUserExtractor	Extractor for itaku user profiles	itaku	user	https://itaku.ee/profile/USER	
+ItchioGameExtractor	Extractor for itch.io games	itchio	game	https://USER.itch.io/GAME	
+IwaraFavoriteExtractor		iwara	favorite	https://www.iwara.tv/favorites/videos	
+IwaraFollowersExtractor		iwara	followers	https://www.iwara.tv/profile/USERNAME/followers	
+IwaraFollowingExtractor		iwara	following	https://www.iwara.tv/profile/USERNAME/following	
+IwaraImageExtractor	Extractor for individual iwara.tv image pages	iwara	image	https://www.iwara.tv/image/ID	
+IwaraPlaylistExtractor	Extractor for individual iwara.tv playlist pages	iwara	playlist	https://www.iwara.tv/playlist/ID	
+IwaraSearchExtractor	Extractor for iwara.tv search pages	iwara	search	https://www.iwara.tv/search?query=QUERY&type=TYPE	
+IwaraTagExtractor	Extractor for iwara.tv tag search	iwara	tag	https://www.iwara.tv/videos?tags=TAGS	
+IwaraUserExtractor	Extractor for iwara.tv profile pages	iwara	user	https://www.iwara.tv/profile/USERNAME	
+IwaraUserImagesExtractor		iwara	user-images	https://www.iwara.tv/profile/USERNAME/images	
+IwaraUserPlaylistsExtractor		iwara	user-playlists	https://www.iwara.tv/profile/USERNAME/playlists	
+IwaraUserVideosExtractor		iwara	user-videos	https://www.iwara.tv/profile/USERNAME/videos	
+IwaraVideoExtractor	Extractor for individual iwara.tv videos	iwara	video	https://www.iwara.tv/video/ID	
+JoyreactorPostExtractor	Extractor for single joyreactor posts	joyreactor	post	http://joyreactor.com/post/12345	reactor
+JoyreactorSearchExtractor	Extractor for joyreactor search results	joyreactor	search	http://joyreactor.com/search/TAG	reactor
+JoyreactorTagExtractor	Extractor for joyreactor tag searches	joyreactor	tag	http://joyreactor.com/tag/TAG	reactor
+JoyreactorUserExtractor	Extractor for posts of a joyreactor user	joyreactor	user	http://joyreactor.com/user/USER	reactor
+JschanBoardExtractor	Extractor for jschan boards		board	https://94chan.org/a/	jschan
+JschanThreadExtractor	Extractor for jschan threads		thread	https://94chan.org/a/thread/12345.html	jschan
+KabeuchiUserExtractor	Extractor for all posts of a user on kabe-uchiroom.com	kabeuchi	user	https://kabe-uchiroom.com/mypage/?id=12345	
+KaliscanChapterExtractor	Extractor for kaliscan manga chapters	kaliscan	chapter	https://kaliscan.me/manga/ID-MANGA/chapter-1	
+KaliscanMangaExtractor	Extractor for kaliscan manga	kaliscan	manga	https://kaliscan.me/manga/ID-MANGA	
+KeenspotComicExtractor	Extractor for webcomics from keenspot.com	keenspot	comic	http://COMIC.keenspot.com/	
+KemonoArtistsExtractor	Extractor for kemono artists	kemono	artists	https://kemono.cr/artists	
+KemonoDiscordExtractor	Extractor for kemono.cr discord servers	kemono	discord	https://kemono.cr/discord/server/12345/12345	
+KemonoDiscordServerExtractor		kemono	discord-server	https://kemono.cr/discord/server/12345	
+KemonoFavoriteExtractor	Extractor for kemono.cr favorites	kemono	favorite	https://kemono.cr/account/favorites/artists	
+KemonoPostExtractor	Extractor for a single kemono.cr post	kemono	post	https://kemono.cr/SERVICE/user/12345/post/12345	
+KemonoPostsExtractor	Extractor for kemono.cr post listings	kemono	posts	https://kemono.cr/posts	
+KemonoUserExtractor	Extractor for all posts from a kemono.cr user listing	kemono	user	https://kemono.cr/SERVICE/user/12345	
+KhinsiderSoundtrackExtractor	Extractor for soundtracks from khinsider.com	khinsider	soundtrack	https://downloads.khinsider.com/game-soundtracks/album/TITLE	
+KomikcastChapterExtractor	Extractor for komikcast manga chapters	komikcast	chapter	https://komikcast.li/chapter/TITLE/	
+KomikcastMangaExtractor	Extractor for komikcast manga	komikcast	manga	https://komikcast.li/komik/TITLE	
+KoofrSharedExtractor	Base class for koofr extractors	koofr	shared	https://app.koofr.net/links/UUID	
+LeakgalleryMostlikedExtractor	Extractor for most liked posts on leakgallery.com	leakgallery	mostliked	https://leakgallery.com/most-liked	
+LeakgalleryPostExtractor	Extractor for individual posts on leakgallery.com	leakgallery	post	https://leakgallery.com/CREATOR/12345	
+LeakgalleryTrendingExtractor	Extractor for trending posts on leakgallery.com	leakgallery	trending	https://leakgallery.com/trending-medias/Week	
+LeakgalleryUserExtractor	Extractor for profile posts on leakgallery.com	leakgallery	user	https://leakgallery.com/creator	
+LensdumpAlbumExtractor		lensdump	album	https://lensdump.com/a/ID	
+LensdumpAlbumsExtractor	Extractor for album list from lensdump.com	lensdump	albums	https://lensdump.com/USER	
+LensdumpImageExtractor	Extractor for individual images on lensdump.com	lensdump	image	https://lensdump.com/i/ID	
+LexicaSearchExtractor	Extractor for lexica.art search results	lexica	search	https://lexica.art/?q=QUERY	
+LightroomGalleryExtractor	Extractor for an image gallery on lightroom.adobe.com	lightroom	gallery	https://lightroom.adobe.com/shares/0123456789abcdef	
+ListalImageExtractor	Extractor for listal pictures	listal	image	https://www.listal.com/viewimage/12345678	
+ListalPeopleExtractor	Extractor for listal people pictures	listal	people	https://www.listal.com/NAME/pictures	
+LivedoorBlogExtractor	Extractor for a user's blog on blog.livedoor.jp	livedoor	blog	http://blog.livedoor.jp/USER/	
+LivedoorPostExtractor	Extractor for images from a blog post on blog.livedoor.jp	livedoor	post	http://blog.livedoor.jp/USER/archives/12345.html	
+LofterBlogPostsExtractor	Extractor for a lofter blog's posts	lofter	blog-posts	https://BLOG.lofter.com/	
+LofterPostExtractor	Extractor for a lofter post	lofter	post	https://BLOG.lofter.com/post/12345678_90abcdef	
+LolisafeAlbumExtractor			album	https://xbunkr.com/a/ID	lolisafe
+LusciousAlbumExtractor	Extractor for image albums from luscious.net	luscious	album	https://luscious.net/albums/TITLE_12345/	
+LusciousSearchExtractor	Extractor for album searches on luscious.net	luscious	search	https://luscious.net/albums/list/?tagged=TAG	
+LynxchanBoardExtractor	Extractor for LynxChan boards		board	https://endchan.org/a/	lynxchan
+LynxchanThreadExtractor	Extractor for LynxChan threads		thread	https://endchan.org/a/res/12345.html	lynxchan
+MadokamiMangaExtractor	Extractor for madokami manga	madokami	manga	https://manga.madokami.al/Manga/A/AB/ABCD/ABCDE_TITLE	
+MangadexAuthorExtractor	Extractor for mangadex authors	mangadex	author	https://mangadex.org/author/01234567-89ab-cdef-0123-456789abcdef/NAME	
+MangadexChapterExtractor	Extractor for manga-chapters from mangadex.org	mangadex	chapter	https://mangadex.org/chapter/01234567-89ab-cdef-0123-456789abcdef	
+MangadexCoversExtractor	Extractor for mangadex manga covers	mangadex	covers	https://mangadex.org/title/01234567-89ab-cdef-0123-456789abcdef?tab=art	
+MangadexFeedExtractor	Extractor for chapters from your Updates Feed	mangadex	feed	https://mangadex.org/title/feed	
+MangadexFollowingExtractor	Extractor for followed manga from your Library	mangadex	following	https://mangadex.org/title/follows	
+MangadexListExtractor	Extractor for mangadex MDLists	mangadex	list	https://mangadex.org/list/01234567-89ab-cdef-0123-456789abcdef/NAME	
+MangadexMangaExtractor	Extractor for manga from mangadex.org	mangadex	manga	https://mangadex.org/title/01234567-89ab-cdef-0123-456789abcdef	
+MangafireChapterExtractor	Extractor for mangafire manga chapters	mangafire	chapter	https://mangafire.to/read/MANGA.ID/LANG/chapter-123	
+MangafireMangaExtractor	Extractor for mangafire manga	mangafire	manga	https://mangafire.to/manga/MANGA.ID	
+MangafoxChapterExtractor	Extractor for manga chapters from fanfox.net	mangafox	chapter	https://fanfox.net/manga/TITLE/v01/c001/1.html	
+MangafoxMangaExtractor	Extractor for manga from fanfox.net	mangafox	manga	https://fanfox.net/manga/TITLE	
+MangafreakChapterExtractor	Extractor for mangafreak manga chapters	mangafreak	chapter	https://ww2.mangafreak.me/Read1_Onepunch_Man_1	
+MangafreakMangaExtractor	Extractor for mangafreak manga series	mangafreak	manga	https://ww2.mangafreak.me/Manga/Onepunch_Man	
+MangahereChapterExtractor	Extractor for manga-chapters from mangahere.cc	mangahere	chapter	https://www.mangahere.cc/manga/TITLE/c001/1.html	
+MangahereMangaExtractor	Extractor for manga from mangahere.cc	mangahere	manga	https://www.mangahere.cc/manga/TITLE	
+ManganeloBookmarkExtractor	Extractor for manganelo bookmarks		bookmark	https://www.mangakakalot.gg/bookmark	manganelo
+ManganeloChapterExtractor	Extractor for manganelo manga chapters		chapter	https://www.mangakakalot.gg/manga/MANGA_NAME/chapter-123	manganelo
+ManganeloMangaExtractor	Extractor for manganelo manga		manga	https://www.mangakakalot.gg/manga/MANGA_NAME	manganelo
+MangaparkChapterExtractor	Extractor for manga-chapters from mangapark.net	mangapark	chapter	https://mangapark.net/title/MANGA/12345-en-ch.01	
+MangaparkMangaExtractor	Extractor for manga from mangapark.net	mangapark	manga	https://mangapark.net/title/12345-MANGA	
+MangareadChapterExtractor	Extractor for manga-chapters from mangaread.org	mangaread	chapter	https://www.mangaread.org/manga/MANGA/chapter-01/	
+MangareadMangaExtractor	Extractor for manga from mangaread.org	mangaread	manga	https://www.mangaread.org/manga/MANGA	
+MangareaderChapterExtractor	Extractor for mangareader manga chapters	mangareader	chapter	https://mangareader.to/read/MANGA-123/LANG/chapter-123	
+MangareaderMangaExtractor	Extractor for mangareader manga	mangareader	manga	https://mangareader.to/MANGA-123	
+MangataroChapterExtractor	Extractor for mangataro manga chapters	mangataro	chapter	https://mangataro.org/read/MANGA/ch123-12345	
+MangataroMangaExtractor	Extractor for mangataro manga	mangataro	manga	https://mangataro.org/manga/MANGA	
+MangatownChapterExtractor	Extractor for manga-chapters from mangatown.com	mangatown	chapter	https://www.mangatown.com/manga/TITLE/c001/1.html	
+MangatownMangaExtractor	Extractor for manga from mangatown.com	mangatown	manga	https://www.mangatown.com/manga/TITLE	
+MangoxoAlbumExtractor	Extractor for albums on mangoxo.com	mangoxo	album	https://www.mangoxo.com/album/ID	
+MangoxoChannelExtractor	Extractor for all albums on a mangoxo channel	mangoxo	channel	https://www.mangoxo.com/USER/album	
+MastodonBookmarkExtractor	Extractor for mastodon bookmarks		bookmark	https://mastodon.social/bookmarks	mastodon
+MastodonFavoriteExtractor	Extractor for mastodon favorites		favorite	https://mastodon.social/favourites	mastodon
+MastodonFollowingExtractor	Extractor for followed mastodon users		following	https://mastodon.social/@USER/following	mastodon
+MastodonHashtagExtractor	Extractor for mastodon hashtags		hashtag	https://mastodon.social/tags/NAME	mastodon
+MastodonListExtractor	Extractor for mastodon lists		list	https://mastodon.social/lists/12345	mastodon
+MastodonStatusExtractor	Extractor for images from a status		status	https://mastodon.social/@USER/12345	mastodon
+MastodonUserExtractor	Extractor for all images of an account/user		user	https://mastodon.social/@USER	mastodon
+MisskeyAvatarExtractor	Extractor for a Misskey user's avatar		avatar	https://misskey.io/@USER/avatar	misskey
+MisskeyBackgroundExtractor	Extractor for a Misskey user's banner image		background	https://misskey.io/@USER/banner	misskey
+MisskeyFavoriteExtractor	Extractor for favorited notes		favorite	https://misskey.io/my/favorites	misskey
+MisskeyFollowingExtractor	Extractor for followed Misskey users		following	https://misskey.io/@USER/following	misskey
+MisskeyInfoExtractor	Extractor for a Misskey user's profile data		info	https://misskey.io/@USER/info	misskey
+MisskeyNoteExtractor	Extractor for images from a Note		note	https://misskey.io/notes/98765	misskey
+MisskeyNotesExtractor	Extractor for a Misskey user's notes		notes	https://misskey.io/@USER/notes	misskey
+MisskeyUserExtractor	Extractor for all images of a Misskey user		user	https://misskey.io/@USER	misskey
+MixdropFileExtractor	Extractor for mixdrop files	mixdrop	file	https://mixdrop.ag/f/0123456789abcdef	
+MoebooruPoolExtractor			pool	https://yande.re/pool/show/12345	moebooru
+MoebooruPopularExtractor			popular	https://yande.re/post/popular_by_month?year=YYYY&month=MM	moebooru
+MoebooruPostExtractor			post	https://yande.re/post/show/12345	moebooru
+MoebooruTagExtractor			tag	https://yande.re/post?tags=TAG	moebooru
+MotherlessGalleryExtractor	Extractor for a motherless.com gallery	motherless	gallery	https://motherless.com/GABC123	
+MotherlessGroupExtractor		motherless	group	https://motherless.com/g/abc123	
+MotherlessMediaExtractor	Extractor for a single image/video from motherless.com	motherless	media	https://motherless.com/ABC123	
+MyhentaigalleryGalleryExtractor	Extractor for image galleries from myhentaigallery.com	myhentaigallery	gallery	https://myhentaigallery.com/g/12345	
+MyhentaigalleryTagExtractor	Extractor for myhentaigallery tag searches	myhentaigallery	tag	https://myhentaigallery.com/g/category/123	
+MyportfolioGalleryExtractor	Extractor for an image gallery on www.myportfolio.com	myportfolio	gallery	https://USER.myportfolio.com/TITLE	
+NaverBlogBlogExtractor	Extractor for a user's blog on blog.naver.com	naver-blog	blog	https://blog.naver.com/BLOGID	
+NaverBlogPostExtractor	Extractor for blog posts on blog.naver.com	naver-blog	post	https://blog.naver.com/BLOGID/12345	
+NaverChzzkCommentExtractor	Extractor for individual comment from chzzk.naver.com	naver-chzzk	comment	https://chzzk.naver.com/0123456789abcdef/community/detail/12345	
+NaverChzzkCommunityExtractor	Extractor for comments from chzzk.naver.com	naver-chzzk	community	https://chzzk.naver.com/0123456789abcdef/community	
+NaverWebtoonComicExtractor		naver-webtoon	comic	https://comic.naver.com/webtoon/list?titleId=12345	
+NaverWebtoonEpisodeExtractor		naver-webtoon	episode	https://comic.naver.com/webtoon/detail?titleId=12345&no=1	
+NekohousePostExtractor		nekohouse	post	https://nekohouse.su/SERVICE/user/12345/post/12345	
+NekohouseUserExtractor		nekohouse	user	https://nekohouse.su/SERVICE/user/12345	
+NewgroundsArtExtractor	Extractor for all images of a newgrounds user	newgrounds	art	https://USER.newgrounds.com/art	
+NewgroundsAudioExtractor	Extractor for all audio submissions of a newgrounds user	newgrounds	audio	https://USER.newgrounds.com/audio	
+NewgroundsFavoriteExtractor	Extractor for posts favorited by a newgrounds user	newgrounds	favorite	https://USER.newgrounds.com/favorites	
+NewgroundsFollowingExtractor	Extractor for a newgrounds user's favorited users	newgrounds	following	https://USER.newgrounds.com/favorites/following	
+NewgroundsGamesExtractor	Extractor for a newgrounds user's games	newgrounds	games	https://USER.newgrounds.com/games	
+NewgroundsImageExtractor	Extractor for a single image from newgrounds.com	newgrounds	image	https://www.newgrounds.com/art/view/USER/TITLE	
+NewgroundsMediaExtractor	Extractor for a media file from newgrounds.com	newgrounds	media	https://www.newgrounds.com/portal/view/12345	
+NewgroundsMoviesExtractor	Extractor for all movies of a newgrounds user	newgrounds	movies	https://USER.newgrounds.com/movies	
+NewgroundsSearchExtractor	Extractor for newgrounds.com search reesults	newgrounds	search	https://www.newgrounds.com/search/conduct/art?terms=QUERY	
+NewgroundsUserExtractor	Extractor for a newgrounds user profile	newgrounds	user	https://USER.newgrounds.com	
+NijieDoujinExtractor	Extractor for doujin entries of a nijie user		doujin	https://nijie.info/members_dojin.php?id=12345	Nijie
+NijieFavoriteExtractor	Extractor for all favorites/bookmarks of a nijie user		favorite	https://nijie.info/user_like_illust_view.php?id=12345	Nijie
+NijieFeedExtractor	Extractor for nijie liked user feed		feed	https://nijie.info/like_user_view.php	Nijie
+NijieFollowedExtractor	Extractor for followed nijie users		followed	https://nijie.info/like_my.php	Nijie
+NijieIllustrationExtractor	Extractor for all illustrations of a nijie-user		illustration	https://nijie.info/members_illust.php?id=12345	Nijie
+NijieImageExtractor	Extractor for a nijie work/image		image	https://nijie.info/view.php?id=12345	Nijie
+NijieNuitaExtractor	Extractor for a nijie user's 抜いた list		nuita	https://nijie.info/history_nuita.php?id=12345	Nijie
+NijieUserExtractor	Extractor for nijie user profiles		user	https://nijie.info/members.php?id=12345	Nijie
+NitterMediaExtractor			media	https://nitter.net/USER/media	nitter
+NitterRepliesExtractor			replies	https://nitter.net/USER/with_replies	nitter
+NitterSearchExtractor			search	https://nitter.net/USER/search	nitter
+NitterTweetExtractor	Extractor for nitter tweets		tweet	https://nitter.net/USER/status/12345	nitter
+NitterTweetsExtractor			tweets	https://nitter.net/USER	nitter
+NoopExtractor		noop		noop	
+NozomiIndexExtractor	Extractor for the nozomi.la index	nozomi	index	https://nozomi.la/index-1.html	
+NozomiPostExtractor	Extractor for individual posts on nozomi.la	nozomi	post	https://nozomi.la/post/12345.html	
+NozomiSearchExtractor	Extractor for search results on nozomi.la	nozomi	search	https://nozomi.la/search.html?q=QUERY	
+NozomiTagExtractor	Extractor for posts from tag searches on nozomi.la	nozomi	tag	https://nozomi.la/tag/TAG-1.html	
+NsfwalbumAlbumExtractor	Extractor for image albums on nsfwalbum.com	nsfwalbum	album	https://nsfwalbum.com/album/12345	
+NudostarImageExtractor	Extractor for NudoStar images	nudostar	image	https://nudostar.tv/models/MODEL/123/	
+NudostarModelExtractor	Extractor for NudoStar models	nudostar	model	https://nudostar.tv/models/MODEL/	
+OAuthDeviantart		oauth	deviantart	oauth:deviantart	
+OAuthFlickr		oauth	flickr	oauth:flickr	
+OAuthMastodon		oauth	mastodon	oauth:mastodon:mastodon.social	
+OAuthPixiv		oauth	pixiv	oauth:pixiv	
+OAuthReddit		oauth	reddit	oauth:reddit	
+OAuthSmugmug		oauth	smugmug	oauth:smugmug	
+OAuthTumblr		oauth	tumblr	oauth:tumblr	
+OkpornGalleryExtractor	Extractor for image galleries from ok.porn	okporn	gallery	https://ok.porn/albums/12345/	
+PahealPostExtractor	Extractor for single images from rule34.paheal.net	paheal	post	https://rule34.paheal.net/post/view/12345	shimmie2
+PahealTagExtractor	Extractor for images from rule34.paheal.net by search-tags	paheal	tag	https://rule34.paheal.net/post/list/TAG/1	shimmie2
+PatreonCollectionExtractor	Extractor for a patreon collection	patreon	collection	https://www.patreon.com/collection/12345	
+PatreonCreatorExtractor	Extractor for a creator's works	patreon	creator	https://www.patreon.com/c/USER	
+PatreonPostExtractor	Extractor for media from a single post	patreon	post	https://www.patreon.com/posts/TITLE-12345	
+PatreonUserExtractor	Extractor for media from creators supported by you	patreon	user	https://www.patreon.com/home	
+PexelsCollectionExtractor	Extractor for a pexels.com collection	pexels	collection	https://www.pexels.com/collections/SLUG-a1b2c3/	
+PexelsImageExtractor		pexels	image	https://www.pexels.com/photo/SLUG-12345/	
+PexelsSearchExtractor	Extractor for pexels.com search results	pexels	search	https://www.pexels.com/search/QUERY/	
+PexelsUserExtractor	Extractor for pexels.com user galleries	pexels	user	https://www.pexels.com/@USER-12345/	
+PhilomenaGalleryExtractor	Extractor for Philomena galleries		gallery	https://derpibooru.org/galleries/12345	philomena
+PhilomenaPostExtractor	Extractor for single posts on a Philomena booru		post	https://derpibooru.org/images/12345	philomena
+PhilomenaSearchExtractor	Extractor for Philomena search results		search	https://derpibooru.org/search?q=QUERY	philomena
+PholderSearchExtractor	Extractor for URLs from pholder-stored posts for a search	pholder	search	https://www.pholder.com/SEARCH	
+PholderSubredditExtractor	Extractor for media from pholder-stored posts for a subreddit	pholder	subreddit	https://pholder.com/r/SUBREDDIT	
+PholderUserExtractor	Extractor for URLs from pholder-stored posts for a reddit user	pholder	user	https://www.pholder.com/u/USER	
+PhotovogueUserExtractor		photovogue	user	https://www.vogue.com/photovogue/photographers/12345	
+PicartoGalleryExtractor	Extractor for picarto galleries	picarto	gallery	https://picarto.tv/USER/gallery/TITLE/	
+PicazorUserExtractor	Extractor for picazor users	picazor	user	https://picazor.com/en/USERNAME	
+PicstateImageExtractor	Extractor for single images from picstate.com	picstate	image	https://picstate.com/view/full/123	imagehost
+PictoaAlbumExtractor	Extractor for image albums from pictoa.com	pictoa	album	https://www.pictoa.com/albums/NAME-12345.html	
+PictoaImageExtractor	Extractor for single images from pictoa.com	pictoa	image	https://www.pictoa.com/albums/NAME-12345/12345.html	
+PiczelFolderExtractor	Extractor for images inside a user's folder	piczel	folder	https://piczel.tv/gallery/USER/12345	
+PiczelImageExtractor	Extractor for individual images	piczel	image	https://piczel.tv/gallery/image/12345	
+PiczelUserExtractor	Extractor for all images from a user's gallery	piczel	user	https://piczel.tv/gallery/USER	
+PillowfortPostExtractor	Extractor for a single pillowfort post	pillowfort	post	https://www.pillowfort.social/posts/12345	
+PillowfortUserExtractor	Extractor for all posts of a pillowfort user	pillowfort	user	https://www.pillowfort.social/USER	
+PinterestAllpinsExtractor	Extractor for a user's 'All Pins' feed	pinterest	allpins	https://www.pinterest.com/USER/pins/	
+PinterestBoardExtractor	Extractor for images from a board from pinterest.com	pinterest	board	https://www.pinterest.com/USER/BOARD/	
+PinterestCreatedExtractor	Extractor for a user's created pins	pinterest	created	https://www.pinterest.com/USER/_created/	
+PinterestPinExtractor	Extractor for images from a single pin from pinterest.com	pinterest	pin	https://www.pinterest.com/pin/12345/	
+PinterestPinitExtractor	Extractor for images from a pin.it URL	pinterest	pinit	https://pin.it/abcde	
+PinterestRelatedBoardExtractor	Extractor for related pins of a board from pinterest.com	pinterest	related-board	https://www.pinterest.com/USER/BOARD/#related	
+PinterestRelatedPinExtractor	Extractor for related pins of another pin from pinterest.com	pinterest	related-pin	https://www.pinterest.com/pin/12345/#related	
+PinterestSearchExtractor	Extractor for Pinterest search results	pinterest	search	https://www.pinterest.com/search/pins/?q=QUERY	
+PinterestSectionExtractor	Extractor for board sections on pinterest.com	pinterest	section	https://www.pinterest.com/USER/BOARD/SECTION	
+PinterestUserExtractor	Extractor for a user's boards	pinterest	user	https://www.pinterest.com/USER/	
+PixeldrainAlbumExtractor	Extractor for pixeldrain albums	pixeldrain	album	https://pixeldrain.com/l/abcdefgh	
+PixeldrainFileExtractor	Extractor for pixeldrain files	pixeldrain	file	https://pixeldrain.com/u/abcdefgh	
+PixeldrainFolderExtractor	Extractor for pixeldrain filesystem files and directories	pixeldrain	folder	https://pixeldrain.com/d/abcdefgh	
+PixhostGalleryExtractor	Extractor for image galleries from pixhost.to	pixhost	gallery	https://pixhost.to/gallery/ID	imagehost
+PixhostImageExtractor	Extractor for single images from pixhost.to	pixhost	image	https://pixhost.to/show/123/12345_NAME.EXT	imagehost
+PixivArtworksExtractor	Extractor for artworks of a pixiv user	pixiv	artworks	https://www.pixiv.net/en/users/12345/artworks	
+PixivAvatarExtractor	Extractor for pixiv avatars	pixiv	avatar	https://www.pixiv.net/en/users/12345/avatar	
+PixivBackgroundExtractor	Extractor for pixiv background banners	pixiv	background	https://www.pixiv.net/en/users/12345/background	
+PixivFavoriteExtractor	Extractor for all favorites/bookmarks of a pixiv user	pixiv	favorite	https://www.pixiv.net/en/users/12345/bookmarks/artworks	
+PixivFollowedExtractor	Extractor for new illustrations from your followed artists	pixiv	followed	https://www.pixiv.net/bookmark_new_illust.php	
+PixivMeExtractor	Extractor for pixiv.me URLs	pixiv	me	https://pixiv.me/USER	
+PixivNovelBookmarkExtractor	Extractor for bookmarked pixiv novels	pixiv-novel	bookmark	https://www.pixiv.net/en/users/12345/bookmarks/novels	
+PixivNovelNovelExtractor	Extractor for pixiv novels	pixiv-novel	novel	https://www.pixiv.net/novel/show.php?id=12345	
+PixivNovelSeriesExtractor	Extractor for pixiv novel series	pixiv-novel	series	https://www.pixiv.net/novel/series/12345	
+PixivNovelUserExtractor	Extractor for pixiv users' novels	pixiv-novel	user	https://www.pixiv.net/en/users/12345/novels	
+PixivPixivisionExtractor	Extractor for illustrations from a pixivision article	pixiv	pixivision	https://www.pixivision.net/en/a/12345	
+PixivRankingExtractor	Extractor for pixiv ranking pages	pixiv	ranking	https://www.pixiv.net/ranking.php	
+PixivSearchExtractor	Extractor for pixiv search results	pixiv	search	https://www.pixiv.net/en/tags/TAG	
+PixivSeriesExtractor	Extractor for illustrations from a Pixiv series	pixiv	series	https://www.pixiv.net/user/12345/series/12345	
+PixivSketchExtractor	Extractor for user pages on sketch.pixiv.net	pixiv	sketch	https://sketch.pixiv.net/@USER	
+PixivUnlistedExtractor	Extractor for a unlisted pixiv illustrations	pixiv	unlisted	https://www.pixiv.net/en/artworks/unlisted/a1b2c3d4e5f6g7h8i9j0	
+PixivUserExtractor	Extractor for a pixiv user profile	pixiv	user	https://www.pixiv.net/en/users/12345	
+PixivWorkExtractor	Extractor for a single pixiv work/illustration	pixiv	work	https://www.pixiv.net/artworks/12345	
+PixnetFolderExtractor	Extractor for all sets in a pixnet folder	pixnet	folder	https://USER.pixnet.net/album/folder/12345	
+PixnetImageExtractor	Extractor for a single photo from pixnet.net	pixnet	image	https://USER.pixnet.net/album/photo/12345	
+PixnetSetExtractor	Extractor for images from a pixnet set	pixnet	set	https://USER.pixnet.net/album/set/12345	
+PixnetUserExtractor	Extractor for all sets and folders of a pixnet user	pixnet	user	https://USER.pixnet.net/	
+PlurkPostExtractor	Extractor for URLs from a Plurk post	plurk	post	https://www.plurk.com/p/12345	
+PlurkTimelineExtractor	Extractor for URLs from all posts in a Plurk timeline	plurk	timeline	https://www.plurk.com/USER	
+PoipikuPostExtractor	Extractor for a poipiku post	poipiku	post	https://poipiku.com/12345/12345.html	
+PoipikuUserExtractor	Extractor for posts from a poipiku user	poipiku	user	https://poipiku.com/12345/	
+PoringaPostExtractor	Extractor for posts on poringa.net	poringa	post	http://www.poringa.net/posts/imagenes/12345/TITLE.html	
+PoringaSearchExtractor		poringa	search	http://www.poringa.net/buscar/?q=QUERY	
+PoringaUserExtractor		poringa	user	http://www.poringa.net/USER	
+PornhubGalleryExtractor	Extractor for image galleries on pornhub.com	pornhub	gallery	https://www.pornhub.com/album/12345	
+PornhubGifExtractor	Extractor for pornhub.com gifs	pornhub	gif	https://www.pornhub.com/gif/12345	
+PornhubGifsExtractor	Extractor for a pornhub user's gifs	pornhub	gifs	https://www.pornhub.com/model/USER/gifs	
+PornhubPhotosExtractor	Extractor for all galleries of a pornhub user	pornhub	photos	https://www.pornhub.com/model/USER/photos	
+PornhubUserExtractor	Extractor for a pornhub user	pornhub	user	https://www.pornhub.com/model/USER	
+PornpicsCategoryExtractor	Extractor for galleries from pornpics categories	pornpics	category	https://www.pornpics.com/ass/	
+PornpicsGalleryExtractor	Extractor for pornpics galleries	pornpics	gallery	https://www.pornpics.com/galleries/TITLE-12345/	
+PornpicsListingExtractor	Extractor for galleries from pornpics listing pages\n\nThese pages (popular, recent, etc.) don't support JSON pagination\nand use single quotes in HTML, unlike category pages.\n	pornpics	listing	https://www.pornpics.com/popular/	
+PornpicsSearchExtractor	Extractor for galleries from pornpics search results	pornpics	search	https://www.pornpics.com/?q=QUERY	
+PornpicsTagExtractor	Extractor for galleries from pornpics tag searches	pornpics	tag	https://www.pornpics.com/tags/TAGS/	
+PornstarstubeGalleryExtractor	Extractor for image galleries from pornstars.tube	pornstarstube	gallery	https://pornstars.tube/albums/12345/SLUG/	
+PostimgGalleryExtractor	Extractor for images galleries from postimages.org	postimg	gallery	https://postimg.cc/gallery/ID	imagehost
+PostimgImageExtractor	Extractor for single images from postimages.org	postimg	image	https://postimg.cc/ID	imagehost
+PostmillForumExtractor	Extractor for submissions on a forum		forum	https://raddle.me/f/FORUM	postmill
+PostmillHomeExtractor	Extractor for the home page		home	https://raddle.me/	postmill
+PostmillPostExtractor	Extractor for a single submission URL		post	https://raddle.me/f/FORUM/123/TITLE	postmill
+PostmillSearchExtractor	Extractor for search results		search	https://raddle.me/search?q=QUERY	postmill
+PostmillShortURLExtractor	Extractor for short submission URLs		shorturl	https://raddle.me/123	postmill
+PostmillTagExtractor	Extractor for submissions on a forum with a specific tag		tag	https://raddle.me/tag/TAG	postmill
+PostmillUserSubmissionsExtractor	Extractor for submissions made by a user		usersubmissions	https://raddle.me/user/USER/submissions	postmill
+RawkumaChapterExtractor	Extractor for manga chapters from rawkuma.net	rawkuma	chapter	https://rawkuma.net/manga/7TITLE/chapter-123.321	
+RawkumaMangaExtractor	Extractor for manga from rawkuma.net	rawkuma	manga	https://rawkuma.net/manga/TITLE/	
+ReactorPostExtractor	Extractor for single posts on *reactor.cc sites		post	http://reactor.cc/post/12345	reactor
+ReactorSearchExtractor	Extractor for search results on *reactor.cc sites		search	http://reactor.cc/search?q=QUERY	reactor
+ReactorTagExtractor	Extractor for tag searches on *reactor.cc sites		tag	http://reactor.cc/tag/TAG	reactor
+ReactorUserExtractor	Extractor for all posts of a user on *reactor.cc sites		user	http://reactor.cc/user/USER	reactor
+ReadcomiconlineComicExtractor	Extractor for comics from readcomiconline.li	readcomiconline	comic	https://readcomiconline.li/Comic/TITLE	
+ReadcomiconlineIssueExtractor	Extractor for comic-issues from readcomiconline.li	readcomiconline	issue	https://readcomiconline.li/Comic/TITLE/Issue-123?id=12345	
+ReadcomiconlineTagExtractor	Extractor for comics from readcomiconline.li lists	readcomiconline	tag	https://readcomiconline.li/Artist/NAME	
+RealbooruFavoriteExtractor		realbooru	favorite	https://realbooru.com/index.php?page=favorites&s=view&id=12345	booru
+RealbooruPoolExtractor		realbooru	pool	https://realbooru.com/index.php?page=pool&s=show&id=12345	booru
+RealbooruPostExtractor		realbooru	post	https://realbooru.com/index.php?page=post&s=view&id=12345	booru
+RealbooruTagExtractor		realbooru	tag	https://realbooru.com/index.php?page=post&s=list&tags=TAG	booru
+RecursiveExtractor	Extractor that fetches URLs from a remote or local source	recursive		recursive:https://pastebin.com/raw/FLwrCYsT	
+RedditHomeExtractor	Extractor for submissions from your home feed on reddit.com	reddit	home	https://www.reddit.com/	
+RedditImageExtractor	Extractor for reddit-hosted images	reddit	image	https://i.redd.it/NAME.EXT	
+RedditRedirectExtractor	Extractor for personalized share URLs produced by the mobile app	reddit	redirect	https://www.reddit.com/r/SUBREDDIT/s/abc456GHIJ	
+RedditSubmissionExtractor	Extractor for URLs from a submission on reddit.com	reddit	submission	https://www.reddit.com/r/SUBREDDIT/comments/id/	
+RedditSubredditExtractor	Extractor for URLs from subreddits on reddit.com	reddit	subreddit	https://www.reddit.com/r/SUBREDDIT/	
+RedditUserExtractor	Extractor for URLs from posts by a reddit user	reddit	user	https://www.reddit.com/user/USER/	
+RedgifsCollectionExtractor	Extractor for an individual user collection	redgifs	collection	https://www.redgifs.com/users/USER/collections/ID	
+RedgifsCollectionsExtractor	Extractor for redgifs user collections	redgifs	collections	https://www.redgifs.com/users/USER/collections	
+RedgifsImageExtractor	Extractor for individual gifs from redgifs.com	redgifs	image	https://redgifs.com/watch/ID	
+RedgifsNichesExtractor	Extractor for redgifs niches	redgifs	niches	https://www.redgifs.com/niches/NAME	
+RedgifsSearchExtractor	Extractor for redgifs search results	redgifs	search	https://www.redgifs.com/gifs/TAG	
+RedgifsUserExtractor	Extractor for redgifs user profiles	redgifs	user	https://www.redgifs.com/users/USER	
+Rule34usPostExtractor		rule34us	post	https://rule34.us/index.php?r=posts/view&id=12345	booru
+Rule34usTagExtractor		rule34us	tag	https://rule34.us/index.php?r=posts/index&q=TAG	booru
+Rule34vaultPlaylistExtractor		rule34vault	playlist	https://rule34vault.com/playlists/view/12345	booru
+Rule34vaultPostExtractor		rule34vault	post	https://rule34vault.com/post/12345	booru
+Rule34vaultTagExtractor		rule34vault	tag	https://rule34vault.com/TAG	booru
+Rule34xyzPlaylistExtractor		rule34xyz	playlist	https://rule34.xyz/playlists/view/12345	booru
+Rule34xyzPostExtractor		rule34xyz	post	https://rule34.xyz/post/12345	booru
+Rule34xyzTagExtractor		rule34xyz	tag	https://rule34.xyz/TAG	booru
+S3ndpicsPostExtractor		s3ndpics	post	https://s3nd.pics/post/0123456789abcdef01234567	
+S3ndpicsSearchExtractor		s3ndpics	search	https://s3nd.pics/search?QUERY	
+S3ndpicsUserExtractor		s3ndpics	user	https://s3nd.pics/user/USER	
+SankakuBooksExtractor	Extractor for books by tag search on sankaku.app	sankaku	books	https://sankaku.app/books?tags=TAG	booru
+SankakuPoolExtractor	Extractor for image pools or books from sankaku.app	sankaku	pool	https://sankaku.app/books/12345	booru
+SankakuPostExtractor	Extractor for single posts from sankaku.app	sankaku	post	https://sankaku.app/post/show/12345	booru
+SankakuTagExtractor	Extractor for images from sankaku.app by search-tags	sankaku	tag	https://sankaku.app/?tags=TAG	booru
+SankakucomplexArticleExtractor	Extractor for articles on news.sankakucomplex.com	sankakucomplex	article	https://news.sankakucomplex.com/1970/01/01/TITLE	
+SankakucomplexTagExtractor	Extractor for sankakucomplex blog articles by tag or author	sankakucomplex	tag	https://news.sankakucomplex.com/tag/TAG/	
+ScatbooruFavoriteExtractor		scatbooru	favorite	https://scatbooru.co.uk/?page=favorites&s=view&id=1	gelbooru_v01
+ScatbooruPostExtractor		scatbooru	post	https://scatbooru.co.uk/?page=post&s=view&id=12345	gelbooru_v01
+ScatbooruTagExtractor		scatbooru	tag	https://scatbooru.co.uk/?page=post&s=list&tags=TAG	gelbooru_v01
+ScrolllerFollowingExtractor	Extractor for followed scrolller subreddits	scrolller	following	https://scrolller.com/following	
+ScrolllerPostExtractor	Extractor for media from a single scrolller post	scrolller	post	https://scrolller.com/TITLE-SLUG-a1b2c3d4f5	
+ScrolllerSubredditExtractor	Extractor for media from a scrolller subreddit	scrolller	subreddit	https://scrolller.com/r/SUBREDDIT	
+ScrolllerUserExtractor	Extractor for media from a scrolller Reddit user	scrolller	user	https://scrolller.com/reddit-user/USER	
+SeigaImageExtractor	Extractor for single images from seiga.nicovideo.jp	seiga	image	https://seiga.nicovideo.jp/seiga/im12345	
+SeigaUserExtractor	Extractor for images of a user from seiga.nicovideo.jp	seiga	user	https://seiga.nicovideo.jp/user/illust/12345	
+SenmangaChapterExtractor	Extractor for manga chapters from raw.senmanga.com	senmanga	chapter	https://raw.senmanga.com/MANGA/CHAPTER	
+SexcomBoardExtractor	Extractor for pins from a board on www.sex.com	sexcom	board	https://www.sex.com/user/USER/BOARD/	
+SexcomFeedExtractor	Extractor for pins from your account's main feed on www.sex.com	sexcom	feed	https://www.sex.com/feed/	
+SexcomLikesExtractor	Extractor for a user's liked pins on www.sex.com	sexcom	likes	https://www.sex.com/user/USER/likes/	
+SexcomPinExtractor	Extractor for a pinned image or video on www.sex.com	sexcom	pin	https://www.sex.com/pin/12345-TITLE/	
+SexcomPinsExtractor	Extractor for a user's pins on www.sex.com	sexcom	pins	https://www.sex.com/user/USER/pins/	
+SexcomRelatedPinExtractor	Extractor for related pins on www.sex.com	sexcom	related-pin	https://www.sex.com/pin/12345#related	
+SexcomSearchExtractor	Extractor for search results on www.sex.com	sexcom	search	https://www.sex.com/search/pics?query=QUERY	
+Shimmie2PostExtractor	Extractor for single shimmie2 posts		post	https://vidya.pics/post/view/12345	shimmie2
+Shimmie2TagExtractor	Extractor for shimmie2 posts by tag search		tag	https://vidya.pics/post/list/TAG/1	shimmie2
+ShopifyCollectionExtractor	Base class for collection extractors for Shopify based sites		collection	https://www.fashionnova.com/collections/TITLE	shopify
+ShopifyProductExtractor	Base class for product extractors for Shopify based sites		product	https://www.fashionnova.com/collections/TITLE/products/NAME	shopify
+SilverpicImageExtractor	Extractor for single images from silverpic.com	silverpic	image	https://silverpic.net/a1b2c3d4f5g6/NAME.EXT.html	imagehost
+SimplyhentaiGalleryExtractor	Extractor for simplyhentai galleries	simplyhentai	gallery	https://www.simply-hentai.com/SERIES/SLUG	
+SimplyhentaiLanguageExtractor		simplyhentai	language	https://www.simply-hentai.com/language/LANG	
+SimplyhentaiMangaExtractor		simplyhentai	manga	https://www.simply-hentai.com/2-mangas	
+SimplyhentaiSeriesExtractor		simplyhentai	series	https://www.simply-hentai.com/series/SLUG	
+SimplyhentaiTagExtractor		simplyhentai	tag	https://www.simply-hentai.com/tag/TAG	
+SizebooruFavoriteExtractor	Extractor for a sizebooru user's favorites	sizebooru	favorite	https://sizebooru.com/Profile/Favorites/USER	booru
+SizebooruGalleryExtractor	Extractor for sizebooru galleries	sizebooru	gallery	https://sizebooru.com/Galleries/List/123	booru
+SizebooruPostExtractor	Extractor for sizebooru posts	sizebooru	post	https://sizebooru.com/Details/12345	booru
+SizebooruTagExtractor	Extractor for sizebooru tag searches	sizebooru	tag	https://sizebooru.com/Search/TAG	booru
+SizebooruUserExtractor	Extractor for a sizebooru user's uploads	sizebooru	user	https://sizebooru.com/Profile/Uploads/USER	booru
+SkebFollowingExtractor	Extractor for all creators followed by a skeb user	skeb	following	https://skeb.jp/@USER/following_creators	
+SkebFollowingUsersExtractor	Extractor for your followed users	skeb	following-users	https://skeb.jp/following_users	
+SkebPostExtractor	Extractor for a single skeb post	skeb	post	https://skeb.jp/@USER/works/123	
+SkebSearchExtractor	Extractor for skeb search results	skeb	search	https://skeb.jp/search?q=QUERY	
+SkebSentrequestsExtractor	Extractor for a skeb user's sent requests	skeb	sentrequests	https://skeb.jp/@USER/sentrequests	
+SkebUserExtractor	Extractor for a skeb user profile	skeb	user	https://skeb.jp/@USER	
+SkebWorksExtractor	Extractor for a skeb user's works	skeb	works	https://skeb.jp/@USER/works	
+SlickpicAlbumExtractor	Extractor for albums on slickpic.com	slickpic	album	https://USER.slickpic.com/albums/TITLE/	
+SlickpicUserExtractor		slickpic	user	https://USER.slickpic.com/	
+SlidesharePresentationExtractor	Extractor for images from a presentation on slideshare.net	slideshare	presentation	https://www.slideshare.net/USER/PRESENTATION	
+SmugmugAlbumExtractor	Extractor for smugmug albums	smugmug	album	smugmug:album:ID	
+SmugmugImageExtractor	Extractor for individual smugmug images	smugmug	image	https://USER.smugmug.com/PATH/i-ID	
+SmugmugPathExtractor	Extractor for smugmug albums from URL paths and users	smugmug	path	https://USER.smugmug.com/PATH	
+SoundgasmAudioExtractor	Extractor for audio clips from soundgasm.net	soundgasm	audio	https://soundgasm.net/u/USER/TITLE	
+SoundgasmUserExtractor	Extractor for all sounds from a soundgasm user	soundgasm	user	https://soundgasm.net/u/USER	
+SpeakerdeckPresentationExtractor	Extractor for images from a presentation on speakerdeck.com	speakerdeck	presentation	https://speakerdeck.com/USER/PRESENTATION	
+SteamgriddbAssetExtractor	Extractor for a single asset	steamgriddb	asset	https://www.steamgriddb.com/grid/1234	
+SteamgriddbGridsExtractor		steamgriddb	grids	https://www.steamgriddb.com/game/1234/grids	
+SteamgriddbHeroesExtractor		steamgriddb	heroes	https://www.steamgriddb.com/game/1234/heroes	
+SteamgriddbIconsExtractor		steamgriddb	icons	https://www.steamgriddb.com/game/1234/icons	
+SteamgriddbLogosExtractor		steamgriddb	logos	https://www.steamgriddb.com/game/1234/logos	
+SubscribestarPostExtractor	Extractor for media from a single subscribestar post	subscribestar	post	https://www.subscribestar.com/posts/12345	
+SubscribestarUserExtractor	Extractor for media from a subscribestar user	subscribestar	user	https://www.subscribestar.com/USER	
+SxypixGalleryExtractor	Extractor for image galleries from sxypix.com	sxypix	gallery	https://sxypix.com/w/2bbaf1b24a5863d0e73436619bbaa7ee	
+SzurubooruPostExtractor			post	https://booru.bcbnsfw.space/post/12345	szurubooru
+SzurubooruTagExtractor			tag	https://booru.bcbnsfw.space/posts/query=TAG	szurubooru
+TapasCreatorExtractor		tapas	creator	https://tapas.io/CREATOR	
+TapasEpisodeExtractor		tapas	episode	https://tapas.io/episode/12345	
+TapasSeriesExtractor		tapas	series	https://tapas.io/series/TITLE	
+TcbscansChapterExtractor		tcbscans	chapter	https://tcbscans.me/chapters/12345/MANGA-chapter-123	
+TcbscansMangaExtractor		tcbscans	manga	https://tcbscans.me/mangas/123/MANGA	
+TelegraphGalleryExtractor	Extractor for articles from telegra.ph	telegraph	gallery	https://telegra.ph/TITLE	
+TenorImageExtractor		tenor	image	https://tenor.com/view/SLUG-1234567890	
+TenorSearchExtractor		tenor	search	https://tenor.com/search/QUERY	
+TenorUserExtractor		tenor	user	https://tenor.com/users/USER	
+ThefapModelExtractor	Extractor for thefap.net model pages	thefap	model	https://thefap.net/MODEL-12345/	
+ThefapPostExtractor	Extractor for individual thefap.net posts	thefap	post	https://thefap.net/MODEL-12345/KIND/i12345	
+ThehentaiworldPostExtractor		thehentaiworld	post	https://thehentaiworld.com/hentai-images/SLUG/	
+ThehentaiworldTagExtractor		thehentaiworld	tag	https://thehentaiworld.com/tag/TAG/	
+TiktokAvatarExtractor		tiktok	avatar	https://www.tiktok.com/@USER/avatar	
+TiktokFollowingExtractor	Extract all of the stories of all of the users you follow	tiktok	following	https://www.tiktok.com/following	
+TiktokLikesExtractor		tiktok	likes	https://www.tiktok.com/@USER/liked	
+TiktokPostExtractor	Extract a single video or photo TikTok link	tiktok	post	https://www.tiktok.com/@USER/photo/1234567890	
+TiktokPostsExtractor		tiktok	posts	https://www.tiktok.com/@USER/posts	
+TiktokRepostsExtractor		tiktok	reposts	https://www.tiktok.com/@USER/reposts	
+TiktokSavedExtractor		tiktok	saved	https://www.tiktok.com/@USER/saved	
+TiktokStoriesExtractor		tiktok	stories	https://www.tiktok.com/@USER/stories	
+TiktokUserExtractor	Extractor for a TikTok user profile	tiktok	user	https://www.tiktok.com/@USER	
+TiktokVmpostExtractor	Extract a single video or photo TikTok VM link	tiktok	vmpost	https://vm.tiktok.com/1a2B3c4E5	
+TmohentaiGalleryExtractor		tmohentai	gallery	https://tmohentai.com/contents/12345a67b89c0	
+ToyhouseArtExtractor	Extractor for artworks of a toyhouse user	toyhouse	art	https://www.toyhou.se/USER/art	
+ToyhouseImageExtractor	Extractor for individual toyhouse images	toyhouse	image	https://toyhou.se/~images/12345	
+TumblrDayExtractor	Extractor for Tumblr user's posts by day	tumblr	day	https://www.tumblr.com/BLOG/day/1970/01/01	
+TumblrFollowersExtractor	Extractor for a Tumblr user's followers	tumblr	followers	https://www.tumblr.com/BLOG/followers	
+TumblrFollowingExtractor	Extractor for a Tumblr user's followed blogs	tumblr	following	https://www.tumblr.com/BLOG/following	
+TumblrLikesExtractor	Extractor for a Tumblr user's liked posts	tumblr	likes	https://www.tumblr.com/BLOG/likes	
+TumblrPostExtractor	Extractor for a single Tumblr post	tumblr	post	https://www.tumblr.com/BLOG/12345	
+TumblrSearchExtractor	Extractor for a Tumblr search	tumblr	search	https://www.tumblr.com/search/QUERY	
+TumblrTagExtractor	Extractor for Tumblr user's posts by tag	tumblr	tag	https://www.tumblr.com/BLOG/tagged/TAG	
+TumblrUserExtractor	Extractor for a Tumblr user's posts	tumblr	user	https://www.tumblr.com/BLOG	
+TumblrgalleryPostExtractor	Extractor for Posts on tumblrgallery.xyz	tumblrgallery	post	https://tumblrgallery.xyz/post/12345.html	
+TumblrgallerySearchExtractor	Extractor for Search result on tumblrgallery.xyz	tumblrgallery	search	https://tumblrgallery.xyz/s.php?q=QUERY	
+TumblrgalleryTumblrblogExtractor	Extractor for Tumblrblog on tumblrgallery.xyz	tumblrgallery	tumblrblog	https://tumblrgallery.xyz/tumblrblog/gallery/12345.html	
+TungstenModelExtractor		tungsten	model	https://tungsten.run/model/AbCdEfGhIjKlM	
+TungstenPostExtractor		tungsten	post	https://tungsten.run/post/AbCdEfGhIjKlMnOp	
+TungstenUserExtractor		tungsten	user	https://tungsten.run/user/USER	
+TurboAlbumExtractor	Extractor for turbo.cr albums	turbo	album	https://turbo.cr/a/ID	lolisafe
+TurboMediaExtractor	Extractor for turbo.cr media links	turbo	media	https://turbo.cr/embed/ID	lolisafe
+TurboimagehostGalleryExtractor	Extractor for image galleries from turboimagehost.com	turboimagehost	gallery	https://www.turboimagehost.com/album/12345/GALLERY_NAME	imagehost
+TurboimagehostImageExtractor	Extractor for single images from www.turboimagehost.com	turboimagehost	image	https://www.turboimagehost.com/p/12345/NAME.EXT.html	imagehost
+TwibooruGalleryExtractor	Extractor for twibooru galleries	twibooru	gallery	https://twibooru.org/galleries/12345	philomena
+TwibooruPostExtractor	Extractor for single twibooru posts	twibooru	post	https://twibooru.org/12345	philomena
+TwibooruSearchExtractor	Extractor for twibooru search results	twibooru	search	https://twibooru.org/search?q=TAG	philomena
+TwitterAvatarExtractor		twitter	avatar	https://x.com/USER/photo	
+TwitterBackgroundExtractor		twitter	background	https://x.com/USER/header_photo	
+TwitterBookmarkExtractor	Extractor for bookmarked tweets	twitter	bookmark	https://x.com/i/bookmarks	
+TwitterCommunitiesExtractor	Extractor for followed Twitter communities	twitter	communities	https://x.com/i/communities	
+TwitterCommunityExtractor	Extractor for a Twitter community	twitter	community	https://x.com/i/communities/12345	
+TwitterEventExtractor	Extractor for Tweets from a Twitter Event	twitter	event	https://x.com/i/events/12345	
+TwitterFollowersExtractor	Extractor for a user's followers	twitter	followers	https://x.com/USER/followers	
+TwitterFollowingExtractor	Extractor for followed users	twitter	following	https://x.com/USER/following	
+TwitterHashtagExtractor	Extractor for Twitter hashtags	twitter	hashtag	https://x.com/hashtag/NAME	
+TwitterHighlightsExtractor	Extractor for Tweets from a user's Highlights timeline	twitter	highlights	https://x.com/USER/highlights	
+TwitterHomeExtractor	Extractor for Twitter home timelines	twitter	home	https://x.com/home	
+TwitterImageExtractor		twitter	image	https://pbs.twimg.com/media/ABCDE?format=jpg&name=orig	
+TwitterInfoExtractor	Extractor for a user's profile data	twitter	info	https://x.com/USER/info	
+TwitterLikesExtractor	Extractor for liked tweets	twitter	likes	https://x.com/USER/likes	
+TwitterListExtractor	Extractor for Twitter lists	twitter	list	https://x.com/i/lists/12345	
+TwitterListMembersExtractor	Extractor for members of a Twitter list	twitter	list-members	https://x.com/i/lists/12345/members	
+TwitterMediaExtractor	Extractor for Tweets from a user's Media timeline	twitter	media	https://x.com/USER/media	
+TwitterNotificationsExtractor	Extractor for Twitter notifications timelines	twitter	notifications	https://x.com/notifications	
+TwitterQuotesExtractor	Extractor for quotes of a Tweet	twitter	quotes	https://x.com/USER/status/12345/quotes	
+TwitterSearchExtractor	Extractor for Twitter search results	twitter	search	https://x.com/search?q=QUERY	
+TwitterTimelineExtractor	Extractor for a Twitter user timeline	twitter	timeline	https://x.com/USER/timeline	
+TwitterTweetExtractor	Extractor for individual tweets	twitter	tweet	https://x.com/USER/status/12345	
+TwitterTweetsExtractor	Extractor for Tweets from a user's Posts timeline	twitter	tweets	https://x.com/USER/tweets	
+TwitterUserExtractor	Extractor for a Twitter user	twitter	user	https://x.com/USER	
+TwitterWithRepliesExtractor	Extractor for Tweets from a user's Replies timeline	twitter	with-replies	https://x.com/USER/with_replies	
+UnsplashCollectionExtractor	Extractor for an unsplash collection	unsplash	collection	https://unsplash.com/collections/12345/TITLE	
+UnsplashFavoriteExtractor	Extractor for all likes of an unsplash user	unsplash	favorite	https://unsplash.com/@USER/likes	
+UnsplashImageExtractor	Extractor for a single unsplash photo	unsplash	image	https://unsplash.com/photos/ID	
+UnsplashSearchExtractor	Extractor for unsplash search results	unsplash	search	https://unsplash.com/s/photos/QUERY	
+UnsplashUserExtractor	Extractor for all photos of an unsplash user	unsplash	user	https://unsplash.com/@USER	
+UploadirFileExtractor	Extractor for uploadir files	uploadir	file	https://uploadir.com/u/ID	
+UrlgalleriesGalleryExtractor	Extractor for urlgalleries.com galleries	urlgalleries	gallery	https://urlgalleries.com/BLOG/12345/TITLE	
+UrlshortenerLinkExtractor	Extractor for general-purpose URL shorteners		link	https://bit.ly/abcde	urlshortener
+VanillarockPostExtractor	Extractor for blogposts on vanilla-rock.com	vanillarock	post	https://vanilla-rock.com/TITLE	
+VanillarockTagExtractor	Extractor for vanillarock blog posts by tag or category	vanillarock	tag	https://vanilla-rock.com/tag/TAG	
+VichanBoardExtractor	Extractor for vichan boards		board	https://8kun.top/a/	vichan
+VichanThreadExtractor	Extractor for vichan threads		thread	https://8kun.top/a/res/12345.html	vichan
+VipergirlsPostExtractor	Extractor for vipergirls posts	vipergirls	post	https://vipergirls.to/threads/12345-TITLE?p=23456#post23456	
+VipergirlsThreadExtractor	Extractor for vipergirls threads	vipergirls	thread	https://vipergirls.to/threads/12345-TITLE	
+ViprImageExtractor	Extractor for single images from vipr.im	vipr	image	https://vipr.im/abc123.html	imagehost
+VkAlbumExtractor	Extractor for a vk album	vk	album	https://vk.com/album12345_00	
+VkPhotosExtractor	Extractor for photos from a vk user	vk	photos	https://vk.com/id12345	
+VkTaggedExtractor	Extractor for a vk tagged photos	vk	tagged	https://vk.com/tag12345	
+VkWallPostExtractor	Extractor for a vk wall post	vk	wall-post	https://vk.com/wall12345_123	
+VscoAvatarExtractor	Extractor for vsco.co user avatars	vsco	avatar	https://vsco.co/USER/avatar	
+VscoCollectionExtractor	Extractor for images from a collection on vsco.co	vsco	collection	https://vsco.co/USER/collection/1	
+VscoGalleryExtractor	Extractor for a vsco user's gallery	vsco	gallery	https://vsco.co/USER/gallery	
+VscoImageExtractor	Extractor for individual images on vsco.co	vsco	image	https://vsco.co/USER/media/0123456789abcdef	
+VscoSpaceExtractor	Extractor for a vsco.co space	vsco	space	https://vsco.co/spaces/a1b2c3d4e5f	
+VscoSpacesExtractor	Extractor for a vsco.co user's spaces	vsco	spaces	https://vsco.co/USER/spaces	
+VscoUserExtractor	Extractor for a vsco user profile	vsco	user	https://vsco.co/USER	
+VscoVideoExtractor	Extractor for vsco.co videos links	vsco	video	https://vsco.co/USER/video/012345678-9abc-def0	
+WallhavenCollectionExtractor	Extractor for a collection on wallhaven.cc	wallhaven	collection	https://wallhaven.cc/user/USER/favorites/12345	
+WallhavenCollectionsExtractor	Extractor for all collections of a wallhaven user	wallhaven	collections	https://wallhaven.cc/user/USER/favorites	
+WallhavenImageExtractor	Extractor for individual wallpaper on wallhaven.cc	wallhaven	image	https://wallhaven.cc/w/ID	
+WallhavenSearchExtractor	Extractor for search results on wallhaven.cc	wallhaven	search	https://wallhaven.cc/search?q=QUERY	
+WallhavenUploadsExtractor	Extractor for all uploads of a wallhaven user	wallhaven	uploads	https://wallhaven.cc/user/USER/uploads	
+WallhavenUserExtractor	Extractor for a wallhaven user	wallhaven	user	https://wallhaven.cc/user/USER	
+WallpapercaveImageExtractor	Extractor for images on wallpapercave.com	wallpapercave	image	https://wallpapercave.com/w/wp12345	
+WarosuThreadExtractor	Extractor for threads on warosu.org	warosu	thread	https://warosu.org/a/thread/12345	
+WeasylFavoriteExtractor		weasyl	favorite	https://www.weasyl.com/favorites?userid=12345	
+WeasylFolderExtractor		weasyl	folder	https://www.weasyl.com/submissions/USER?folderid=12345	
+WeasylJournalExtractor		weasyl	journal	https://www.weasyl.com/journal/12345	
+WeasylJournalsExtractor		weasyl	journals	https://www.weasyl.com/journals/USER	
+WeasylSubmissionExtractor		weasyl	submission	https://www.weasyl.com/~USER/submissions/12345/TITLE	
+WeasylSubmissionsExtractor		weasyl	submissions	https://www.weasyl.com/submissions/USER	
+WebmshareVideoExtractor	Extractor for webmshare videos	webmshare	video	https://webmshare.com/_ID_	
+WebtoonsArtistExtractor	Extractor for webtoons.com artists	webtoons	artist	https://www.webtoons.com/p/community/LANG/u/ARTIST	
+WebtoonsComicExtractor	Extractor for an entire comic on webtoons.com	webtoons	comic	https://www.webtoons.com/en/GENRE/TITLE/list?title_no=123	
+WebtoonsEpisodeExtractor	Extractor for an episode on webtoons.com	webtoons	episode	https://www.webtoons.com/en/GENRE/TITLE/NAME/viewer?title_no=123&episode_no=12345	
+WeebcentralChapterExtractor	Extractor for manga chapters from weebcentral.com	weebcentral	chapter	https://weebcentral.com/chapters/01JHABCDEFGHIJKLMNOPQRSTUV	
+WeebcentralMangaExtractor	Extractor for manga from weebcentral.com	weebcentral	manga	https://weebcentral.com/series/01J7ABCDEFGHIJKLMNOPQRSTUV/TITLE	
+WeebdexChapterExtractor	Extractor for weebdex manga chapters	weebdex	chapter	https://weebdex.org/chapter/ID/PAGE	
+WeebdexMangaExtractor	Extractor for weebdex manga	weebdex	manga	https://weebdex.org/title/ID/SLUG	
+WeiboAlbumExtractor	Extractor for weibo 'album' listings	weibo	album	https://weibo.com/USER?tabtype=album	
+WeiboArticleExtractor	Extractor for weibo 'article' listings	weibo	article	https://weibo.com/USER?tabtype=article	
+WeiboFeedExtractor	Extractor for weibo user feeds	weibo	feed	https://weibo.com/USER?tabtype=feed	
+WeiboHomeExtractor	Extractor for weibo 'home' listings	weibo	home	https://weibo.com/USER?tabtype=home	
+WeiboNewvideoExtractor	Extractor for weibo 'newVideo' listings	weibo	newvideo	https://weibo.com/USER?tabtype=newVideo	
+WeiboStatusExtractor	Extractor for a weibo status	weibo	status	https://weibo.com/detail/12345	
+WeiboUserExtractor	Extractor for weibo user profiles	weibo	user	https://weibo.com/USER	
+WeiboVideosExtractor	Extractor for weibo 'video' listings	weibo	videos	https://weibo.com/USER?tabtype=video	
+WhypAudioExtractor		whyp	audio	https://whyp.it/tracks/12345/SLUG	
+WhypCollectionExtractor		whyp	collection	https://whyp.it/collections/123/NAME	
+WhypUserExtractor		whyp	user	https://whyp.it/users/123/NAME	
+WikiartArtistExtractor	Extractor for an artist's paintings on wikiart.org	wikiart	artist	https://www.wikiart.org/en/ARTIST	
+WikiartArtistsExtractor	Extractor for artist collections on wikiart.org	wikiart	artists	https://www.wikiart.org/en/artists-by-GROUP/TYPE	
+WikiartArtworksExtractor	Extractor for artwork collections on wikiart.org	wikiart	artworks	https://www.wikiart.org/en/paintings-by-GROUP/TYPE	
+WikiartImageExtractor	Extractor for individual paintings on wikiart.org	wikiart	image	https://www.wikiart.org/en/ARTIST/TITLE	
+WikifeetGalleryExtractor	Extractor for image galleries from wikifeet.com	wikifeet	gallery	https://www.wikifeet.com/CELEB	
+WikimediaArticleExtractor	Extractor for wikimedia articles		article	https://en.wikipedia.org/wiki/TITLE	wikimedia
+WikimediaWikiExtractor	Extractor for all files on a MediaWiki instance		wiki	https://en.wikipedia.org/	wikimedia
+XasiatAlbumExtractor		xasiat	album	https://www.xasiat.com/albums/12345/TITLE/	
+XasiatCategoryExtractor		xasiat	category	https://www.xasiat.com/albums/categories/CATEGORY/	
+XasiatModelExtractor		xasiat	model	https://www.xasiat.com/albums/models/MODEL/	
+XasiatTagExtractor		xasiat	tag	https://www.xasiat.com/albums/tags/TAG/	
+XenforoForumExtractor			forum	https://simpcity.cr/forums/TITLE.123/	xenforo
+XenforoMediaAlbumExtractor			media-album	https://simpcity.cr/media/albums/ALBUM.123/	xenforo
+XenforoMediaCategoryExtractor			media-category	https://simpcity.cr/media/categories/CATEGORY.123/	xenforo
+XenforoMediaItemExtractor			media-item	https://simpcity.cr/media/NAME.123/	xenforo
+XenforoMediaUserExtractor			media-user	https://simpcity.cr/media/users/USER.123/	xenforo
+XenforoPostExtractor			post	https://simpcity.cr/threads/TITLE.12345/post-54321	xenforo
+XenforoProfileExtractor			profile	https://simpcity.cr/members/USER.123/	xenforo
+XenforoThreadExtractor			thread	https://simpcity.cr/threads/TITLE.12345/	xenforo
+XfolioSeriesExtractor		xfolio	series	https://xfolio.jp/portfolio/USER/series/12345	
+XfolioUserExtractor		xfolio	user	https://xfolio.jp/portfolio/USER	
+XfolioWorkExtractor		xfolio	work	https://xfolio.jp/portfolio/USER/works/12345	
+XhamsterGalleryExtractor	Extractor for image galleries on xhamster.com	xhamster	gallery	https://xhamster.com/photos/gallery/12345	
+XhamsterUserExtractor	Extractor for all galleries of an xhamster user	xhamster	user	https://xhamster.com/users/USER/photos	
+XvideosGalleryExtractor	Extractor for user profile galleries on xvideos.com	xvideos	gallery	https://www.xvideos.com/profiles/USER/photos/12345	
+XvideosUserExtractor	Extractor for user profiles on xvideos.com	xvideos	user	https://www.xvideos.com/profiles/USER	
+YiffversePlaylistExtractor		yiffverse	playlist	https://yiffverse.com/playlist/12345	booru
+YiffversePostExtractor		yiffverse	post	https://yiffverse.com/post/12345	booru
+YiffverseTagExtractor		yiffverse	tag	https://yiffverse.com/tag/TAG	booru
+YourlesbiansAlbumExtractor		yourlesbians	album	https://yourlesbians.com/album/SLUG/	
+YoutubeDLExtractor	Generic extractor for youtube-dl supported URLs	ytdl		ytdl:https://www.youtube.com/watch?v=abcdefghijk	
+ZerochanImageExtractor		zerochan	image	https://www.zerochan.net/12345	booru
+ZerochanTagExtractor		zerochan	tag	https://www.zerochan.net/TAG	booru
+_2chBoardExtractor	Extractor for 2ch boards	2ch	board	https://2ch.org/a/	
+_2chThreadExtractor	Extractor for 2ch threads	2ch	thread	https://2ch.org/a/res/12345.html	
+_2chanThreadExtractor	Extractor for 2chan threads	2chan	thread	https://dec.2chan.net/12/res/12345.htm	
+_2chenBoardExtractor	Extractor for 2chen boards		board	https://sturdychan.help/a/	2chen
+_2chenThreadExtractor	Extractor for 2chen threads		thread	https://sturdychan.help/a/12345/	2chen
+_35photoGenreExtractor	Extractor for images of a specific genre on 35photo.pro	35photo	genre	https://35photo.pro/genre_12345/	
+_35photoImageExtractor	Extractor for individual images from 35photo.pro	35photo	image	https://35photo.pro/photo_12345/	
+_35photoTagExtractor	Extractor for all photos from a tag listing	35photo	tag	https://35photo.pro/tags/TAG/	
+_35photoUserExtractor	Extractor for all images of a user on 35photo.pro	35photo	user	https://35photo.pro/USER	
+_3dbooruPoolExtractor	Extractor for image-pools from behoimi.org	3dbooru	pool	http://behoimi.org/pool/show/12345	booru
+_3dbooruPopularExtractor	Extractor for popular images from behoimi.org	3dbooru	popular	http://behoimi.org/post/popular_by_month	booru
+_3dbooruPostExtractor	Extractor for single images from behoimi.org	3dbooru	post	http://behoimi.org/post/show/12345	booru
+_3dbooruTagExtractor	Extractor for images from behoimi.org based on search-tags	3dbooru	tag	http://behoimi.org/post?tags=TAG	booru
+_4archiveBoardExtractor	Extractor for 4archive boards	4archive	board	https://4archive.org/board/a/	
+_4archiveThreadExtractor	Extractor for 4archive threads	4archive	thread	https://4archive.org/board/a/thread/12345/	
+_4chanBoardExtractor	Extractor for 4chan boards	4chan	board	https://boards.4channel.org/a/	
+_4chanThreadExtractor	Extractor for 4chan threads	4chan	thread	https://boards.4channel.org/a/thread/12345/	
+_4chanarchivesBoardExtractor	Extractor for boards on 4chanarchives.com	4chanarchives	board	https://4chanarchives.com/board/a/	
+_4chanarchivesThreadExtractor	Extractor for threads on 4chanarchives.com	4chanarchives	thread	https://4chanarchives.com/board/a/thread/12345/	
+_500pxFavoriteExtractor	Extractor for favorite 500px photos	500px	favorite	https://500px.com/liked	
+_500pxGalleryExtractor	Extractor for photo galleries on 500px.com	500px	gallery	https://500px.com/USER/galleries/GALLERY	
+_500pxImageExtractor	Extractor for individual images from 500px.com	500px	image	https://500px.com/photo/12345/TITLE	
+_500pxUserExtractor	Extractor for photos from a user's photostream on 500px.com	500px	user	https://500px.com/USER	
+_8chanBoardExtractor	Extractor for 8chan boards	8chan	board	https://8chan.moe/a/	
+_8chanThreadExtractor	Extractor for 8chan threads	8chan	thread	https://8chan.moe/a/res/12345.html	
+_8musesAlbumExtractor	Extractor for image albums on comics.8muses.com	8muses	album	https://comics.8muses.com/comics/album/PATH/TITLE	

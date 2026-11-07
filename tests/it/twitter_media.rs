@@ -228,6 +228,7 @@ fn unavailable_opt_in_attempts_valid_photo_video_and_gif_urls_with_shared_previe
                     videos,
                     previews,
                     unavailable: true,
+                    twitpic: false,
                 };
                 let items = parse_response_with_media_options(
                     &serde_json::to_vec(&data).unwrap(),

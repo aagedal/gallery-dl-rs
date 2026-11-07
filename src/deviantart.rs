@@ -792,6 +792,8 @@ pub fn parse_page(body: &Value) -> Result<Page> {
 
 pub struct DeviantArt {
     refresh_token: Option<String>,
+    /// Upstream `_refresh_token_cache` key: rotated tokens are stored there.
+    refresh_token_key: Option<String>,
     client: Client,
     network: NetworkOptions,
     root: Url,
@@ -855,6 +857,7 @@ impl DeviantArt {
     pub fn new(timeout: Duration) -> Result<Self> {
         Ok(Self {
             refresh_token: None,
+            refresh_token_key: None,
             client: NetworkOptions::default().client(USER_AGENT, timeout)?,
             network: NetworkOptions::default(),
             root: Url::parse("https://www.deviantart.com/").expect("static URL"),
@@ -892,6 +895,22 @@ impl DeviantArt {
     /// needed for the `watch` views.
     pub fn with_refresh_token(mut self, token: Option<&str>) -> Self {
         self.refresh_token = token.filter(|t| !t.is_empty()).map(str::to_owned);
+        self
+    }
+
+    /// Upstream's token cache: a configured token (or, for `"cache"`, the
+    /// `#CLIENT_ID` entry written by `oauth:deviantart`) is replaced by its
+    /// latest rotation, and each refresh stores the new token.
+    pub fn with_refresh_token_cache(mut self, configured: Option<&str>) -> Self {
+        let key = match configured.filter(|t| !t.is_empty()) {
+            Some("cache") | None => format!("#{}", self.client_id),
+            Some(token) => token.to_owned(),
+        };
+        let key = crate::cache::key("deviantart", "_refresh_token_cache", &key);
+        let cached = crate::cache::get(&key);
+        self.refresh_token =
+            cached.or_else(|| configured.filter(|t| *t != "cache").map(str::to_owned));
+        self.refresh_token_key = self.refresh_token.is_some().then_some(key);
         self
     }
 
@@ -962,12 +981,23 @@ impl DeviantArt {
             })
             .await?;
         match reply {
-            Reply::Ok(body) => json(&body)?
-                .get("access_token")
-                .and_then(Value::as_str)
-                .filter(|token| !token.is_empty() && token.bytes().all(|b| b.is_ascii_graphic()))
-                .map(str::to_owned)
-                .ok_or_else(|| error("DeviantArt OAuth response contains no access token")),
+            Reply::Ok(body) => {
+                let body = json(&body)?;
+                if let (Some(key), Some(token)) = (
+                    &self.refresh_token_key,
+                    body.get("refresh_token").and_then(Value::as_str),
+                ) && let Err(e) = crate::cache::set(key, token)
+                {
+                    eprintln!("[deviantart][warning] Could not cache the refresh token ({e})");
+                }
+                body.get("access_token")
+                    .and_then(Value::as_str)
+                    .filter(|token| {
+                        !token.is_empty() && token.bytes().all(|b| b.is_ascii_graphic())
+                    })
+                    .map(str::to_owned)
+                    .ok_or_else(|| error("DeviantArt OAuth response contains no access token"))
+            }
             Reply::Status(status) if status.is_client_error() => Err(error(
                 "DeviantArt rejected the OAuth client credentials; check client-id and client-secret",
             )),

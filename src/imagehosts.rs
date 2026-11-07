@@ -80,7 +80,16 @@ impl Site {
         Some(match host.strip_prefix("www.").unwrap_or(host) {
             "pixeldrain.com" => Self::Pixeldrain,
             "catbox.moe" => Self::Catbox,
-            "imgbox.com" => Self::Imgbox,
+            "imgbox.com" | "i.imgbox.com" => Self::Imgbox,
+            // Upstream's `images\d+.imgbox.com` file hosts.
+            images
+                if images
+                    .strip_prefix("images")
+                    .and_then(|rest| rest.strip_suffix(".imgbox.com"))
+                    .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) =>
+            {
+                Self::Imgbox
+            }
             // Upstream's `(?:postim(?:ages|g)|pixxxels)\.(?:cc|org)`.
             "postimg.cc" | "postimg.org" | "postimages.cc" | "postimages.org" | "pixxxels.cc"
             | "pixxxels.org" => Self::Postimg,
@@ -210,7 +219,19 @@ pub fn target(url: &Url) -> Result<Target> {
         }),
         (Site::Catbox, ["c", album]) => id(album, 1..=32).map(Target::CatboxAlbum),
         (Site::Imgbox, ["g", gallery]) => id(gallery, 10..=10).map(Target::ImgboxGallery),
-        (Site::Imgbox, [image]) => id(image, 8..=8).map(Target::ImgboxImage),
+        (Site::Imgbox, [image]) if url.host_str() != Some("i.imgbox.com") => {
+            id(image, 8..=8).map(Target::ImgboxImage)
+        }
+        // File URLs name their image by the first eight characters.
+        (Site::Imgbox, [file]) | (Site::Imgbox, [_, _, file]) => {
+            let hex = |part: &str| part.len() == 2 && part.bytes().all(|b| b.is_ascii_hexdigit());
+            file.get(..8)
+                .filter(|key| {
+                    alnum(key, 8..=8)
+                        && (segments.len() == 1 || hex(segments[0]) && hex(segments[1]))
+                })
+                .map(|key| Target::ImgboxImage(key.to_owned()))
+        }
         (Site::Postimg, ["gallery", gallery]) => id(gallery, 1..=32).map(Target::PostimgGallery),
         (Site::Postimg, ["image" | "img", image] | [image]) if *image != "gallery" => {
             id(image, 1..=32).map(Target::PostimgImage)
@@ -456,7 +477,12 @@ pub fn parse_pixeldrain_file(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
     let item = pixeldrain_item(&body)
         .filter(|item| item.media_id == id)
         .ok_or_else(|| error("Pixeldrain response does not match the requested file"))?;
-    Ok(build(Site::Pixeldrain, id, None, None, vec![item], true))
+    let mut media = build(Site::Pixeldrain, id, None, None, vec![item], true);
+    for file in &mut media {
+        let fields = pixeldrain_fields(&body, &file.url);
+        attach(file, &PIXELDRAIN_FILE, fields);
+    }
+    Ok(media)
 }
 
 /// Parse `/api/list/ID`.
@@ -488,6 +514,28 @@ fn parse_pixeldrain_list_item(bytes: &[u8], id: &str, item: Option<usize>) -> Re
     let title = string(&body, "title").map(str::to_owned);
     let timestamp = string(&body, "date_created").and_then(|d| crate::date::parse_date(d).ok());
     let mut media = build(Site::Pixeldrain, id, title, timestamp, items, false);
+    // Upstream's `album` dictionary, without its files.
+    let mut album = body.as_object().cloned().unwrap_or_default();
+    album.remove("files");
+    if let Some(count) = album.remove("file_count") {
+        album.insert("count".into(), count);
+    }
+    album.insert(
+        "date".into(),
+        crate::filter::source_date_text(timestamp).into(),
+    );
+    let start = item.unwrap_or(0) + 1;
+    for file in &mut media {
+        let Some((position, raw)) = selected.iter().enumerate().find(|(_, raw)| {
+            string(raw, "id") == Some(file.metadata.as_ref().map_or("", |m| m.media_id.as_str()))
+        }) else {
+            continue;
+        };
+        let mut fields = pixeldrain_fields(raw, &file.url);
+        fields.insert("album".into(), Value::Object(album.clone()));
+        fields.insert("num".into(), (start + position).into());
+        attach(file, &PIXELDRAIN_ALBUM, fields);
+    }
     if let Some(index) = item {
         for file in &mut media {
             let number = index + 1; // The index exists in `files`, so this cannot overflow.
@@ -499,6 +547,120 @@ fn parse_pixeldrain_list_item(bytes: &[u8], id: &str, item: Option<usize>) -> Re
         }
     }
     non_empty(Site::Pixeldrain, media)
+}
+
+use crate::sites::Route;
+use serde_json::Map;
+
+// Upstream classes, formats and keyword dictionaries.
+static PIXELDRAIN_FILE: Route = Route::new(
+    "file",
+    "{filename[:230]} ({id}).{extension}",
+    &["{category}"],
+    "{id}",
+);
+static PIXELDRAIN_ALBUM: Route = Route::new(
+    "album",
+    "{num:>03} {filename[:230]} ({id}).{extension}",
+    &[
+        "{category}",
+        "{album[date]:%Y-%m-%d} {album[title]} ({album[id]})",
+    ],
+    "{id}",
+);
+static CATBOX_ALBUM: Route = Route::new(
+    "album",
+    "{filename}.{extension}",
+    &["{category}", "{album_name} ({album_id})"],
+    "{album_id}_{filename}",
+);
+static IMGBOX_GALLERY: Route = Route::new(
+    "gallery",
+    "{num:>03}-{filename}.{extension}",
+    &["{category}", "{title} - {gallery_key}"],
+    "{gallery_key}_{image_key}",
+);
+static IMGBOX_IMAGE: Route = Route::new(
+    "image",
+    "{filename}.{extension}",
+    &["{category}"],
+    "{image_key}",
+);
+static POSTIMG_IMAGE: Route = Route::new(
+    "image",
+    "{filename}.{extension}",
+    &["{category}"],
+    "{token}",
+);
+
+fn attach(media: &mut Media, route: &'static Route, fields: Map<String, Value>) {
+    if let Some(metadata) = media.metadata.as_mut() {
+        metadata.site_keywords = Some(Arc::new(crate::sites::SiteKeywords { route, fields }));
+    }
+}
+
+/// Upstream `text.nameext_from_name` keywords.
+fn name_fields(fields: &mut Map<String, Value>, name: &str) {
+    let (filename, extension) = crate::sites::art::nameext_from_name(name);
+    fields.insert("filename".into(), filename.into());
+    fields.insert("extension".into(), extension.into());
+}
+
+/// Upstream `text.nameext_from_url` keywords.
+fn url_fields(fields: &mut Map<String, Value>, url: &Url) {
+    let (filename, extension) = crate::sites::nameext(url);
+    fields.insert("filename".into(), filename.into());
+    fields.insert("extension".into(), extension.into());
+}
+
+static PIXELDRAIN_FOLDER: Route = Route::new(
+    "folder",
+    "{filename[:230]}.{extension}",
+    &["{category}"],
+    "{path}_{num}",
+);
+
+/// Upstream `PixeldrainFolderExtractor.metadata` plus file fields.
+fn pixeldrain_folder_fields(
+    child: &Value,
+    folder_id: &str,
+    num: usize,
+    url: &Url,
+) -> Map<String, Value> {
+    let get = |key: &str| child.get(key).cloned().unwrap_or(Value::Null);
+    let mut fields = Map::new();
+    fields.insert("type".into(), get("type"));
+    fields.insert("path".into(), get("path"));
+    fields.insert("name".into(), get("name"));
+    fields.insert("mime_type".into(), get("file_type"));
+    fields.insert("size".into(), get("file_size"));
+    fields.insert("hash_sha256".into(), get("sha256_sum"));
+    let date = string(child, "created").and_then(|d| crate::date::parse_date(d).ok());
+    fields.insert("date".into(), crate::filter::source_date_text(date).into());
+    fields.insert("id".into(), folder_id.into());
+    fields.insert("num".into(), num.into());
+    fields.insert("url".into(), url.as_str().into());
+    let path = string(child, "path").unwrap_or_default();
+    fields.insert(
+        "share_url".into(),
+        format!("https://pixeldrain.com/d{path}").into(),
+    );
+    // Upstream `rpartition(".")`: no extension keeps the name empty.
+    let name = string(child, "name").unwrap_or_default();
+    let (filename, extension) = name.rsplit_once('.').unwrap_or(("", name));
+    fields.insert("filename".into(), filename.into());
+    fields.insert("extension".into(), extension.into());
+    fields
+}
+
+/// A Pixeldrain file's upstream dictionary.
+fn pixeldrain_fields(file: &Value, url: &Url) -> Map<String, Value> {
+    let mut fields = file.as_object().cloned().unwrap_or_default();
+    fields.insert("url".into(), url.as_str().into());
+    let date = string(file, "date_upload").and_then(|d| crate::date::parse_date(d).ok());
+    fields.insert("date".into(), crate::filter::source_date_text(date).into());
+    name_fields(&mut fields, string(file, "name").unwrap_or_default());
+    fields
 }
 
 fn non_empty(site: Site, media: Vec<Media>) -> Result<Vec<Media>> {
@@ -555,6 +717,13 @@ pub fn parse_catbox_album(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
     let timestamp = between(page, "<p>Created ", "<")
         .or_else(|| between(page, "<p>Uploaded ", "<"))
         .and_then(catbox_date);
+    // Upstream's album `description`: the paragraph after the date.
+    let description = ["<p>Created ", "<p>Uploaded "]
+        .iter()
+        .find_map(|marker| page.find(marker).map(|at| at + marker.len()))
+        .and_then(|at| between(&page[at..], "<p>", "<"))
+        .map(unescape)
+        .filter(|text| !text.is_empty());
     // Albums now quote their links with `'`; accept both styles.
     let items = between_all(page, "href=\"https://files.catbox.moe/", "\"")
         .chain(between_all(page, "href='https://files.catbox.moe/", "'"))
@@ -569,16 +738,30 @@ pub fn parse_catbox_album(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
                 media_id: stem.into(),
                 ext: clean_extension(ext)?,
                 url,
-                name: Some(name),
+                name: description.clone(),
                 mime: None,
                 timestamp: None,
             })
         })
         .collect();
-    non_empty(
-        Site::Catbox,
-        build(Site::Catbox, id, title, timestamp, items, false),
-    )
+    let mut media = build(Site::Catbox, id, title.clone(), timestamp, items, false);
+    let count = media.len();
+    for (num, file) in media.iter_mut().enumerate() {
+        let mut fields = Map::new();
+        fields.insert("album_id".into(), id.into());
+        fields.insert("album_name".into(), title.clone().into());
+        fields.insert(
+            "date".into(),
+            crate::filter::source_date_text(timestamp).into(),
+        );
+        fields.insert("description".into(), description.clone().into());
+        fields.insert("count".into(), count.into());
+        fields.insert("num".into(), (num + 1).into());
+        fields.insert("url".into(), file.url.as_str().into());
+        url_fields(&mut fields, &file.url.clone());
+        attach(file, &CATBOX_ALBUM, fields);
+    }
+    non_empty(Site::Catbox, media)
 }
 
 // ---------------------------------------------------------------------------
@@ -643,10 +826,33 @@ pub fn parse_imgbox_gallery(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
             timestamp: None,
         });
     }
-    non_empty(
-        Site::Imgbox,
-        build(Site::Imgbox, id, title, None, items, false),
-    )
+    // Upstream splits the `<h1>` into the title and `N images`.
+    let (title, count) = match title.as_deref().and_then(|t| t.rsplit_once(" - ")) {
+        Some((title, count)) => (
+            Some(title.to_owned()),
+            count.strip_suffix(" images").unwrap_or(count).to_owned(),
+        ),
+        None => (title, String::new()),
+    };
+    let mut media = build(Site::Imgbox, id, title.clone(), None, items, false);
+    for (num, file) in media.iter_mut().enumerate() {
+        let mut fields = Map::new();
+        fields.insert("gallery_key".into(), id.into());
+        fields.insert("title".into(), title.clone().into());
+        fields.insert("count".into(), count.clone().into());
+        fields.insert("num".into(), (num + 1).to_string().into());
+        let key = file
+            .metadata
+            .as_ref()
+            .map(|m| m.media_id.clone())
+            .unwrap_or_default();
+        fields.insert("image_key".into(), key.into());
+        // Thumbnail `alt` texts are synthetic ("Key b"), and image pages no
+        // longer carry upstream's `title` names: use the image URL's.
+        url_fields(&mut fields, &file.url.clone());
+        attach(file, &IMGBOX_GALLERY, fields);
+    }
+    non_empty(Site::Imgbox, media)
 }
 
 /// Parse an image page: the `id="img"` element (or `og:image`).
@@ -671,10 +877,18 @@ pub fn parse_imgbox_image(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
         mime: None,
         timestamp: None,
     };
-    non_empty(
-        Site::Imgbox,
-        build(Site::Imgbox, id, None, None, vec![item], true),
-    )
+    let name = item.name.clone();
+    let mut media = build(Site::Imgbox, id, None, None, vec![item], true);
+    for file in &mut media {
+        let mut fields = Map::new();
+        fields.insert("image_key".into(), id.into());
+        match &name {
+            Some(name) => name_fields(&mut fields, name),
+            None => url_fields(&mut fields, &file.url.clone()),
+        }
+        attach(file, &IMGBOX_IMAGE, fields);
+    }
+    non_empty(Site::Imgbox, media)
 }
 
 // ---------------------------------------------------------------------------
@@ -692,7 +906,13 @@ pub fn parse_postimg_image(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
     let url = download
         .or_else(|| meta_property(page, "og:image").and_then(|src| media_url(Site::Postimg, src)))
         .ok_or_else(|| error("Postimg page has no image"))?;
-    let name = between(page, " class=\"imagename\">", "<").and_then(clean_text);
+    // Upstream: the `alt` text after the download link (the uploaded name).
+    let name = page
+        .find(" id=\"download\"")
+        .and_then(|at| between(&page[at..], " alt=\"", "\""))
+        .map(unescape)
+        .filter(|name| !name.is_empty())
+        .or_else(|| between(page, " class=\"imagename\">", "<").and_then(clean_text));
     let ext = url_extension(&url)
         .or_else(|| name.as_deref().and_then(extension_of))
         .unwrap_or_else(|| "jpg".into());
@@ -700,14 +920,28 @@ pub fn parse_postimg_image(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
         url,
         media_id: id.into(),
         ext,
-        name,
+        name: name.clone(),
         mime: None,
         timestamp: None,
     };
-    non_empty(
-        Site::Postimg,
-        build(Site::Postimg, id, None, None, vec![item], true),
-    )
+    let mut media = build(Site::Postimg, id, None, None, vec![item], true);
+    for file in &mut media {
+        let mut fields = Map::new();
+        match &name {
+            Some(name) => {
+                name_fields(&mut fields, name);
+                if fields["extension"] == "" {
+                    let (_, extension) = crate::sites::nameext(&file.url);
+                    fields.insert("extension".into(), extension.into());
+                }
+            }
+            None => url_fields(&mut fields, &file.url.clone()),
+        }
+        fields.insert("token".into(), id.into());
+        fields.insert("post_url".into(), format!("https://postimg.cc/{id}").into());
+        attach(file, &POSTIMG_IMAGE, fields);
+    }
+    non_empty(Site::Postimg, media)
 }
 
 /// Image page IDs linked from gallery thumbnails (` class="thumb"><a href=`).
@@ -903,14 +1137,28 @@ impl ImageHosts {
                     let title = html(Site::Postimg, &page)
                         .ok()
                         .and_then(|page| meta_property(page, "og:title"))
-                        .and_then(clean_text);
+                        .and_then(clean_text)
+                        .map(|title| {
+                            title
+                                .strip_suffix(" — Postimages")
+                                .map_or(title.clone(), str::to_owned)
+                        });
                     (title, images)
                 };
                 let mut items = Vec::new();
+                let mut image_fields = Vec::new();
                 for image in images {
                     let page = self.call(site, &image).await?;
                     let mut media = parse_postimg_image(&page, &image)?;
                     let media = media.remove(0);
+                    image_fields.push(
+                        media
+                            .metadata
+                            .as_ref()
+                            .and_then(|m| m.site_keywords.as_ref())
+                            .map(|k| k.fields.clone())
+                            .unwrap_or_default(),
+                    );
                     let meta = media.metadata.expect("built with metadata");
                     let file = meta.file.unwrap_or_default();
                     items.push(Item {
@@ -925,7 +1173,13 @@ impl ImageHosts {
                         timestamp: None,
                     });
                 }
-                non_empty(site, build(site, &id, title, None, items, false))
+                let mut media = build(site, &id, title.clone(), None, items, false);
+                for (file, mut fields) in media.iter_mut().zip(image_fields) {
+                    // Upstream queues each image with the gallery title.
+                    fields.insert("gallery_title".into(), title.clone().into());
+                    attach(file, &POSTIMG_IMAGE, fields);
+                }
+                non_empty(site, media)
             }
         }
     }
@@ -1014,6 +1268,9 @@ impl ImageHosts {
                             headers: BTreeMap::new(),
                             handoff: BTreeMap::new(),
                         });
+                        let file = media.last_mut().expect("just pushed");
+                        let fields = pixeldrain_folder_fields(&child, &folder_id, num, &file.url);
+                        attach(file, &PIXELDRAIN_FOLDER, fields);
                     }
                     Some("dir") if self.pixeldrain_recursive => {
                         folders.push((child_path.trim_start_matches('/').to_owned(), child))

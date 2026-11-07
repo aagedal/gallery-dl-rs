@@ -127,6 +127,7 @@ pub struct Twitter {
     /// Upstream `retries-api`: retries of API responses whose errors came
     /// from the server (`None` retries without limit).
     retries_api: Option<u32>,
+    locked_wait: bool,
     rate_limits: RateLimits,
     transaction: Mutex<Option<Transaction>>,
     initialize: tokio::sync::Mutex<()>,
@@ -179,6 +180,7 @@ impl Twitter {
             request_timeout: timeout,
             retries: 0,
             retries_api: Some(9),
+            locked_wait: false,
             rate_limits: RateLimits::default(),
             transaction: Mutex::new(None),
             initialize: tokio::sync::Mutex::new(()),
@@ -266,6 +268,15 @@ impl Twitter {
     /// Upstream `retries-api` (negative values retry without limit).
     pub fn with_retries_api(mut self, retries: i64) -> Self {
         self.retries_api = u32::try_from(retries).ok();
+        self
+    }
+
+    /// Upstream `locked`: `"wait"` prompts to retry while the account is
+    /// temporarily locked (only on an interactive terminal); otherwise the
+    /// lock is an authorization error.
+    pub fn with_locked(mut self, value: Option<&Value>) -> Self {
+        self.locked_wait =
+            value.and_then(Value::as_str) == Some("wait") && crate::actions::input_allowed();
         self
     }
 
@@ -416,6 +427,28 @@ impl Twitter {
     }
 
     async fn fetch(&self, endpoint: &Url, code: &str, api: bool) -> Result<Vec<u8>> {
+        loop {
+            let body = self.fetch_timed(endpoint, code, api).await?;
+            if !(api && account_locked(&body)) {
+                return Ok(body);
+            }
+            if !self.locked_wait {
+                return Err(error("Account temporarily locked"));
+            }
+            eprintln!("[twitter][warning] Account temporarily locked");
+            eprint!("Press ENTER to retry.");
+            let read = tokio::task::spawn_blocking(|| {
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line)
+            })
+            .await;
+            if !matches!(read, Ok(Ok(count)) if count > 0) {
+                return Err(error("Account temporarily locked"));
+            }
+        }
+    }
+
+    async fn fetch_timed(&self, endpoint: &Url, code: &str, api: bool) -> Result<Vec<u8>> {
         tokio::time::timeout(self.timeout, async {
             let mut api_tries = 0u32;
             loop {
@@ -643,6 +676,20 @@ fn server_errors(body: &[u8]) -> bool {
             })
 }
 
+/// Upstream's "this account is temporarily locked" API error.
+fn account_locked(body: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(body)
+        .ok()
+        .and_then(|value| value.get("errors").and_then(Value::as_array).cloned())
+        .is_some_and(|errors| {
+            errors.iter().any(|e| {
+                e.get("message")
+                    .and_then(Value::as_str)
+                    .is_some_and(|m| m.contains("this account is temporarily locked"))
+            })
+        })
+}
+
 fn backoff(attempt: u8) -> Duration {
     Duration::from_millis(250 * (1u64 << attempt.min(6)))
 }
@@ -740,6 +787,51 @@ pub(crate) fn valid_id(id: &str) -> bool {
 }
 
 /// Parse first-party single-post URLs. `Twitter::stream` also handles explicit profile tabs.
+/// The upstream extractor class of a Twitter/X URL.
+pub fn subcategory(url: &Url) -> Option<&'static str> {
+    use collections::Collection;
+    use timeline::ProfileTab;
+    if images::image_input(url).is_some() {
+        return None;
+    }
+    if post_id(url).is_ok() {
+        return Some("tweet");
+    }
+    if let Ok(Some(_)) = search::input(url) {
+        return Some(if url.path().starts_with("/hashtag/") {
+            "hashtag"
+        } else {
+            "search"
+        });
+    }
+    if let Ok(Some(collection)) = collections::input(url) {
+        return Some(match collection {
+            Collection::Bookmarks => "bookmark",
+            Collection::List(_) => "list",
+            Collection::HomeLatest | Collection::Home => "home",
+            Collection::Community(_) => "community",
+            Collection::Communities => "communities",
+        });
+    }
+    if let Ok(Some(target)) = users::input(url) {
+        return Some(target.subcategory());
+    }
+    if timeline::is_user_dispatch(url) {
+        return Some("user");
+    }
+    Some(match timeline::profile_input(url).ok()?.1 {
+        ProfileTab::Info => "info",
+        ProfileTab::Avatar => "avatar",
+        ProfileTab::Background => "background",
+        ProfileTab::Media => "media",
+        ProfileTab::Tweets => "tweets",
+        ProfileTab::Replies => "replies",
+        ProfileTab::Highlights => "highlights",
+        ProfileTab::Likes => "likes",
+        ProfileTab::Timeline => "timeline",
+    })
+}
+
 pub fn post_id(url: &Url) -> Result<String> {
     if !matches!(url.scheme(), "http" | "https")
         || !crate::twitter::twitter_host(url.host_str())
@@ -1132,6 +1224,14 @@ mod tests {
         let client = br#"{"errors":[{"code":89,"source":"Client"}]}"#;
         assert!(!server_errors(client));
         assert!(!server_errors(b"not json"));
+    }
+
+    #[test]
+    fn locked_account_errors_are_recognized() {
+        let locked = br#"{"errors":[{"message":"Denied by access control: To protect our users from spam and other malicious activity, this account is temporarily locked."}]}"#;
+        assert!(account_locked(locked));
+        assert!(!account_locked(br#"{"errors":[{"message":"Timeout"}]}"#));
+        assert!(!account_locked(b"not json"));
     }
 
     #[test]

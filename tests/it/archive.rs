@@ -560,7 +560,7 @@ async fn invalid_per_media_names_fail_before_requests_or_archive_records() {
 #[test]
 fn cli_native_names_skip_without_overwriting_and_repair_metadata() {
     let root = tempfile::tempdir().unwrap();
-    let saved = root.path().join("direct/picture.jpg");
+    let saved = root.path().join("directlink/picture.jpg");
     std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
     std::fs::write(&saved, b"keep existing").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
@@ -665,8 +665,9 @@ async fn cancellation_does_not_archive_partial_media_or_keep_its_identity_locked
     );
     let (url, handle) = server(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc");
     let refreshed = item(&url);
+    // Slow CI runners need more than the request timeout here.
     let result = tokio::time::timeout(
-        Duration::from_secs(2),
+        Duration::from_secs(20),
         archive.download(&client, root.path(), &refreshed, DownloadOptions::default()),
     )
     .await

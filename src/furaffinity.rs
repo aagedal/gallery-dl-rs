@@ -611,6 +611,8 @@ fn finish_keywords(
         .next()
         .and_then(|t| t.parse::<i64>().ok());
     data.insert("date".into(), crate::filter::source_date_text(stamp).into());
+    // Upstream's private raw description (for `external` links).
+    data.insert("_description".into(), description.into());
     let description = if options.html_descriptions {
         description.trim().to_owned()
     } else {

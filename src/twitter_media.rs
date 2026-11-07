@@ -21,6 +21,8 @@ pub struct MediaOptions {
     pub previews: bool,
     /// Attempt supplied media URLs even when the API marks the media unavailable.
     pub unavailable: bool,
+    /// Upstream `twitpic`: also download images of linked twitpic.com pages.
+    pub twitpic: bool,
 }
 
 static TWEET: crate::sites::Route = crate::sites::Route::new(
@@ -383,6 +385,118 @@ pub(super) struct FileOptions<'a> {
 pub(super) struct ParsedPost {
     pub(super) metadata: PostMetadata,
     pub(super) media: Vec<Media>,
+    /// Linked twitpic.com pages, resolved by the async caller.
+    pub(super) twitpic: Vec<Url>,
+    /// The tweet's keywords, for files appended later.
+    pub(super) keywords: serde_json::Map<String, Value>,
+}
+
+impl ParsedPost {
+    /// Append a twitpic image after the tweet's other files.
+    pub(super) fn push_twitpic(&mut self, url: Url) {
+        let num = self.media.len() + 1;
+        let post_id = self.metadata.post_id.clone();
+        let (name, ext) = crate::sites::nameext(&url);
+        let ext = crate::path_options::map_extension(&ext).unwrap_or(ext);
+        let mut fields = self.keywords.clone();
+        fields.insert("filename".into(), name.into());
+        fields.insert("extension".into(), ext.clone().into());
+        fields.insert("num".into(), num.into());
+        for item in &mut self.media {
+            if let Some(keywords) = item
+                .metadata
+                .as_mut()
+                .and_then(|m| m.site_keywords.as_mut())
+            {
+                Arc::make_mut(keywords)
+                    .fields
+                    .insert("count".into(), num.into());
+            }
+        }
+        fields.insert("count".into(), num.into());
+        self.media.push(Media {
+            filename: format!("{post_id}_{num}.{ext}"),
+            job: MediaJob::DirectHttp,
+            handoff: BTreeMap::new(),
+            category: "twitter".into(),
+            metadata: Some(PostMetadata {
+                media_id: num.to_string(),
+                index: num,
+                site_keywords: Some(Arc::new(crate::sites::SiteKeywords {
+                    route: &TWEET,
+                    fields,
+                })),
+                ..self.metadata.clone()
+            }),
+            url,
+            headers: BTreeMap::from([
+                ("User-Agent".into(), USER_AGENT.into()),
+                ("Referer".into(), "https://x.com/".into()),
+            ]),
+        });
+    }
+}
+
+/// Upstream `_extract_twitpic`: twitpic.com page links in the tweet's URL
+/// entities and text (not direct `/photos/` images).
+fn twitpic_links(legacy: &Value) -> Vec<Url> {
+    let mut links: Vec<String> = Vec::new();
+    for entity in legacy
+        .pointer("/entities/urls")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let url = entity
+            .get("expanded_url")
+            .or_else(|| entity.get("url"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if url.is_empty() || !url.contains("//twitpic.com/") || url.contains("/photos/") {
+            continue;
+        }
+        let url = match url.strip_prefix("http:") {
+            Some(rest) => format!("https:{rest}"),
+            None => url.to_owned(),
+        };
+        if !links.contains(&url) {
+            links.push(url);
+        }
+    }
+    let text = legacy
+        .get("full_text")
+        .or_else(|| legacy.get("text"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    for (at, _) in text.match_indices("://twitpic.com/") {
+        if !(text[..at].ends_with("http") || text[..at].ends_with("https")) {
+            continue;
+        }
+        let rest = &text[at + "://twitpic.com/".len()..];
+        let word: String = rest
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        if word.is_empty() || (word == "photos" && rest[word.len()..].starts_with('/')) {
+            continue;
+        }
+        let url = format!("https://twitpic.com/{word}");
+        if !links.contains(&url) {
+            links.push(url);
+        }
+    }
+    links
+        .into_iter()
+        .filter_map(|url| Url::parse(&url).ok())
+        .collect()
+}
+
+/// The image of a twitpic.com page.
+pub(super) fn twitpic_image(page: &str) -> Option<Url> {
+    const META: &str = r#"name="twitter:image" value=""#;
+    let start = page.find(META)? + META.len();
+    let end = page[start..].find('"')? + start;
+    Url::parse(&page[start..end]).ok()
 }
 
 pub(super) fn parse_tweet_media(
@@ -398,7 +512,13 @@ pub(super) fn parse_tweet_media(
         articles: article_options,
         images: image_options,
     } = selection;
-    let has_card = card_options.mode != CardMode::Skip && card_source.get("card").is_some();
+    let twitpic = if options.twitpic {
+        twitpic_links(&tweet["legacy"])
+    } else {
+        Vec::new()
+    };
+    let has_card = (card_options.mode != CardMode::Skip && card_source.get("card").is_some())
+        || !twitpic.is_empty();
     // Cards are skipped by default (as upstream); say so when one is present.
     let no_media = || {
         if card_options.mode == CardMode::Skip && card_source.get("card").is_some() {
@@ -523,7 +643,13 @@ pub(super) fn parse_tweet_media(
             },
         )
         .collect();
-    Ok(ParsedPost { metadata, media })
+    tweet_fields.remove("count");
+    Ok(ParsedPost {
+        metadata,
+        media,
+        twitpic,
+        keywords: tweet_fields,
+    })
 }
 
 pub(super) type SelectedFile = (Url, String, MediaJob, Vec<Url>, FileMetadata);
@@ -743,4 +869,34 @@ fn image_url(item: &Value) -> Result<(Url, String)> {
         })
         .ok_or_else(|| error("Twitter photo has unsupported extension"))?;
     Ok((url, extension))
+}
+
+#[cfg(test)]
+mod twitpic_tests {
+    use super::*;
+
+    #[test]
+    fn twitpic_links_come_from_entities_and_text() {
+        let legacy = serde_json::json!({
+            "entities": {"urls": [
+                {"expanded_url": "http://twitpic.com/abc1"},
+                {"expanded_url": "https://twitpic.com/photos/large/1.jpg"},
+                {"url": "https://t.co/x"}]},
+            "full_text": "see https://twitpic.com/def2 and http://twitpic.com/abc1 \
+                and https://twitpic.com/photos/x"});
+        let links: Vec<_> = twitpic_links(&legacy)
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert_eq!(
+            links,
+            ["https://twitpic.com/abc1", "https://twitpic.com/def2"]
+        );
+        let page =
+            r#"<meta name="twitter:image" value="https://twitpic.com/photos/large/77.jpg" />"#;
+        assert_eq!(
+            twitpic_image(page).unwrap().as_str(),
+            "https://twitpic.com/photos/large/77.jpg"
+        );
+    }
 }

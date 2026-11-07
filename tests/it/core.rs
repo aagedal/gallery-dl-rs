@@ -472,7 +472,10 @@ fn routes_social_hosts_without_lookalike_domains() {
             Some("wallhaven"),
         ),
         ("https://wallhaven.cc/", None),
-        ("https://w.wallhaven.cc/full/94/wallhaven-94x38z.jpg", None),
+        (
+            "https://w.wallhaven.cc/full/94/wallhaven-94x38z.jpg",
+            Some("wallhaven"),
+        ),
         ("https://wallhaven.cc.evil.example/w/94x38z", None),
         ("https://www.flickr.com/photos/alice/123", Some("flickr")),
         (
@@ -482,7 +485,10 @@ fn routes_social_hosts_without_lookalike_domains() {
         ("https://www.flickr.com/photos/alice", Some("flickr")),
         ("https://flic.kr/p/FPVo9U", Some("flickr")),
         ("https://www.flickr.com/", None),
-        ("https://live.staticflickr.com/65535/1_a_o.jpg", None),
+        (
+            "https://live.staticflickr.com/65535/1_a_o.jpg",
+            Some("flickr"),
+        ),
         ("https://www.flickr.com.evil.example/photos/alice", None),
         ("https://www.pixiv.net/artworks/1", Some("pixiv")),
         ("https://www.pixiv.net/en/artworks/1", Some("pixiv")),
@@ -498,10 +504,16 @@ fn routes_social_hosts_without_lookalike_domains() {
         ("https://catbox.moe/c/abc", Some("catbox")),
         ("https://files.catbox.moe/abc.png", None),
         ("https://imgbox.com/g/AbCdEfGhIj", Some("imgbox")),
-        ("https://images2.imgbox.com/ab/cd/x_o.png", None),
+        (
+            "https://images2.imgbox.com/ab/cd/AbCd1234_o.png",
+            Some("imgbox"),
+        ),
         ("https://postimg.cc/gallery/abc", Some("postimg")),
         ("https://i.postimg.cc/abc/x.png", None),
         ("https://imgbox.com.evil.example/AbCd1234", None),
+        ("https://redd.it/abc12", Some("reddit")),
+        // No extractor handles Reddit's video host, like upstream.
+        ("https://v.redd.it/abc12", None),
         ("https://x.com/user/status/123", Some("twitter")),
         ("https://twitter.com/user/status/123", Some("twitter")),
         ("https://notinstagram.com/p/abc", None),

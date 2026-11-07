@@ -48,7 +48,7 @@ const API_ROOT: &str = "https://www.reddit.com/";
 /// Upstream's `api: "oauth"` endpoints and default application.
 const OAUTH_ROOT: &str = "https://oauth.reddit.com/";
 const TOKEN_URL: &str = "https://www.reddit.com/api/v1/access_token";
-const DEFAULT_CLIENT_ID: &str = "6N9uN0krSDE-ig";
+pub const DEFAULT_CLIENT_ID: &str = "6N9uN0krSDE-ig";
 /// Reddit ties the default client ID to upstream's User-Agent.
 const DEFAULT_CLIENT_USER_AGENT: &str = "Python:gallery-dl:0.8.4 (by /u/mikf1)";
 const MAX_RESPONSE: usize = 16 * 1024 * 1024;

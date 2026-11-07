@@ -120,7 +120,7 @@ impl Server {
                 {
                     let deadline = Instant::now() + Duration::from_secs(2);
                     while Instant::now() < deadline && !stopped.load(Ordering::Relaxed) {
-                        let written = std::fs::read_dir(root.join("direct/.gallery-dl-rs"))
+                        let written = std::fs::read_dir(root.join("directlink/.gallery-dl-rs"))
                             .is_ok_and(|entries| {
                                 entries.filter_map(Result::ok).any(|entry| {
                                     entry.path().extension().is_some_and(|ext| ext == "part")
@@ -579,14 +579,15 @@ async fn cancelling_an_active_fallback_cleans_temporary_files_and_stops_the_chai
     });
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
-        let has_temporary = std::fs::read_dir(root.path().join("direct")).is_ok_and(|entries| {
-            // Windows directory listings cache sizes of files still open for
-            // writing; query each file directly for its current length.
-            entries.filter_map(Result::ok).any(|entry| {
-                std::fs::metadata(entry.path())
-                    .is_ok_and(|metadata| metadata.is_file() && metadata.len() == 4096)
-            })
-        });
+        let has_temporary =
+            std::fs::read_dir(root.path().join("directlink")).is_ok_and(|entries| {
+                // Windows directory listings cache sizes of files still open for
+                // writing; query each file directly for its current length.
+                entries.filter_map(Result::ok).any(|entry| {
+                    std::fs::metadata(entry.path())
+                        .is_ok_and(|metadata| metadata.is_file() && metadata.len() == 4096)
+                })
+            });
         if server.requests().len() == 2 && has_temporary {
             break;
         }
@@ -601,7 +602,7 @@ async fn cancelling_an_active_fallback_cleans_temporary_files_and_stops_the_chai
     assert!(worker.await.unwrap_err().is_cancelled());
     assert!(!destination.exists());
     assert_eq!(
-        std::fs::read_dir(root.path().join("direct"))
+        std::fs::read_dir(root.path().join("directlink"))
             .unwrap()
             .count(),
         0,
@@ -690,7 +691,7 @@ fn local_blocking_io_timeout_does_not_fetch_a_fallback() {
         release.release();
         blocker.await.unwrap();
         assert_eq!(
-            std::fs::read_dir(root.path().join("direct"))
+            std::fs::read_dir(root.path().join("directlink"))
                 .unwrap()
                 .count(),
             0

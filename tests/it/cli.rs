@@ -689,12 +689,12 @@ mod cancellation {
                 b"HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\nConnection: close\r\n\r\npartial",
             )
             .unwrap();
-        wait_until(|| file_count(&destination.join("direct")) == 1);
+        wait_until(|| file_count(&destination.join("directlink")) == 1);
         let pid_file = root.path().join("backend.pid");
         wait_until(|| std::fs::read_to_string(&pid_file).is_ok_and(|s| !s.is_empty()));
         let pid = std::fs::read_to_string(pid_file).unwrap();
         interrupt(child);
-        assert_eq!(file_count(&destination.join("direct")), 0);
+        assert_eq!(file_count(&destination.join("directlink")), 0);
         wait_until(|| {
             let state = Command::new("ps")
                 .args(["-o", "stat=", "-p", &pid])
@@ -749,7 +749,7 @@ mod cancellation {
                 b"HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\nConnection: close\r\n\r\npartial",
             )
             .unwrap();
-        let category = root.path().join("direct");
+        let category = root.path().join("directlink");
         wait_until(|| file_count(&category) == 1);
         interrupt(child);
         assert_eq!(file_count(&category), 0);
@@ -2013,4 +2013,26 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
     assert!(!log.exists());
+}
+
+#[test]
+fn extractor_and_module_lists_match_upstream() {
+    let output = binary()
+        .args(["--list-extractors", "mastodon:status", "4chan"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "MastodonStatusExtractor\nExtractor for images from a status\n\
+         Category:  - Subcategory: status\nExample : https://mastodon.social/@USER/12345\n\n\
+         _4chanBoardExtractor\nExtractor for 4chan boards\nCategory: 4chan - Subcategory: board\n\
+         Example : https://boards.4channel.org/a/\n\n\
+         _4chanThreadExtractor\nExtractor for 4chan threads\nCategory: 4chan - Subcategory: thread\n\
+         Example : https://boards.4channel.org/a/thread/12345/\n\n"
+    );
+    let output = binary().arg("--list-modules").output().unwrap();
+    let modules = String::from_utf8(output.stdout).unwrap();
+    assert!(modules.starts_with("2ch\n2chan\n"));
+    assert!(modules.lines().any(|line| line == "mastodon"));
 }

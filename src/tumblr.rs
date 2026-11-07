@@ -2203,6 +2203,14 @@ fn npf_to_legacy(post: &mut Value) {
     if post.contains_key("photos") || !post.get("content").is_some_and(Value::is_array) {
         return;
     }
+    // NPF posts give `id` as a string; the legacy format, like upstream's
+    // keywords, as a number (with `id_string` alongside).
+    if let Some(Value::String(id)) = post.get("id").cloned()
+        && let Ok(number) = id.parse::<u64>()
+    {
+        post.insert("id".into(), number.into());
+        post.entry("id_string").or_insert_with(|| id.into());
+    }
     let mut blocks: Vec<Value> = Vec::new();
     for item in post
         .get("trail")
@@ -2573,6 +2581,13 @@ mod tests {
         assert_eq!(blog_identifier("blog.example.com"), "blog.example.com");
         assert_eq!(blog_identifier("alice"), "alice.tumblr.com");
         assert!(crate::extract::http_url("tumblr:https://blog.example.com/").is_ok());
+        for input in [
+            "tumblr:blog.example.com",
+            "tumblr:https://blog.example.com/",
+        ] {
+            let url = Url::parse(input).unwrap();
+            assert_eq!(crate::extract::social_site(&url), Some("tumblr"), "{input}");
+        }
         assert_eq!(
             t("https://alice.tumblr.com/tagged/cute-cats%21").unwrap(),
             Target::Tagged {
@@ -2888,7 +2903,7 @@ mod tests {
 
     #[test]
     fn npf_posts_gain_legacy_media_fields() {
-        let mut post = json!({"id": 5, "original_type": "regular", "content": [
+        let mut post = json!({"id": "5", "original_type": "regular", "content": [
             {"type": "text", "text": "a <b>"},
             {"type": "image", "media": [
                 {"url": "https://64.media.tumblr.com/k/s640x960/small.pnj", "width": 640},
@@ -2900,6 +2915,10 @@ mod tests {
             "trail": [{"content": [{"type": "image", "media": [
                 {"url": "https://64.media.tumblr.com/t/s1280x1920/first.jpg", "width": 9}]}]}]});
         npf_to_legacy(&mut post);
+        assert_eq!(
+            (post["id"].clone(), post["id_string"].clone()),
+            (json!(5), json!("5"))
+        );
         assert_eq!(post["type"], "photo");
         let photos = post["photos"].as_array().unwrap();
         assert_eq!(photos.len(), 3);

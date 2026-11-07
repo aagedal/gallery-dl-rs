@@ -96,11 +96,12 @@ fn class_job_options_and_declared_custom_names_resolve_without_keyword_guesses()
     for class in ["tag", "artist", "artist-search"] {
         for value in [json!(null), json!({})] {
             assert!(
+                // Ignored outside Danbooru and e621.
                 Config::parse(
                     &serde_json::to_vec(&json!({"extractor":{"twitter":{class:value}}})).unwrap(),
                     &std::env::temp_dir(),
                 )
-                .is_err()
+                .is_ok()
             );
         }
     }

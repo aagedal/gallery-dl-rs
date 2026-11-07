@@ -358,6 +358,29 @@ pub fn target(url: &Url) -> Result<Target> {
         return Err(unsupported());
     }
     let parts = segments(url);
+    // Upstream also reads the photo ID of a static file URL
+    // (`HOST.static[.]flickr.com/SERVER[/...]/ID_SECRET_SIZE.EXT`).
+    if let Some(host) = url.host_str()
+        && let Some(label) = host
+            .strip_suffix(".staticflickr.com")
+            .or_else(|| host.strip_suffix(".static.flickr.com"))
+        && !label.is_empty()
+        && label
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        && let [servers @ .., file] = parts.as_slice()
+        && !servers.is_empty()
+        && servers
+            .iter()
+            .all(|s| s.bytes().all(|b| b.is_ascii_digit()))
+    {
+        let id: String = file.chars().take_while(char::is_ascii_digit).collect();
+        return if valid_id(&id) {
+            Ok(Target::Photo { id })
+        } else {
+            Err(unsupported())
+        };
+    }
     match url.host_str().ok_or_else(unsupported)? {
         "flic.kr" | "www.flic.kr" => match parts[..] {
             ["p", code] => Ok(Target::Photo {
@@ -1617,6 +1640,28 @@ mod tests {
     }
 
     #[test]
+    fn static_file_urls_name_their_photo() {
+        for (url, id) in [
+            (
+                "http://c2.staticflickr.com/2/1475/24531000464_9a7503ae68_b.jpg",
+                "24531000464",
+            ),
+            (
+                "https://farm2.static.flickr.com/1035/1188352415_cb139831d0.jpg",
+                "1188352415",
+            ),
+            ("https://live.staticflickr.com/65535/123_abc_o.png", "123"),
+        ] {
+            let found = target(&Url::parse(url).unwrap()).unwrap();
+            assert!(
+                matches!(found, Target::Photo { id: ref found } if found == id),
+                "{url}"
+            );
+        }
+        assert!(target(&Url::parse("https://live.staticflickr.com/x.jpg").unwrap()).is_err());
+    }
+
+    #[test]
     fn picks_original_photo_and_best_video() {
         let body = sizes_body().to_string();
         let photo = parse_sizes(body.as_bytes(), false).unwrap();
@@ -1831,7 +1876,6 @@ mod tests {
             "https://www.flickr.com/photos/tags/cat",
             "https://www.flickr.com/search/",
             "https://flic.kr/p/0OIl",
-            "https://live.staticflickr.com/65535/1_a_o.jpg",
             "https://www.flickr.com:444/photos/alice",
             "https://www.flickr.com.evil.example/photos/alice",
         ] {
