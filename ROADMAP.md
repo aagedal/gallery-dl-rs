@@ -625,7 +625,8 @@ downloads. Document compatibility differences as features land.
 **Implemented upstream keyword dictionaries (2026-11-07):** files of the
 native Pinterest, Tumblr, Reddit, Flickr, Kemono/Coomer, Wallhaven, Imgur,
 Weasyl, VSCO, ArtStation, Fur Affinity, Newgrounds, Mastodon, Bluesky,
-DeviantArt, Twitter, Instagram (posts, stories and highlights) and Facebook
+DeviantArt, Twitter, Instagram (posts, stories and highlights), Facebook,
+Pixeldrain (files and albums), Catbox albums, imgbox and Postimg
 extractors carry upstream's per-file keyword dictionaries
 (`PostMetadata.site_keywords`), so upstream filename/directory templates,
 filters and postprocessor keywords work unchanged, and default paths follow
