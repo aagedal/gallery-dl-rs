@@ -525,7 +525,8 @@ pub fn safe_component(value: &str) -> String {
 
 pub fn destination(root: &Path, media: &Media) -> PathBuf {
     // Dedicated extractors use upstream's default layouts.
-    if let Some((filename, directory)) = crate::naming::dedicated_templates(media)
+    if let Some((filename, directory)) =
+        crate::sites::default_templates(media).or_else(|| crate::naming::dedicated_templates(media))
         && let Ok(Some(name)) = filename.render_optional(media)
         && let Ok(Some(directory)) = directory.render(media)
     {

@@ -23,6 +23,356 @@ pub struct MediaOptions {
     pub unavailable: bool,
 }
 
+static TWEET: crate::sites::Route = crate::sites::Route::new(
+    "tweet",
+    "{tweet_id}_{num}.{extension}",
+    &["{category}", "{user[name]}"],
+    "{tweet_id}_{retweet_id}_{num}",
+);
+
+fn date_of(timestamp: Option<i64>) -> Value {
+    crate::filter::source_date_text(timestamp).into()
+}
+
+fn parse_int(value: Option<&Value>) -> i64 {
+    crate::sites::gdl::int_of(value)
+}
+
+/// Upstream `_transform_user`.
+pub(super) fn transform_user(user: &Value) -> Value {
+    let Some(uid) = user
+        .get("rest_id")
+        .or_else(|| user.get("id_str"))
+        .and_then(Value::as_str)
+    else {
+        return Value::Object(serde_json::Map::new());
+    };
+    let nested = user.get("core").is_some_and(Value::is_object) && user.get("legacy").is_some();
+    let (core, legacy) = if nested {
+        (&user["core"], &user["legacy"])
+    } else if let Some(legacy) = user.get("legacy") {
+        // Older responses keep every field in `legacy`.
+        (legacy, legacy)
+    } else {
+        (user, user)
+    };
+    let get = |key: &str| legacy.get(key).cloned().unwrap_or(Value::Null);
+    let mut data = serde_json::Map::new();
+    data.insert("id".into(), crate::sites::gdl::parse_int(uid).into());
+    data.insert(
+        "name".into(),
+        core.get("screen_name").cloned().unwrap_or(Value::Null),
+    );
+    data.insert(
+        "nick".into(),
+        core.get("name").cloned().unwrap_or(Value::Null),
+    );
+    let created = core
+        .get("created_at")
+        .and_then(Value::as_str)
+        .and_then(timestamp);
+    data.insert("date".into(), date_of(created));
+    let banner = legacy
+        .get("profile_banner_url")
+        .cloned()
+        .unwrap_or_else(|| "".into());
+    data.insert("profile_banner".into(), banner);
+    for key in [
+        "favourites_count",
+        "followers_count",
+        "friends_count",
+        "listed_count",
+        "media_count",
+        "statuses_count",
+    ] {
+        data.insert(key.into(), get(key));
+    }
+    let image = if nested {
+        data.insert(
+            "location".into(),
+            user.pointer("/location/location")
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
+        data.insert(
+            "verified".into(),
+            user.pointer("/verification/verified")
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
+        data.insert(
+            "protected".into(),
+            user.pointer("/privacy/protected")
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
+        user.pointer("/avatar/image_url")
+    } else {
+        for key in ["location", "verified", "protected"] {
+            data.insert(key.into(), user.get(key).cloned().unwrap_or(Value::Null));
+        }
+        user.get("profile_image_url_https")
+    };
+    let image = image
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .replace("_normal.", ".");
+    data.insert("profile_image".into(), image.into());
+    let mut description = legacy
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    if let Some(entities) = legacy.get("entities") {
+        for url in entities
+            .pointer("/description/urls")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let (Some(short), Some(long)) = (
+                url.get("url").and_then(Value::as_str),
+                url.get("expanded_url").and_then(Value::as_str),
+            ) {
+                description = description.replace(short, long);
+            }
+        }
+        if let Some(url) = entities.pointer("/url/urls/0") {
+            let link = url.get("expanded_url").or_else(|| url.get("url"));
+            data.insert("url".into(), link.cloned().unwrap_or(Value::Null));
+        }
+    }
+    data.insert("description".into(), description.into());
+    Value::Object(data)
+}
+
+/// Upstream `_tweetid_to_datetime`.
+fn snowflake_seconds(id: i64) -> i64 {
+    ((id >> 22) + 1_288_834_974_657) / 1000
+}
+
+/// Upstream `_transform_tweet`.
+pub(super) fn transform_tweet(tweet: &Value, tweet_id: &str) -> serde_json::Map<String, Value> {
+    let legacy = tweet.get("legacy").unwrap_or(tweet);
+    let get = |key: &str| legacy.get(key).cloned().unwrap_or(Value::Null);
+    let id = crate::sites::gdl::parse_int(tweet_id);
+    let author = tweet
+        .get("author")
+        .or_else(|| tweet.pointer("/core/user_results/result"))
+        .or_else(|| tweet.get("user"))
+        .map(transform_user)
+        .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+    let date = if id >= 300_000_000_000_000 {
+        Some(snowflake_seconds(id))
+    } else {
+        legacy
+            .get("created_at")
+            .and_then(Value::as_str)
+            .and_then(timestamp)
+    };
+    let mut data = serde_json::Map::new();
+    data.insert("tweet_id".into(), id.into());
+    for (key, field) in [
+        ("retweet_id", "retweeted_status_id_str"),
+        ("quote_id", "quoted_by_id_str"),
+    ] {
+        // Zero would hide the native identity of expanded retweets/quotes.
+        let value = parse_int(legacy.get(field));
+        if value != 0 {
+            data.insert(key.into(), value.into());
+        }
+    }
+    data.insert(
+        "reply_id".into(),
+        parse_int(legacy.get("in_reply_to_status_id_str")).into(),
+    );
+    data.insert(
+        "conversation_id".into(),
+        parse_int(legacy.get("conversation_id_str")).into(),
+    );
+    data.insert("date".into(), date_of(date));
+    data.insert("author".into(), author.clone());
+    data.insert("user".into(), author.clone());
+    data.insert("lang".into(), get("lang"));
+    let source = tweet.get("source").and_then(Value::as_str).unwrap_or("");
+    let source = crate::sites::extr(source, ">", "<").unwrap_or("");
+    data.insert("source".into(), source.into());
+    data.insert("sensitive".into(), get("possibly_sensitive"));
+    for key in [
+        "favorite_count",
+        "quote_count",
+        "reply_count",
+        "retweet_count",
+        "bookmark_count",
+    ] {
+        data.insert(key.into(), get(key));
+    }
+    let views = tweet
+        .pointer("/views/count")
+        .and_then(|v| {
+            v.as_str()
+                .map(str::to_owned)
+                .or_else(|| v.as_i64().map(|n| n.to_string()))
+        })
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(0);
+    data.insert("view_count".into(), views.into());
+    let note = tweet.pointer("/note_tweet/note_tweet_results/result");
+    let (content, entities) = match note {
+        Some(note) => (
+            note.get("text").and_then(Value::as_str).unwrap_or(""),
+            note.get("entity_set").unwrap_or(&Value::Null),
+        ),
+        None => (
+            legacy
+                .get("full_text")
+                .or_else(|| legacy.get("text"))
+                .and_then(Value::as_str)
+                .unwrap_or(""),
+            legacy.get("entities").unwrap_or(&Value::Null),
+        ),
+    };
+    if let Some(tags) = entities
+        .get("hashtags")
+        .and_then(Value::as_array)
+        .filter(|t| !t.is_empty())
+    {
+        let tags: Vec<Value> = tags.iter().filter_map(|t| t.get("text").cloned()).collect();
+        data.insert("hashtags".into(), tags.into());
+    }
+    if let Some(mentions) = entities
+        .get("user_mentions")
+        .and_then(Value::as_array)
+        .filter(|m| !m.is_empty())
+    {
+        let mentions: Vec<Value> = mentions
+            .iter()
+            .map(|user| {
+                serde_json::json!({
+                    "id": parse_int(user.get("id_str")),
+                    "name": user.get("screen_name"),
+                    "nick": user.get("name"),
+                })
+            })
+            .collect();
+        data.insert("mentions".into(), mentions.into());
+    }
+    let mut content = crate::sites::unescape(content);
+    for url in entities
+        .get("urls")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let (Some(short), Some(long)) = (
+            url.get("url").and_then(Value::as_str),
+            url.get("expanded_url").and_then(Value::as_str),
+        ) {
+            content = content.replace(short, long);
+        }
+    }
+    let content = match content.rsplit_once(' ') {
+        Some((text, tco)) if tco.starts_with("https://t.co/") => text.to_owned(),
+        _ => content,
+    };
+    data.insert("content".into(), content.into());
+    if tweet.get("pinned").is_some() {
+        data.insert("pinned".into(), true.into());
+    }
+    if let Some(note) = tweet.pointer("/birdwatch_pivot/subtitle/text") {
+        data.insert("birdwatch".into(), note.clone());
+    }
+    if let Some(article) = tweet.get("article") {
+        data.insert("article".into(), article.clone());
+    }
+    if let Some(name) = legacy.get("in_reply_to_screen_name") {
+        data.insert("reply_to".into(), name.clone());
+    }
+    if let Some(by) = legacy.get("quoted_by") {
+        data.insert("quote_by".into(), by.clone());
+    }
+    if let Some(retweet) = data.get("retweet_id").and_then(Value::as_i64) {
+        let name = author.get("name").and_then(Value::as_str).unwrap_or("");
+        let content = data
+            .get("content")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        data.insert("content".into(), format!("RT @{name}: {content}").into());
+        data.insert(
+            "date_original".into(),
+            date_of(Some(snowflake_seconds(retweet))),
+        );
+    }
+    data
+}
+
+/// Per-file keywords for `extended_entities` media.
+fn file_keywords(item: &Value, preview: bool, url: &Url) -> serde_json::Map<String, Value> {
+    let mut file = serde_json::Map::new();
+    let video = item.get("video_info").is_some() && !preview;
+    if video {
+        let duration = item
+            .pointer("/video_info/duration_millis")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        file.insert("duration".into(), (duration / 1000.0).into());
+    }
+    let kind = if preview {
+        "preview".into()
+    } else {
+        item.get("type").cloned().unwrap_or(Value::Null)
+    };
+    file.insert("type".into(), kind);
+    let info = item.get("original_info");
+    let size = |key: &str| {
+        info.and_then(|i| i.get(key))
+            .filter(|v| v.is_u64())
+            .cloned()
+            .unwrap_or(0.into())
+    };
+    file.insert("width".into(), size("width"));
+    file.insert("height".into(), size("height"));
+    file.insert(
+        "description".into(),
+        item.get("ext_alt_text").cloned().unwrap_or(Value::Null),
+    );
+    let flags: Vec<Value> = [
+        ("adult_content", "Nudity"),
+        ("other", "Sensitive"),
+        ("graphic_violence", "Violence"),
+    ]
+    .into_iter()
+    .filter(|(key, _)| {
+        item.get("sensitive_media_warning")
+            .is_some_and(|w| w.get(key).is_some())
+    })
+    .map(|(_, flag)| flag.into())
+    .collect();
+    file.insert("sensitive_flags".into(), flags.into());
+    let source = parse_int(item.get("source_status_id_str"));
+    file.insert("source_id".into(), source.into());
+    if source != 0
+        && let Some(user) = item.pointer("/additional_media_info/source_user/user_results/result")
+    {
+        file.insert("source_user".into(), transform_user(user));
+    }
+    // Images are named after their `media_url_https`, videos after the variant.
+    let named = if video {
+        url.clone()
+    } else {
+        item.get("media_url_https")
+            .and_then(Value::as_str)
+            .and_then(|raw| Url::parse(raw).ok())
+            .unwrap_or_else(|| url.clone())
+    };
+    let (filename, extension) = crate::sites::nameext(&named);
+    let extension = crate::path_options::map_extension(&extension).unwrap_or(extension);
+    file.insert("filename".into(), filename.into());
+    file.insert("extension".into(), extension.into());
+    file
+}
+
 pub(super) struct FileOptions<'a> {
     pub(super) media: MediaOptions,
     pub(super) cards: &'a CardOptions,
@@ -99,7 +449,9 @@ pub(super) fn parse_tweet_media(
         .get("created_at")
         .and_then(Value::as_str)
         .and_then(timestamp);
-    let mut selected = select_entities(items.iter(), requested_post_id, options, image_options)?;
+    let mut selected =
+        select_entities_with_keywords(items.iter(), requested_post_id, options, image_options)?;
+    let (mut selected, mut file_fields): (Vec<_>, Vec<_>) = selected.drain(..).unzip();
     selected.extend(cards::select(
         card_source,
         requested_post_id,
@@ -110,6 +462,13 @@ pub(super) fn parse_tweet_media(
     let (article_files, article) =
         articles::select_with_images(card_source, article_options, image_options);
     selected.extend(article_files);
+    // Cards and articles carry no per-entity keywords.
+    file_fields.resize_with(selected.len(), serde_json::Map::new);
+    let mut tweet_fields = transform_tweet(tweet, requested_post_id);
+    tweet_fields.insert("count".into(), selected.len().into());
+    // Raw article objects may carry malformed payloads; the parsed
+    // article metadata is exposed instead.
+    tweet_fields.remove("article");
     let community = community::native(card_source);
     let metadata = PostMetadata {
         community,
@@ -123,28 +482,46 @@ pub(super) fn parse_tweet_media(
     // gallery-dl numbers files after selection, including previews after their video.
     let media = selected
         .into_iter()
+        .zip(file_fields)
         .enumerate()
-        .map(|(i, (url, extension, job, fallback, file))| Media {
-            url,
-            job,
-            handoff: if fallback.is_empty() {
-                BTreeMap::new()
-            } else {
-                BTreeMap::from([("_fallback".into(), serde_json::json!(fallback))])
+        .map(
+            |(i, ((url, extension, job, fallback, file), mut fields))| Media {
+                url: url.clone(),
+                job,
+                handoff: if fallback.is_empty() {
+                    BTreeMap::new()
+                } else {
+                    BTreeMap::from([("_fallback".into(), serde_json::json!(fallback))])
+                },
+                category: "twitter".into(),
+                filename: format!("{requested_post_id}_{}.{extension}", i + 1),
+                metadata: Some(PostMetadata {
+                    file: (file != FileMetadata::default()).then_some(file),
+                    media_id: (i + 1).to_string(),
+                    index: i + 1,
+                    site_keywords: Some(Arc::new(crate::sites::SiteKeywords {
+                        route: &TWEET,
+                        fields: {
+                            if !fields.contains_key("extension") {
+                                let (name, ext) = crate::sites::nameext(&url);
+                                let ext = crate::path_options::map_extension(&ext).unwrap_or(ext);
+                                fields.insert("filename".into(), name.into());
+                                fields.insert("extension".into(), ext.into());
+                            }
+                            let mut data = tweet_fields.clone();
+                            data.extend(fields);
+                            data.insert("num".into(), (i + 1).into());
+                            data
+                        },
+                    })),
+                    ..metadata.clone()
+                }),
+                headers: BTreeMap::from([
+                    ("User-Agent".into(), USER_AGENT.into()),
+                    ("Referer".into(), "https://x.com/".into()),
+                ]),
             },
-            category: "twitter".into(),
-            filename: format!("{requested_post_id}_{}.{extension}", i + 1),
-            metadata: Some(PostMetadata {
-                file: (file != FileMetadata::default()).then_some(file),
-                media_id: (i + 1).to_string(),
-                index: i + 1,
-                ..metadata.clone()
-            }),
-            headers: BTreeMap::from([
-                ("User-Agent".into(), USER_AGENT.into()),
-                ("Referer".into(), "https://x.com/".into()),
-            ]),
-        })
+        )
         .collect();
     Ok(ParsedPost { metadata, media })
 }
@@ -157,7 +534,18 @@ pub(super) fn select_entities<'a>(
     options: MediaOptions,
     image_options: &ImageOptions,
 ) -> Result<Vec<SelectedFile>> {
-    let mut selected = Vec::new();
+    select_entities_with_keywords(items, requested_post_id, options, image_options)
+        .map(|files| files.into_iter().map(|(file, _)| file).collect())
+}
+
+/// [`select_entities`] with each file's upstream keywords.
+fn select_entities_with_keywords<'a>(
+    items: impl IntoIterator<Item = &'a Value>,
+    requested_post_id: &str,
+    options: MediaOptions,
+    image_options: &ImageOptions,
+) -> Result<Vec<(SelectedFile, serde_json::Map<String, Value>)>> {
+    let mut selected: Vec<(SelectedFile, serde_json::Map<String, Value>)> = Vec::new();
     for item in items {
         if !options.unavailable
             && item
@@ -179,12 +567,17 @@ pub(super) fn select_entities<'a>(
             match options.videos {
                 VideoMode::Files => {
                     let (url, bitrate) = video_url(item)?;
+                    let mut keywords = file_keywords(item, false, &url);
+                    keywords.insert("bitrate".into(), bitrate.unwrap_or(0).into());
                     selected.push((
-                        url,
-                        "mp4".into(),
-                        MediaJob::DirectHttp,
-                        Vec::new(),
-                        entity_metadata(item, false, bitrate),
+                        (
+                            url,
+                            "mp4".into(),
+                            MediaJob::DirectHttp,
+                            Vec::new(),
+                            entity_metadata(item, false, bitrate),
+                        ),
+                        keywords,
                     ));
                 }
                 VideoMode::Skip => {}
@@ -192,12 +585,18 @@ pub(super) fn select_entities<'a>(
                     // Fixed first-party page; never take a delegate target from response data.
                     let page_url =
                         Url::parse(&format!("https://x.com/i/web/status/{requested_post_id}"))?;
+                    let url = Url::parse(&format!("ytdl:{page_url}"))?;
+                    let mut keywords = file_keywords(item, false, &url);
+                    keywords.insert("extension".into(), "mp4".into());
                     selected.push((
-                        Url::parse(&format!("ytdl:{page_url}"))?,
-                        "mp4".into(),
-                        MediaJob::VideoPage { page_url },
-                        Vec::new(),
-                        entity_metadata(item, false, None),
+                        (
+                            url,
+                            "mp4".into(),
+                            MediaJob::VideoPage { page_url },
+                            Vec::new(),
+                            entity_metadata(item, false, None),
+                        ),
+                        keywords,
                     ));
                 }
             }
@@ -207,12 +606,16 @@ pub(super) fn select_entities<'a>(
         }
         let (url, extension) = image_url(item)?;
         let (url, fallback) = image_options.apply(url);
+        let keywords = file_keywords(item, video, &url);
         selected.push((
-            url,
-            extension,
-            MediaJob::DirectHttp,
-            fallback,
-            entity_metadata(item, video, None),
+            (
+                url,
+                extension,
+                MediaJob::DirectHttp,
+                fallback,
+                entity_metadata(item, video, None),
+            ),
+            keywords,
         ));
     }
     Ok(selected)

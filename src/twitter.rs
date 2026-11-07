@@ -1065,6 +1065,48 @@ mod tests {
     }
 
     #[test]
+    fn photo_keywords_follow_upstream_transform_tweet() {
+        let mut tweet: Value = serde_json::from_slice(PHOTO).unwrap();
+        let result = &mut tweet["data"]["tweetResult"]["result"];
+        result["core"]["user_results"]["result"]["rest_id"] = "42".into();
+        result["legacy"]["favorite_count"] = 7.into();
+        result["legacy"]["lang"] = "en".into();
+        result["legacy"]["entities"] = serde_json::json!({"hashtags": [{"text": "art"}]});
+        result["legacy"]["extended_entities"]["media"][0]["original_info"] =
+            serde_json::json!({"width": 640, "height": 480});
+        let media = parse_response(tweet.to_string().as_bytes(), ID).unwrap();
+        let keywords = media[0]
+            .metadata
+            .as_ref()
+            .unwrap()
+            .site_keywords
+            .clone()
+            .unwrap();
+        let fields = &keywords.fields;
+        assert_eq!(keywords.route.filename, "{tweet_id}_{num}.{extension}");
+        assert_eq!(fields["tweet_id"], 1234567890);
+        assert_eq!(fields["content"], "Synthetic post");
+        assert_eq!(fields["date"], "2023-11-14 22:13:20");
+        assert_eq!(fields["author"]["id"], 42);
+        assert_eq!(fields["user"]["name"], "fixture_user");
+        assert_eq!(fields["favorite_count"], 7);
+        assert_eq!(fields["hashtags"], serde_json::json!(["art"]));
+        assert_eq!(
+            (fields["num"].clone(), fields["count"].clone()),
+            (1.into(), 1.into())
+        );
+        assert_eq!(
+            (fields["width"].clone(), fields["height"].clone()),
+            (640.into(), 480.into())
+        );
+        assert_eq!(
+            (fields["filename"].clone(), fields["extension"].clone()),
+            ("fixture".into(), "jpg".into())
+        );
+        assert_eq!(fields["type"], "photo");
+    }
+
+    #[test]
     fn transaction_matches_deterministic_upstream_python_reference() {
         let vector: Value = serde_json::from_str(include_str!(
             "../tests/fixtures/twitter/transaction-vector.json"

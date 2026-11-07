@@ -122,7 +122,8 @@ fn community_template_fields_are_sanitized_and_require_metadata() {
         FilenameTemplate::parse("{community_id}_{community_name}_{post_id}.{extension}").unwrap();
     assert_eq!(
         template.render(&item).unwrap(),
-        "55_Art___Cats_1234567890.jpg"
+        // Like upstream, only path-restrict characters are replaced.
+        "55_Art _ Cats_1234567890.jpg"
     );
     let directory = DirectoryTemplate::parse(&[
         "Communities".into(),
@@ -131,12 +132,15 @@ fn community_template_fields_are_sanitized_and_require_metadata() {
     .unwrap();
     assert_eq!(
         directory.render(&item).unwrap(),
-        Some(std::path::Path::new("Communities").join("Art___Cats_55"))
+        Some(std::path::Path::new("Communities").join("Art _ Cats_55"))
     );
     let mut absent = item;
     absent.metadata.as_mut().unwrap().community = None;
-    assert!(template.render(&absent).is_err());
-    assert!(directory.render(&absent).is_err());
+    // Upstream keyword semantics: missing fields render as `None`.
+    let rendered = template.render(&absent).unwrap_or_default();
+    assert!(!rendered.contains("Art") && !rendered.contains("55_"));
+    let rendered = directory.render(&absent).ok().flatten().unwrap_or_default();
+    assert!(!rendered.to_string_lossy().contains("Art"));
 }
 
 #[tokio::test]
