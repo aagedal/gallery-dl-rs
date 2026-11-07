@@ -134,6 +134,7 @@ impl Instagram {
         for item in &mut media {
             self.network.apply_media(item);
         }
+        warn_video_agent(&media);
         media
     }
 
@@ -374,6 +375,7 @@ impl Instagram {
         for item in &mut media {
             self.network.apply_media(item);
         }
+        warn_video_agent(&media);
         Ok(media)
     }
 
@@ -1489,6 +1491,56 @@ pub fn set_warn_images(value: Option<&Value>) {
     WARN_IMAGES.store(level, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Upstream `warn-videos`: warn once when videos are requested without a
+/// desktop Chrome user agent.
+static WARN_VIDEOS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_warn_videos(value: Option<&Value>) {
+    WARN_VIDEOS.store(
+        value.is_none_or(crate::postprocess::truthy),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+fn warn_video_agent(media: &[Media]) {
+    let Some(video) = media.iter().find(|m| m.filename.ends_with(".mp4")) else {
+        return;
+    };
+    let agent = video
+        .headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("user-agent"))
+        .map_or("", |(_, value)| value.as_str());
+    if !desktop_chrome(agent) && WARN_VIDEOS.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        eprintln!(
+            "[instagram][warning] Potentially lowered video quality due to non-Chrome User-Agent"
+        );
+    }
+}
+
+/// `Chrome/\d{3,}\.\d+\.\d+\.\d+(?!\d* Mobile)`
+fn desktop_chrome(agent: &str) -> bool {
+    agent.match_indices("Chrome/").any(|(at, prefix)| {
+        let rest = &agent[at + prefix.len()..];
+        let mut parts = rest.splitn(4, '.');
+        let digits = |part: &str| part.bytes().take_while(u8::is_ascii_digit).count();
+        let (Some(major), Some(a), Some(b), Some(last)) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return false;
+        };
+        let last_len = digits(last);
+        major.len() >= 3
+            && digits(major) == major.len()
+            && digits(a) == a.len()
+            && !a.is_empty()
+            && digits(b) == b.len()
+            && !b.is_empty()
+            && last_len > 0
+            && !last[last_len..].starts_with(" Mobile")
+    })
+}
+
 /// How many of an image's dimensions are noticeably below the original.
 fn lowered_dimensions(width: u64, height: u64, original: (u64, u64)) -> u8 {
     u8::from(width as f64 * 1.1 < original.0 as f64)
@@ -1536,6 +1588,17 @@ fn identifier(value: Option<&Value>) -> Result<String> {
 #[cfg(test)]
 mod file_option_tests {
     use super::*;
+
+    #[test]
+    fn desktop_chrome_agents_match_upstream_pattern() {
+        assert!(desktop_chrome(USER_AGENT));
+        assert!(!desktop_chrome(
+            "Mozilla/5.0 (Linux; Android 14) Chrome/131.0.0.0 Mobile Safari/537.36"
+        ));
+        assert!(!desktop_chrome("Mozilla/5.0 Firefox/128.0"));
+        assert!(!desktop_chrome("Chrome/99.0.0.0 Safari"));
+        assert!(!desktop_chrome("gallery-dl-native-test/1"));
+    }
 
     #[test]
     fn warn_images_counts_lowered_dimensions() {
