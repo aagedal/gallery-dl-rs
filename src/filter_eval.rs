@@ -32,6 +32,7 @@ pub(super) fn evaluate(expr: &Expr, context: &BTreeMap<String, Value>) -> Result
         allocation_left: BYTES,
         depth: 0,
         context,
+        locals: Vec::new(),
     }
     .eval(expr)
 }
@@ -41,6 +42,8 @@ struct Evaluator<'a> {
     allocation_left: usize,
     depth: usize,
     context: &'a BTreeMap<String, Value>,
+    /// Comprehension variables, innermost last.
+    locals: Vec<(String, Value)>,
 }
 impl Evaluator<'_> {
     fn step(&mut self) -> Result<()> {
@@ -75,7 +78,10 @@ impl Evaluator<'_> {
         Ok(match expression {
             Expr::Literal(value) => value.clone(),
             Expr::Name(name) => {
-                let value = self.context.get(name).cloned().ok_or_else(invalid)?;
+                let value = match self.locals.iter().rev().find(|(local, _)| local == name) {
+                    Some((_, value)) => value.clone(),
+                    None => self.context.get(name).cloned().ok_or_else(invalid)?,
+                };
                 if let Value::SourcePrimitive(value) = value {
                     (*value).clone()
                 } else {
@@ -207,6 +213,62 @@ impl Evaluator<'_> {
             }
             // Keyword arguments only appear inside calls.
             Expr::Keyword(..) => return Err(invalid()),
+            Expr::Comprehension {
+                key,
+                element,
+                targets,
+                iterable,
+                conditions,
+            } => {
+                let items = self.eval(iterable)?;
+                let items = self.sequence(&items)?;
+                let mut values = Vec::new();
+                let mut map = super::OrderedMap::default();
+                for item in items {
+                    self.step()?;
+                    let bound = targets.len();
+                    if bound == 1 {
+                        self.locals.push((targets[0].clone(), item));
+                    } else {
+                        let parts = match item {
+                            Value::List(parts) | Value::Tuple(parts) if parts.len() == bound => {
+                                parts
+                            }
+                            _ => return Err(invalid()),
+                        };
+                        for (target, part) in targets.iter().zip(parts.iter()) {
+                            self.locals.push((target.clone(), part.clone()));
+                        }
+                    }
+                    let result = (|| -> Result<()> {
+                        for condition in conditions {
+                            if !truthy(&self.eval(condition)?) {
+                                return Ok(());
+                            }
+                        }
+                        if values.len() >= ITEMS {
+                            return Err(invalid());
+                        }
+                        self.allocate_sequence(1)?;
+                        match key {
+                            Some(key) => {
+                                let key = self.eval(key)?;
+                                let value = self.eval(element)?;
+                                map.insert(string(&key)?.to_owned(), value);
+                            }
+                            None => values.push(self.eval(element)?),
+                        }
+                        Ok(())
+                    })();
+                    self.locals.truncate(self.locals.len() - bound);
+                    result?;
+                }
+                if key.is_some() {
+                    Value::Map(Arc::new(map))
+                } else {
+                    Value::List(values.into())
+                }
+            }
             Expr::Method(value, method, arguments) => {
                 let value = self.eval(value)?;
                 self.allocate_sequence(arguments.len())?;
@@ -2099,6 +2161,22 @@ mod tests {
         assert_eq!(run("{'a': 1}.keys()"), run("['a']"));
         assert_eq!(run("{'a': 1}.items()"), run("[('a', 1)]"));
         assert_eq!(int("['a', 'b'].index('b')"), 1);
+        // Comprehensions and generator expressions.
+        assert_eq!(run("[t.upper() for t in ['a', 'b']]"), run("['A', 'B']"));
+        assert_eq!(run("[x for x in [1, 2, 3] if x > 1 if x < 3]"), run("[2]"));
+        assert_eq!(run("{t: 1 for t in 'ab'}"), run("{'a': 1, 'b': 1}"));
+        assert_eq!(
+            run("[k for k, v in {'a': 1, 'b': 2}.items() if v > 1]"),
+            run("['b']")
+        );
+        assert_eq!(
+            run("any(t in 'abc' for t in ('x', 'b'))"),
+            Value::Bool(true)
+        );
+        assert_eq!(run("all(x > 0 for x in [1, 2])"), Value::Bool(true));
+        assert_eq!(int("sum(x * 2 for x in range(3))"), 6);
+        assert_eq!(run("(x for x in [1])"), run("[1]"));
+        assert_eq!(run("[[1, 2], [3]]"), run("[[1, 2], [3]]"));
     }
 
     #[test]

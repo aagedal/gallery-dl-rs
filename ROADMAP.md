@@ -1624,8 +1624,9 @@ upstream's documented globals (`datetime(...)`, `datetime.now()`,
 `match`/`fullmatch`/`findall`/`sub`/`split`, `print`, `parse_int`), common
 builtins (`sum`, `sorted(reverse=)`, `reversed`, `list`, `tuple`, `range`,
 `enumerate`, `zip`, `divmod`, `pow`, `hex`/`oct`/`bin`, `chr`, `ord`) and
-string/list/dict methods; comprehensions, `%`/`format`/f-string
-formatting, `isinstance` and sets remain unsupported.
+string/list/dict methods, plus list/dict comprehensions and generator
+expressions (one `for` clause with optional `if` filters); `%`/`format`/
+f-string formatting, `isinstance` and sets remain unsupported.
 
 **Implemented extraction options, 2026-11-07:** `path-convert`,
 `file-unique`/`image-unique`, `child-unique`/`chapter-unique` and

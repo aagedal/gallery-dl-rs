@@ -73,6 +73,15 @@ pub(super) enum Expr {
     Call(String, Vec<Expr>),
     /// `name=value` keyword argument of a call.
     Keyword(String, Box<Expr>),
+    /// `[element for targets in iterable if conditions]`; a `key` makes it a
+    /// dictionary comprehension. Generators evaluate to lists.
+    Comprehension {
+        key: Option<Box<Expr>>,
+        element: Box<Expr>,
+        targets: Vec<String>,
+        iterable: Box<Expr>,
+        conditions: Vec<Expr>,
+    },
     Method(Box<Expr>, String, Vec<Expr>),
     Conditional {
         test: Box<Expr>,
@@ -379,6 +388,22 @@ fn validate_tree(expr: &Expr, depth: usize, budget: &mut usize) -> Result<()> {
             next(right)?;
         }
         Expr::Unary(_, value) | Expr::Keyword(_, value) => next(value)?,
+        Expr::Comprehension {
+            key,
+            element,
+            iterable,
+            conditions,
+            ..
+        } => {
+            if let Some(key) = key {
+                next(key)?;
+            }
+            next(element)?;
+            next(iterable)?;
+            for condition in conditions {
+                next(condition)?;
+            }
+        }
         Expr::Slice(value, bounds) => {
             next(value)?;
             for bound in bounds.iter() {
