@@ -2628,6 +2628,11 @@ fn extract_input<'a>(
                                             options.client_secret.as_deref(),
                                         )
                                         .with_refresh_token(options.refresh_token.as_deref())
+                                        .with_content_options(
+                                            gallery_dl_rs::deviantart::ContentOptions::from_options(
+                                                options.site_options.as_deref(),
+                                            ),
+                                        )
                                         .with_retries(options.retries.unwrap())
                                         .with_request_timeout(options.timeout.unwrap())
                                         .with_network(&configured.network)

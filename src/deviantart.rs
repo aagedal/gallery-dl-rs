@@ -473,7 +473,7 @@ fn deviation_keywords(
     deviation: &Value,
     target: &Value,
     url: &Url,
-    original: bool,
+    original: Option<bool>,
 ) -> Map<String, Value> {
     let mut data = deviation.as_object().cloned().unwrap_or_default();
     let index = string(deviation, "url")
@@ -541,7 +541,7 @@ fn deviation_keywords(
     target.insert("extension".into(), extension.clone().into());
     data.insert("target".into(), target.into());
     data.insert("extension".into(), extension.into());
-    let original = original || !url.as_str().contains("/v1/");
+    let original = original.unwrap_or_else(|| !url.as_str().contains("/v1/"));
     data.insert("is_original".into(), original.into());
     data
 }
@@ -571,14 +571,143 @@ fn retarget(
     }
 }
 
+/// Upstream `quality`, `intermediary`, `jwt`, `mature` and `wait-min`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContentOptions {
+    /// `quality`: a JPEG quality, `"png"`, or `None` to keep URLs.
+    pub quality: Option<String>,
+    pub intermediary: bool,
+    pub jwt: bool,
+    /// `mature`: the API's `mature_content` value.
+    pub mature: String,
+    /// `wait-min`: seconds to wait before each API request.
+    pub wait_min: u64,
+}
+
+impl Default for ContentOptions {
+    fn default() -> Self {
+        Self {
+            quality: Some("100".into()),
+            intermediary: true,
+            jwt: false,
+            mature: "true".into(),
+            wait_min: 0,
+        }
+    }
+}
+
+impl ContentOptions {
+    pub fn from_options(options: Option<&Map<String, Value>>) -> Self {
+        let get = |key: &str| options.and_then(|o| o.get(key));
+        let flag = |key: &str, default: bool| get(key).map_or(default, crate::postprocess::truthy);
+        let defaults = Self::default();
+        Self {
+            quality: match get("quality") {
+                None => defaults.quality,
+                Some(Value::String(q)) if !q.is_empty() => Some(q.clone()),
+                Some(Value::Number(n)) => Some(n.to_string()),
+                Some(_) => None,
+            },
+            intermediary: flag("intermediary", true),
+            jwt: flag("jwt", false),
+            mature: match get("mature") {
+                None => defaults.mature,
+                Some(Value::String(value)) => value.clone(),
+                Some(value) => if crate::postprocess::truthy(value) {
+                    "true"
+                } else {
+                    "false"
+                }
+                .into(),
+            },
+            wait_min: get("wait-min").and_then(Value::as_u64).unwrap_or(0),
+        }
+    }
+
+    /// Upstream `_extract_content`/`_update_token`: the file URL to use and
+    /// its fallback, and whether the URL is an original.
+    fn source(&self, src: &str, index: u64) -> (String, Option<String>, Option<bool>) {
+        use crate::sites::gdl::re;
+        if self.jwt {
+            let Some((url, _)) = src.split_once("/v1/") else {
+                return (src.to_owned(), None, None);
+            };
+            let url = url.replacen("//images-wixmp", "//wixmp", 1);
+            let path = url.split_once("/f/").map_or("", |(_, path)| path);
+            let payload = format!(
+                r#"{{"sub":"urn:app:","iss":"urn:app:","obj":[[{{"path":"/f/{path}"}}]],"aud":["urn:service:file.download"]}}"#
+            );
+            use base64::Engine;
+            let payload = base64::engine::general_purpose::STANDARD_NO_PAD.encode(payload);
+            let token = format!("{url}?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJub25lIn0.{payload}.");
+            return (token, Some(src.to_owned()), Some(true));
+        }
+        if !src.starts_with("https://images-wixmp-") {
+            return (src.to_owned(), None, None);
+        }
+        let mut url = src.to_owned();
+        let mut fallback = None;
+        let mut original = None;
+        if self.intermediary && index <= 790_677_560 {
+            let pattern = re!(r"(/f/[^/]+/[^/]+)/v\d+/.*");
+            if pattern.is_match(&url) {
+                fallback = Some(url.clone());
+                original = Some(false);
+                url = pattern.replacen(&url, 1, "/intermediary$1").into_owned();
+            }
+        }
+        match self.quality.as_deref() {
+            Some("png") => {
+                url = re!(r"-fullview\.[a-z0-9]+\?")
+                    .replacen(&url, 1, "-fullview.png?")
+                    .into_owned();
+            }
+            Some(quality) => {
+                let quality = format!(",q_{quality}");
+                url = re!(r",q_\d+")
+                    .replacen(&url, 1, quality.as_str())
+                    .into_owned();
+            }
+            None => {}
+        }
+        url = re!(r",blur_\d+").replacen(&url, 1, "").into_owned();
+        (url, fallback, original)
+    }
+}
+
 /// Parse one deviation into its file, optionally using a `deviation/download`
 /// response for the original. `None` for deviations without image content.
 pub fn parse_deviation(deviation: &Value, download: Option<&Value>) -> Option<Media> {
+    parse_deviation_with(
+        deviation,
+        download,
+        &ContentOptions {
+            quality: None,
+            intermediary: false,
+            ..ContentOptions::default()
+        },
+    )
+}
+
+fn parse_deviation_with(
+    deviation: &Value,
+    download: Option<&Value>,
+    options: &ContentOptions,
+) -> Option<Media> {
     let uuid = string(deviation, "deviationid").filter(|id| valid_uuid(id))?;
     let content = deviation.get("content")?;
-    let preview = string(content, "src").and_then(media_url)?;
+    let index = string(deviation, "url")
+        .and_then(|url| url.rsplit('-').next())
+        .and_then(|id| id.parse::<u64>().ok())
+        .unwrap_or(0);
+    let (src, content_fallback, content_original) = options.source(string(content, "src")?, index);
+    let preview = media_url(&src)?;
     let original = download.and_then(|d| Some((d, string(d, "src").and_then(media_url)?)));
-    let is_download = original.is_some();
+    let is_original = if original.is_some() {
+        Some(true)
+    } else {
+        content_original
+    };
     let (source, url) = original.unwrap_or((content, preview));
     let timestamp = match deviation.get("published_time") {
         Some(Value::String(s)) => s.trim().parse::<i64>().ok(),
@@ -607,13 +736,16 @@ pub fn parse_deviation(deviation: &Value, download: Option<&Value>) -> Option<Me
             index: 1,
             site_keywords: Some(Arc::new(SiteKeywords {
                 route: &DEVIATION,
-                fields: deviation_keywords(deviation, source, &url, is_download),
+                fields: deviation_keywords(deviation, source, &url, is_original),
             })),
             ..PostMetadata::default()
         }),
         url,
         headers: BTreeMap::new(),
-        handoff: BTreeMap::new(),
+        handoff: content_fallback
+            .filter(|_| is_original != Some(true) || download.is_none())
+            .map(|fallback| BTreeMap::from([("_fallback".into(), serde_json::json!([fallback]))]))
+            .unwrap_or_default(),
     })
 }
 
@@ -655,6 +787,7 @@ pub struct DeviantArt {
     cookies: std::sync::Mutex<CookieJar>,
     /// Eclipse API `csrf_token`, fetched from the front page once.
     csrf: tokio::sync::Mutex<Option<String>>,
+    content: ContentOptions,
 }
 
 /// Upstream login cookie names (`cookies_names`).
@@ -715,6 +848,7 @@ impl DeviantArt {
             rate_limits: RateLimits::default(),
             cookies: std::sync::Mutex::new(CookieJar::default()),
             csrf: tokio::sync::Mutex::new(None),
+            content: ContentOptions::default(),
         })
     }
 
@@ -762,6 +896,12 @@ impl DeviantArt {
         self
     }
 
+    /// Upstream `quality`, `intermediary`, `jwt`, `mature` and `wait-min`.
+    pub fn with_content_options(mut self, content: ContentOptions) -> Self {
+        self.content = content;
+        self
+    }
+
     /// Override the site, OAuth and API origin; intended for local tests.
     pub fn with_root(mut self, root: Url) -> Self {
         self.root = root;
@@ -774,7 +914,8 @@ impl DeviantArt {
             .join("api/v1/oauth2/")
             .and_then(|base| base.join(path))
             .expect("static path");
-        url.query_pairs_mut().append_pair("mature_content", "true");
+        url.query_pairs_mut()
+            .append_pair("mature_content", &self.content.mature);
         url
     }
 
@@ -829,6 +970,9 @@ impl DeviantArt {
 
     /// Authorized API GET, refreshing the access token once on HTTP 401.
     async fn get(&self, endpoint: &Url) -> Result<Value> {
+        if self.content.wait_min > 0 {
+            tokio::time::sleep(Duration::from_secs(self.content.wait_min)).await;
+        }
         tokio::time::timeout(self.timeout, async {
             let mut token = self.access_token(None).await?;
             for refreshed in [false, true] {
@@ -887,7 +1031,7 @@ impl DeviantArt {
                 .await
                 .ok();
         }
-        let mut media = match parse_deviation(deviation, download.as_ref()) {
+        let mut media = match parse_deviation_with(deviation, download.as_ref(), &self.content) {
             Some(media) => media,
             None => self.journal(deviation).await?,
         };
@@ -2344,5 +2488,28 @@ mod tests {
             "T_{search_tags}_{index}.{extension}"
         );
         assert_eq!(keywords.fields["search_tags"], "cats");
+    }
+
+    #[test]
+    fn content_options_rewrite_quality_intermediary_and_jwt() {
+        let src = "https://images-wixmp-ed30a86b8c4ca887773594c2.wixmp.com/f/abc/def-x.jpg/v1/fill/w_800,h_600,q_75,blur_5,strp/a.jpg?token=t";
+        let defaults = ContentOptions::default();
+        let (url, fallback, original) = defaults.source(src, 900_000_000);
+        assert!(url.contains(",q_100,") && !url.contains("blur_"));
+        assert_eq!((fallback, original), (None, None));
+        let (url, fallback, original) = defaults.source(src, 1);
+        assert!(url.contains("/intermediary/f/abc/def-x.jpg"), "{url}");
+        assert_eq!((fallback.as_deref(), original), (Some(src), Some(false)));
+        let jwt = ContentOptions::from_options(json!({"jwt": true, "mature": false}).as_object());
+        assert_eq!(jwt.mature, "false");
+        let (url, _, original) = jwt.source(src, 1);
+        assert!(url.starts_with("https://wixmp-ed30a86b8c4ca887773594c2.wixmp.com/f/abc/def-x.jpg?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJub25lIn0."));
+        assert_eq!(original, Some(true));
+        let png = ContentOptions::from_options(json!({"quality": "png"}).as_object());
+        let (url, ..) = png.source(
+            "https://images-wixmp-x.wixmp.com/f/a/b-fullview.jpg?token=1",
+            900_000_000,
+        );
+        assert!(url.contains("-fullview.png?token=1"));
     }
 }
