@@ -971,6 +971,9 @@ pub struct Kemono {
     endpoint: Endpoint,
     favorites: Favorites,
     extras: Extras,
+    /// Upstream `username`/`password`: log in once per host before API calls.
+    login: Option<(String, String)>,
+    logged_in: tokio::sync::Mutex<HashSet<String>>,
     /// Upstream fetches `dms` and `announcements` once per run.
     creator_lists: tokio::sync::Mutex<HashMap<(String, &'static str), Value>>,
 }
@@ -1042,8 +1045,51 @@ impl Kemono {
             endpoint: Endpoint::Posts,
             favorites: Favorites::Artist,
             extras: Extras::default(),
+            login: None,
+            logged_in: tokio::sync::Mutex::new(HashSet::new()),
             creator_lists: tokio::sync::Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Upstream `login`: credentials for `/api/v1/authentication/login`.
+    pub fn with_login(mut self, username: Option<&str>, password: Option<&str>) -> Self {
+        self.login = username
+            .filter(|name| !name.is_empty())
+            .map(|name| (name.to_owned(), password.unwrap_or_default().to_owned()));
+        self
+    }
+
+    /// Log in once per host; the session cookies then authenticate API calls.
+    async fn ensure_login(&self, host: &str, root: &Url) -> Result<()> {
+        let Some((username, password)) = &self.login else {
+            return Ok(());
+        };
+        let mut logged_in = self.logged_in.lock().await;
+        if logged_in.contains(host) {
+            return Ok(());
+        }
+        let endpoint = root
+            .join("api/v1/authentication/login")
+            .expect("static login path");
+        let response = self
+            .client
+            .post(endpoint.clone())
+            .headers(self.session.request_headers(&endpoint)?)
+            .timeout(self.request_timeout)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(serde_json::json!({"username": username, "password": password}).to_string())
+            .send()
+            .await
+            .map_err(|_| error("Kemono login failed; check network access"))?;
+        self.session
+            .store_response(response.url(), response.headers());
+        if response.status().as_u16() >= 400 {
+            return Err(error(
+                "Kemono login failed: username or password is incorrect",
+            ));
+        }
+        logged_in.insert(host.to_owned());
+        Ok(())
     }
 
     pub fn with_extras(mut self, extras: Extras) -> Self {
@@ -1164,6 +1210,9 @@ impl Kemono {
         if !query.is_empty() {
             endpoint.query_pairs_mut().extend_pairs(query);
         }
+        tokio::time::timeout(self.timeout, self.ensure_login(host, &root))
+            .await
+            .map_err(|_| error("native Kemono extraction timed out"))??;
         tokio::time::timeout(self.timeout, self.request(&endpoint))
             .await
             .map_err(|_| error("native Kemono extraction timed out"))?
@@ -3819,5 +3868,43 @@ mod tests {
         assert!(requests[2].starts_with("GET /api/v1/patreon/user/42/dms "));
         assert!(requests[3].starts_with("GET /api/v1/patreon/user/42/announcements "));
         assert!(requests[4].starts_with(&format!("GET /api/v1/file/{hash} ")));
+    }
+
+    #[tokio::test]
+    async fn login_posts_credentials_once_and_reuses_the_session_cookie() {
+        let login = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\nSet-Cookie: session=abc; Path=/\r\n\r\n{}".to_vec();
+        let (root, server) = serve(vec![
+            login,
+            response("200 OK", json!({"post": post("7")}).to_string().as_bytes()),
+        ]);
+        let events: Vec<_> = kemono(root)
+            .with_login(Some("alice"), Some("secret"))
+            .events(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
+            .collect()
+            .await;
+        assert!(events.iter().all(Result::is_ok), "{events:?}");
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("POST /api/v1/authentication/login "));
+        assert!(requests[1].starts_with("GET /api/v1/patreon/user/42/post/7 "));
+        assert!(
+            requests[1]
+                .to_ascii_lowercase()
+                .contains("cookie: session=abc")
+        );
+
+        let (root, server) = serve(vec![response("401 Unauthorized", b"{}")]);
+        let error = kemono(root)
+            .with_login(Some("alice"), Some("wrong"))
+            .events(&Url::parse("https://kemono.cr/patreon/user/42/post/7").unwrap())
+            .collect::<Vec<_>>()
+            .await
+            .remove(0)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("login failed") && !error.contains("wrong"),
+            "{error}"
+        );
+        server.join().unwrap();
     }
 }

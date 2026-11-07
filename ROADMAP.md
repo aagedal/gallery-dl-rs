@@ -702,8 +702,9 @@ object merged with each file's `type`/`path`/`hash`/`url`/`filename`, plus
 fields) with upstream's default filename/directory, and the `comments`,
 `dms`, `announcements`, `archives` and `archives-format` options.
 `user_profile` uses the native typed profile (dates as Unix seconds).
-Remaining: popular views, link extraction from post text,
-username/password login and additional endpoint behavior.
+Since 2026-11-07 `username`/`password` log in through
+`/api/v1/authentication/login` once per host (session cookies stay in memory).
+Remaining: additional endpoint behavior.
 
 **Implemented Kemono/Coomer creator metadata:** default-enabled, lazy profile
 lookups attach typed immutable IDs and optional display names, public IDs, dates,

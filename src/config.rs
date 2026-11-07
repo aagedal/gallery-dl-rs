@@ -1886,11 +1886,11 @@ impl Config {
                     "native configuration threshold is only supported for danbooru and e621",
                 ));
             }
-            if !matches!(name, "danbooru" | "e621" | "bluesky")
+            if !matches!(name, "danbooru" | "e621" | "bluesky" | "kemono" | "coomer")
                 && (settings.username.0.is_some() || settings.password.0.is_some())
             {
                 return Err(error(
-                    "native configuration username/password are only supported for danbooru, e621 and bluesky",
+                    "native configuration username/password are only supported for danbooru, e621, bluesky, kemono and coomer",
                 ));
             }
             if !matches!(name, "gelbooru" | "safebooru") && settings.user_id.0.is_some() {
