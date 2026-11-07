@@ -582,6 +582,10 @@ pub struct ContentOptions {
     pub mature: String,
     /// `wait-min`: seconds to wait before each API request.
     pub wait_min: u64,
+    /// `flat`: list every deviation instead of queueing each folder.
+    pub flat: bool,
+    /// `subfolders`: queue a folder's subfolders.
+    pub subfolders: bool,
 }
 
 impl Default for ContentOptions {
@@ -592,6 +596,8 @@ impl Default for ContentOptions {
             jwt: false,
             mature: "true".into(),
             wait_min: 0,
+            flat: true,
+            subfolders: true,
         }
     }
 }
@@ -621,6 +627,8 @@ impl ContentOptions {
                 .into(),
             },
             wait_min: get("wait-min").and_then(Value::as_u64).unwrap_or(0),
+            flat: flag("flat", true),
+            subfolders: flag("subfolders", true),
         }
     }
 
@@ -1697,6 +1705,81 @@ impl DeviantArt {
     }
 
     /// Upstream `DeviantartFollowingExtractor`: queue every watched user.
+    /// Upstream `flat: false` and `subfolders`: queue gallery or collection
+    /// folders (`kind` is `gallery` or `collections`) as folder children.
+    fn folders(
+        &self,
+        kind: &'static str,
+        user: String,
+        parent: Option<(String, Option<String>)>,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
+        let path = if kind == "gallery" {
+            "gallery"
+        } else {
+            "favourites"
+        };
+        stream::try_unfold((Some(0u64), 0usize), move |(offset, pages)| {
+            let user = user.clone();
+            let parent = parent.clone();
+            async move {
+                let Some(offset) = offset.filter(|_| pages < MAX_PAGES) else {
+                    return Ok(None);
+                };
+                let mut endpoint = self.api(&format!("{kind}/folders"));
+                endpoint
+                    .query_pairs_mut()
+                    .append_pair("username", &user)
+                    .append_pair("offset", &offset.to_string())
+                    .append_pair("limit", "50");
+                let page = parse_page(&self.get(&endpoint).await?)?;
+                let folders: Vec<Value> = match &parent {
+                    None => page.results.clone(),
+                    // Subfolders of one folder, as listed in its `subfolders`.
+                    Some((id, name)) => page
+                        .results
+                        .iter()
+                        .find(|folder| {
+                            string(folder, "folderid") == Some(id.as_str())
+                                || name.as_deref().is_some_and(|name| {
+                                    string(folder, "name").map(slugify) == Some(slugify(name))
+                                })
+                        })
+                        .and_then(|folder| folder.get("subfolders").and_then(Value::as_array))
+                        .cloned()
+                        .unwrap_or_default(),
+                };
+                let children: Vec<_> = folders
+                    .into_iter()
+                    .filter_map(|folder| {
+                        let id = string(&folder, "folderid").filter(|id| valid_uuid(id))?;
+                        let name = string(&folder, "name").unwrap_or("folder");
+                        let mut url = Url::parse("https://www.deviantart.com/").ok()?;
+                        url.path_segments_mut().ok()?.extend([
+                            user.as_str(),
+                            path,
+                            id,
+                            &slugify(name),
+                        ]);
+                        let data = folder.as_object().cloned().unwrap_or_default();
+                        Some(crate::event::child_job(
+                            crate::event::ChildMetadata::from_raw("deviantart", "folder", &data)
+                                .with_url(url.as_str()),
+                            move || self.events(&url),
+                        ))
+                    })
+                    .collect();
+                let next = page.next.filter(|next| *next > offset && parent.is_none());
+                Ok::<_, crate::Error>(Some((stream::iter(children).flatten(), (next, pages + 1))))
+            }
+        })
+        .map(|result| match result {
+            Ok(events) => events.boxed(),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
     fn following(&self, user: String) -> BoxStream<'_, Result<ExtractionEvent>> {
         stream::try_unfold((Some(0u64), 0usize), move |(offset, pages)| {
             let user = user.clone();
@@ -1746,6 +1829,10 @@ impl DeviantArt {
 
     /// Emit one post boundary per deviation; galleries paginate lazily.
     pub fn events(&self, url: &Url) -> BoxStream<'_, Result<ExtractionEvent>> {
+        self.events_with(url, self.content.subfolders)
+    }
+
+    fn events_with(&self, url: &Url, subfolders: bool) -> BoxStream<'_, Result<ExtractionEvent>> {
         let target = match target(url) {
             Ok(target) => target,
             Err(e) => return stream::once(async move { Err(e) }).boxed(),
@@ -1820,8 +1907,18 @@ impl DeviantArt {
             Target::Watch { posts: false } => ("browse/deviantsyouwatch", String::new(), None),
             Target::Watch { posts: true } => ("browse/posts/deviantsyouwatch", String::new(), None),
             Target::Tag(tag) => ("browse/tags", tag, None),
+            Target::Favorites { user, folder: None } if !self.content.flat => {
+                return self.folders("collections", user, None);
+            }
+            Target::Gallery(user) if !self.content.flat => {
+                return self.folders("gallery", user, None);
+            }
             Target::Favorites { user, folder } => ("collections", user, folder),
             Target::Gallery(user) => ("gallery", user, None),
+            Target::Folder { user, id, name } if subfolders => {
+                let queued = self.folders("gallery", user, Some((id, name)));
+                return queued.chain(self.events_with(url, false)).boxed();
+            }
             Target::Folder { user, id, name } => ("gallery", user, Some((id, name))),
             Target::Deviation { user, slug } => {
                 return stream::once(async move {
@@ -2309,6 +2406,10 @@ mod tests {
             ok(json!({"results": [deviation(&uuid(3), false)], "has_more": false})),
         ]);
         let results: Vec<_> = client(root)
+            .with_content_options(ContentOptions {
+                subfolders: false,
+                ..ContentOptions::default()
+            })
             .stream(&Url::parse("https://www.deviantart.com/alice/gallery/5/my-folder").unwrap())
             .collect()
             .await;
@@ -2511,5 +2612,57 @@ mod tests {
             900_000_000,
         );
         assert!(url.contains("-fullview.png?token=1"));
+    }
+
+    #[tokio::test]
+    async fn folders_queue_subfolders_and_non_flat_galleries() {
+        let folders = json!({"results": [{"folderid": uuid(8), "name": "My Folder",
+            "has_subfolders": true, "subfolders": [{"folderid": uuid(7), "name": "Sub Part"}]},
+            {"folderid": uuid(9), "name": "Other"}], "has_more": false});
+        let first_child = |client: DeviantArt, url: &'static str| async move {
+            client
+                .events(&Url::parse(url).unwrap())
+                .filter_map(|event| {
+                    std::future::ready(match event {
+                        Ok(ExtractionEvent::BeginChild(scope)) => {
+                            scope.control.cancel();
+                            Some(scope.metadata.url().unwrap_or_default().to_owned())
+                        }
+                        _ => None,
+                    })
+                })
+                .take(1)
+                .collect::<Vec<_>>()
+                .await
+        };
+        let (root, server) = serve(vec![token("t"), ok(folders.clone())]);
+        let queued = first_child(
+            client(root),
+            "https://www.deviantart.com/alice/gallery/5/my-folder",
+        )
+        .await;
+        assert_eq!(
+            queued,
+            [format!(
+                "https://www.deviantart.com/alice/gallery/{}/sub-part",
+                uuid(7)
+            )]
+        );
+        server.join().unwrap();
+
+        let (root, server) = serve(vec![token("t"), ok(folders)]);
+        let flat = client(root).with_content_options(ContentOptions {
+            flat: false,
+            ..ContentOptions::default()
+        });
+        let queued = first_child(flat, "https://www.deviantart.com/alice/gallery").await;
+        assert_eq!(
+            queued,
+            [format!(
+                "https://www.deviantart.com/alice/gallery/{}/my-folder",
+                uuid(8)
+            )]
+        );
+        server.join().unwrap();
     }
 }
