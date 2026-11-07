@@ -651,8 +651,10 @@ views and artist discovery. Danbooru/e621 support
 API-only username/password Basic authentication and Gelbooru/Safebooru support API-only
 user-id/api-key credentials, with same-origin redirects and no credentials in
 media metadata. API-reported file size, rating and signed score are exposed.
-Remaining: other favorites, notes,
-`tags`/`metadata` options, per-category tags and authenticated live verification.
+The `[booru]` `tags` (per-type `tags_TYPE`) and `notes` options read post pages
+for the gelbooru_v02 and moebooru engines (2026-11-07). Remaining: other
+favorites, the Danbooru-family `metadata` option and authenticated live
+verification.
 
 **Implemented experimental native Mastodon:** statuses, user timelines,
 bookmarks, favourites, list timelines and Unicode hashtags on mastodon.social,
