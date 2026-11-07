@@ -1596,6 +1596,18 @@ path) or `expression` (`mode: eval`) in an external `python3`
 `compression: lzma` writes LZMA (method 14) entries built natively and
 copied into the archive, readable by Python's `zipfile` (2026-10-28).
 
+**Implemented extraction options, 2026-11-07:** `path-convert`,
+`file-unique`/`image-unique`, `child-unique`/`chapter-unique` and
+`category-transfer` (with upstream's class defaults for manga and other
+listing extractors) apply to native jobs, and the `noop` input is accepted.
+Options tied to the Python runtime have no native meaning and are accepted
+without effect: `metadata-extractor` (inserts the Python extractor object),
+`extractor.module-sources` (Python extractor modules), `path-extended` and
+`output.ansi` (Windows console/path workarounds handled by Rust's standard
+library), and `downloader.http.consume-content` (connection reuse).
+Remaining: `parent-session` and `parent-skip` (per-child-job skip counters;
+`-A`/`abort:N` currently stop the whole input rather than one child job).
+
 **Implemented input, auth and pacing options, 2026-10-28:** input files accept
 upstream's `-KEY=VALUE` (next URL) and `-G KEY=VALUE` (all following URLs)
 option lines; such inputs re-resolve their settings. `-I/--input-file-comment`
