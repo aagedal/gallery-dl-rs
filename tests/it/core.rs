@@ -472,7 +472,10 @@ fn routes_social_hosts_without_lookalike_domains() {
             Some("wallhaven"),
         ),
         ("https://wallhaven.cc/", None),
-        ("https://w.wallhaven.cc/full/94/wallhaven-94x38z.jpg", None),
+        (
+            "https://w.wallhaven.cc/full/94/wallhaven-94x38z.jpg",
+            Some("wallhaven"),
+        ),
         ("https://wallhaven.cc.evil.example/w/94x38z", None),
         ("https://www.flickr.com/photos/alice/123", Some("flickr")),
         (
