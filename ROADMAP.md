@@ -1837,6 +1837,11 @@ Files lacking a required field, and direct links, keep the digest names.
 Exact keyword differences remain (e.g. DeviantArt's `{index}` is the UUID,
 Instagram omits the sidecar prefix, Reddit uses the user directory).
 
+A 2026-11-07 re-run of the URL sweep routed Pixiv image URLs
+(`i.pximg.net`, legacy `iN`/`img.pixiv.net`) to their works like upstream's
+`PixivWorkExtractor`, Pixeldrain `/d/` paths ending in a file name to the
+folder extractor, and fixed host-less `tumblr:DOMAIN` inputs.
+
 **Implemented upstream URL coverage for dedicated extractors, 2026-10-28:**
 a sweep of every `#url` in upstream's `test/results` (excluding `#fail` and
 `#exception` cases) against `--extractor native -g` found 175 URLs the

@@ -581,6 +581,8 @@ async fn config_command(args: &Args) -> Result<()> {
 fn routed_site(url: &url::Url, extractor: Extractor) -> Option<&'static str> {
     extract::social_site(url).filter(|site| {
         let file = extract::direct(url).is_some();
+        // Pixeldrain filesystem paths name files but are pages.
+        let file = file && !(*site == "pixeldrain" && url.path().starts_with("/d/"));
         !(*site == "imgur"
             && matches!(extractor, Extractor::Compatibility)
             && url.host_str() == Some("i.imgur.com")

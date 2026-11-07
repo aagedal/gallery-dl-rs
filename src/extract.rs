@@ -872,6 +872,10 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     if url.scheme() == "mastodon" && crate::mastodon::target(url).is_ok() {
         return Some("mastodon");
     }
+    // Opaque `tumblr:DOMAIN` inputs have no host.
+    if url.scheme() == "tumblr" && crate::tumblr::is_blog_url(url) {
+        return Some("tumblr");
+    }
     let host = url.host_str()?;
     if crate::mastodon::INSTANCES.contains(&host) {
         return Some("mastodon");
