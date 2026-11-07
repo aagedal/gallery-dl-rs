@@ -594,3 +594,33 @@ fn direct_links_provide_upstream_directlink_keywords() {
     .unwrap();
     assert_eq!(name, "cdn.example.org-x_y_z-a_b-jpg-q_1-f-example.org");
 }
+
+#[test]
+fn format_string_dialects_follow_upstream() {
+    use gallery_dl_rs::{kemono, naming::DirectoryTemplate};
+    let post = serde_json::json!({"id":"7","user":"42","service":"patreon","title":"Hello World",
+        "published":"2024-01-02T03:04:05","file":{"name":"cover.jpg","path":"/aa/bb/aabb.jpg"}});
+    let media = kemono::parse_post(&post, "kemono.cr", "patreon", "42").remove(0);
+    let render = |template: &str| {
+        FilenameTemplate::parse(template)
+            .unwrap()
+            .render(&media)
+            .unwrap()
+    };
+    assert_eq!(
+        render("\u{c}E title.lower() + '.' + extension"),
+        "hello world.jpg"
+    );
+    assert_eq!(
+        render("\u{c}F {id}_{title.upper()[:5]}_{num:>03}.{extension!u}"),
+        "7_HELLO_001.JPG"
+    );
+    assert_eq!(render("\u{c}F {'a:b' if num == 1 else 'c'}x"), "a:bx");
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("name.txt");
+    std::fs::write(&file, "{id}-{num}.{extension}\n").unwrap();
+    assert_eq!(render(&format!("\u{c}T {}", file.display())), "7-1.jpg");
+    let directory = DirectoryTemplate::parse(&["\u{c}F {service}/{user}".into()]).unwrap();
+    assert!(directory.render(&media).unwrap().is_some());
+    assert!(FilenameTemplate::parse("\u{c}J {{ id }}").is_err());
+}

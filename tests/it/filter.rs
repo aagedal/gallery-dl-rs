@@ -151,3 +151,20 @@ fn supported_expressions_match_recorded_cpython_reference_results() {
         );
     }
 }
+
+#[test]
+fn python_slices_follow_upstream_semantics() {
+    let media = social();
+    for expr in [
+        "content[:5] == 'A Cat'",
+        "content[2:5] == 'Cat'",
+        "content[-1:] == '🍂'",
+        "content[::-1][0] == '🍂'",
+        "content[::2] == 'ACt🍂'",
+        "sensitive_flags[:1] == ['Nudity']",
+        "content[10:] == ''",
+    ] {
+        assert!(matches(expr, &media), "{expr}");
+    }
+    assert!(FilterExpression::parse("content[1:2:3:4]").is_err());
+}

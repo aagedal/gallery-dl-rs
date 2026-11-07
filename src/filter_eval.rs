@@ -129,6 +129,17 @@ impl Evaluator<'_> {
                 let index = self.eval(index)?;
                 self.index(&value, &index)?
             }
+            Expr::Slice(value, bounds) => {
+                let value = self.eval(value)?;
+                let mut evaluated = [None, None, None];
+                for (slot, bound) in evaluated.iter_mut().zip(bounds.iter()) {
+                    *slot = match self.eval(bound)? {
+                        Value::None => None,
+                        bound => Some(i64::try_from(integer(&bound)?).map_err(|_| invalid())?),
+                    };
+                }
+                self.slice(&value, evaluated)?
+            }
             Expr::Unary(op, value) => {
                 let value = self.eval(value)?;
                 match op {
@@ -200,6 +211,58 @@ impl Evaluator<'_> {
                 }
             }
         })
+    }
+    /// Python slicing of strings, lists and tuples.
+    fn slice(&mut self, value: &Value, [start, stop, step]: [Option<i64>; 3]) -> Result<Value> {
+        let step = step.unwrap_or(1);
+        if step == 0 {
+            return Err(invalid());
+        }
+        let indices = |len: usize| -> Vec<usize> {
+            let len = len as i64;
+            let clamp = |bound: i64, low: i64, high: i64| {
+                let bound = if bound < 0 { bound + len } else { bound };
+                bound.clamp(low, high)
+            };
+            let (start, stop) = if step > 0 {
+                (
+                    start.map_or(0, |b| clamp(b, 0, len)),
+                    stop.map_or(len, |b| clamp(b, 0, len)),
+                )
+            } else {
+                (
+                    start.map_or(len - 1, |b| clamp(b, -1, len - 1)),
+                    stop.map_or(-1, |b| clamp(b, -1, len - 1)),
+                )
+            };
+            let mut out = Vec::new();
+            let mut i = start;
+            while (step > 0 && i < stop) || (step < 0 && i > stop) {
+                out.push(i as usize);
+                i += step;
+            }
+            out
+        };
+        match value {
+            Value::String(text) => {
+                let chars: Vec<char> = text.chars().collect();
+                let sliced: String = indices(chars.len()).into_iter().map(|i| chars[i]).collect();
+                self.allocate(sliced.len())?;
+                Ok(Value::String(sliced.into()))
+            }
+            Value::List(values) | Value::Tuple(values) => {
+                let sliced: Vec<Value> = indices(values.len())
+                    .into_iter()
+                    .map(|i| values[i].clone())
+                    .collect();
+                Ok(if matches!(value, Value::List(_)) {
+                    Value::List(sliced.into())
+                } else {
+                    Value::Tuple(sliced.into())
+                })
+            }
+            _ => Err(invalid()),
+        }
     }
     fn index(&mut self, value: &Value, index: &Value) -> Result<Value> {
         match value {

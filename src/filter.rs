@@ -65,6 +65,8 @@ pub(super) enum Expr {
     Tuple(Vec<Expr>),
     Map(Vec<(String, Expr)>),
     Index(Box<Expr>, Box<Expr>),
+    /// `value[start:stop:step]`; absent bounds are `None` literals.
+    Slice(Box<Expr>, Box<[Expr; 3]>),
     Unary(UnaryOp, Box<Expr>),
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
     Compare(Box<Expr>, Vec<(CompareOp, Expr)>),
@@ -106,6 +108,25 @@ pub(super) enum CompareOp {
     NotIn,
     Is,
     IsNot,
+}
+
+/// One Python expression, for `\fE`/`\fF` format strings.
+#[derive(Clone, PartialEq)]
+pub(crate) struct Expression(Expr);
+impl std::fmt::Debug for Expression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Expression { expression: [redacted] }")
+    }
+}
+impl Expression {
+    pub(crate) fn parse(source: &str) -> Result<Self> {
+        let expression = parser::parse(source)?;
+        validate_tree(&expression, 0, &mut 4096)?;
+        Ok(Self(expression))
+    }
+    pub(crate) fn evaluate(&self, context: &BTreeMap<String, Value>) -> Result<Value> {
+        eval::evaluate(&self.0, context)
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -356,6 +377,12 @@ fn validate_tree(expr: &Expr, depth: usize, budget: &mut usize) -> Result<()> {
             next(right)?;
         }
         Expr::Unary(_, value) => next(value)?,
+        Expr::Slice(value, bounds) => {
+            next(value)?;
+            for bound in bounds.iter() {
+                next(bound)?;
+            }
+        }
         Expr::Compare(left, comparisons) => {
             next(left)?;
             for (_, value) in comparisons {
