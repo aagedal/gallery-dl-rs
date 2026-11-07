@@ -511,6 +511,9 @@ fn routes_social_hosts_without_lookalike_domains() {
         ("https://postimg.cc/gallery/abc", Some("postimg")),
         ("https://i.postimg.cc/abc/x.png", None),
         ("https://imgbox.com.evil.example/AbCd1234", None),
+        ("https://redd.it/abc12", Some("reddit")),
+        // No extractor handles Reddit's video host, like upstream.
+        ("https://v.redd.it/abc12", None),
         ("https://x.com/user/status/123", Some("twitter")),
         ("https://twitter.com/user/status/123", Some("twitter")),
         ("https://notinstagram.com/p/abc", None),

@@ -955,6 +955,15 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
         ("fixvx.com", "twitter"),
     ] {
         if host == domain || host.ends_with(&format!(".{domain}")) {
+            // Reddit's other hosts (`v.redd.it`, ...) have no extractor,
+            // except for the file hosts downloaded directly.
+            if category == "reddit"
+                && domain != "reddit.com"
+                && crate::reddit::target(url).is_err()
+                && direct(url).is_none()
+            {
+                return None;
+            }
             return Some(category);
         }
     }
