@@ -787,6 +787,51 @@ pub(crate) fn valid_id(id: &str) -> bool {
 }
 
 /// Parse first-party single-post URLs. `Twitter::stream` also handles explicit profile tabs.
+/// The upstream extractor class of a Twitter/X URL.
+pub fn subcategory(url: &Url) -> Option<&'static str> {
+    use collections::Collection;
+    use timeline::ProfileTab;
+    if images::image_input(url).is_some() {
+        return None;
+    }
+    if post_id(url).is_ok() {
+        return Some("tweet");
+    }
+    if let Ok(Some(_)) = search::input(url) {
+        return Some(if url.path().starts_with("/hashtag/") {
+            "hashtag"
+        } else {
+            "search"
+        });
+    }
+    if let Ok(Some(collection)) = collections::input(url) {
+        return Some(match collection {
+            Collection::Bookmarks => "bookmark",
+            Collection::List(_) => "list",
+            Collection::HomeLatest | Collection::Home => "home",
+            Collection::Community(_) => "community",
+            Collection::Communities => "communities",
+        });
+    }
+    if let Ok(Some(target)) = users::input(url) {
+        return Some(target.subcategory());
+    }
+    if timeline::is_user_dispatch(url) {
+        return Some("user");
+    }
+    Some(match timeline::profile_input(url).ok()?.1 {
+        ProfileTab::Info => "info",
+        ProfileTab::Avatar => "avatar",
+        ProfileTab::Background => "background",
+        ProfileTab::Media => "media",
+        ProfileTab::Tweets => "tweets",
+        ProfileTab::Replies => "replies",
+        ProfileTab::Highlights => "highlights",
+        ProfileTab::Likes => "likes",
+        ProfileTab::Timeline => "timeline",
+    })
+}
+
 pub fn post_id(url: &Url) -> Result<String> {
     if !matches!(url.scheme(), "http" | "https")
         || !crate::twitter::twitter_host(url.host_str())

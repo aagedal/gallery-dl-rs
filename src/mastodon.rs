@@ -403,6 +403,21 @@ static STATUS: Route = Route::new(
     "{media[id]}",
 );
 
+/// Upstream's other Mastodon classes share the status formats.
+const fn class(subcategory: &'static str) -> Route {
+    Route::new(
+        subcategory,
+        "{category}_{id}_{media[id]}.{extension}",
+        &["mastodon", "{instance}", "{account[username]}"],
+        "{media[id]}",
+    )
+}
+static USER: Route = class("user");
+static BOOKMARK: Route = class("bookmark");
+static FAVORITE: Route = class("favorite");
+static LIST: Route = class("list");
+static HASHTAG: Route = class("hashtag");
+
 /// Upstream `items` keywords: the status without its attachments, plus
 /// `instance`, `instance_remote`, `count`, tag names, `date`, `num`,
 /// `media` and URL name parts.
@@ -651,6 +666,7 @@ struct TimelineState {
     pages: usize,
     done: bool,
     moved_checked: bool,
+    route: &'static Route,
     pending: VecDeque<ExtractionEvent>,
 }
 
@@ -759,11 +775,26 @@ impl Mastodon {
         group(media, &category)
     }
 
-    fn status_events(&self, status: &Value, host: &str) -> VecDeque<ExtractionEvent> {
+    fn status_events(
+        &self,
+        status: &Value,
+        host: &str,
+        route: &'static Route,
+    ) -> VecDeque<ExtractionEvent> {
         if !selected(status, self.selection) {
             return VecDeque::new();
         }
-        let media = parse_status_with_options(status, host, self.selection);
+        let mut media = parse_status_with_options(status, host, self.selection);
+        // Files carry the class of the input, like upstream's extractors.
+        for item in &mut media {
+            if let Some(keywords) = item
+                .metadata
+                .as_mut()
+                .and_then(|metadata| metadata.site_keywords.as_mut())
+            {
+                Arc::make_mut(keywords).route = route;
+            }
+        }
         if !media.is_empty() {
             return self.finish(media);
         }
@@ -841,7 +872,7 @@ impl Mastodon {
             }
             state
                 .pending
-                .extend(self.status_events(status, &state.host));
+                .extend(self.status_events(status, &state.host, state.route));
         }
         Ok(())
     }
@@ -909,7 +940,7 @@ impl Mastodon {
                     "Mastodon response does not match the requested status",
                 ));
             }
-            let events = self.status_events(&status, &host);
+            let events = self.status_events(&status, &host, &STATUS);
             if events.is_empty() && selected(&status, self.selection) {
                 return Err(error("Mastodon status contains no supported media"));
             }
@@ -1064,19 +1095,19 @@ impl Mastodon {
     }
 
     async fn timeline(&self, target: &Target) -> Result<TimelineState> {
-        let (host, path, account_query) = match target {
+        let (host, path, account_query, route) = match target {
             Target::User { host, acct } => {
                 let id = self.account_id(host, acct).await?;
-                (host, format!("api/v1/accounts/{id}/statuses"), true)
+                (host, format!("api/v1/accounts/{id}/statuses"), true, &USER)
             }
             Target::Collection { host, feed } => {
-                let path = match feed {
-                    Collection::Bookmarks => "api/v1/bookmarks".into(),
-                    Collection::Favourites => "api/v1/favourites".into(),
-                    Collection::List(id) => format!("api/v1/timelines/list/{id}"),
-                    Collection::Hashtag(tag) => format!("api/v1/timelines/tag/{tag}"),
+                let (path, route) = match feed {
+                    Collection::Bookmarks => ("api/v1/bookmarks".into(), &BOOKMARK),
+                    Collection::Favourites => ("api/v1/favourites".into(), &FAVORITE),
+                    Collection::List(id) => (format!("api/v1/timelines/list/{id}"), &LIST),
+                    Collection::Hashtag(tag) => (format!("api/v1/timelines/tag/{tag}"), &HASHTAG),
                 };
-                (host, path, false)
+                (host, path, false, route)
             }
             Target::Status { .. } | Target::Object { .. } | Target::Following { .. } => {
                 unreachable!("statuses and followings do not have timeline state")
@@ -1092,6 +1123,7 @@ impl Mastodon {
             pages: 0,
             done: false,
             moved_checked: false,
+            route,
             pending: VecDeque::new(),
         })
     }

@@ -601,6 +601,18 @@ fn routed_site(url: &url::Url, extractor: Extractor) -> Option<&'static str> {
     })
 }
 
+/// The upstream class of an input for dedicated extractors whose files
+/// otherwise share one class.
+fn dedicated_class(url: &url::Url) -> Option<&'static str> {
+    match extract::social_site(url)? {
+        "bluesky" => gallery_dl_rs::bluesky::subcategory(url),
+        "twitter" => gallery_dl_rs::twitter::subcategory(url),
+        "kemono" | "coomer" => gallery_dl_rs::kemono::subcategory(url),
+        "instagram" => gallery_dl_rs::instagram::subcategory(url),
+        _ => None,
+    }
+}
+
 fn settings_category(url: &url::Url, extractor: Extractor) -> &'static str {
     match routed_site(url, extractor) {
         Some("mastodon") => gallery_dl_rs::mastodon::url_category(url).unwrap_or("mastodon"),
@@ -645,11 +657,22 @@ fn settings_key(url: &url::Url, extractor: Extractor) -> &'static str {
 fn media_settings_key<'a>(
     media: &'a extract::Media,
     extractor: Extractor,
-    settings: &BTreeMap<&str, Settings>,
+    settings: &BTreeMap<&'static str, Settings>,
 ) -> &'a str {
     if !settings.contains_key(media.category.as_str()) {
         // Generic compatibility output from other gallery-dl extractors.
         return "direct";
+    }
+    // A configured `CATEGORY.SUBCATEGORY` scope for the file's upstream class.
+    if let Some(route) = media
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.site_keywords.as_ref())
+        .map(|keywords| keywords.route)
+        && let Some((key, _)) =
+            settings.get_key_value(format!("{}:{}", media.category, route.subcategory).as_str())
+    {
+        return key;
     }
     media_settings_key_known(media, extractor)
 }
@@ -3228,6 +3251,47 @@ fn extract_input<'a>(
                 .boxed(),
             None => input,
         };
+        // Files of single-format dedicated extractors carry their job's
+        // upstream class (`subcategory`); child jobs use their own URL's.
+        let input = if matches!(extractor, Extractor::Native) && dedicated_class(&url).is_some() {
+            let root = dedicated_class(&url);
+            input
+                .scan(vec![root], move |classes, event| {
+                    if let Ok(event) = &event {
+                        match event {
+                            ExtractionEvent::BeginChild(scope) => classes.push(
+                                scope
+                                    .metadata
+                                    .url()
+                                    .and_then(|url| url::Url::parse(url).ok())
+                                    .and_then(|url| dedicated_class(&url)),
+                            ),
+                            ExtractionEvent::EndChild(_) if classes.len() > 1 => {
+                                classes.pop();
+                            }
+                            _ => {}
+                        }
+                    }
+                    let class = classes.last().copied().flatten();
+                    let event = event.map(|mut event| {
+                        if let Some(class) = class
+                            && let ExtractionEvent::Media(media) = &mut event
+                            && let Some(keywords) = media
+                                .metadata
+                                .as_mut()
+                                .and_then(|metadata| metadata.site_keywords.as_mut())
+                        {
+                            let route = gallery_dl_rs::sites::class_route(keywords.route, class);
+                            Arc::make_mut(keywords).route = route;
+                        }
+                        event
+                    });
+                    std::future::ready(Some(event))
+                })
+                .boxed()
+        } else {
+            input
+        };
         let input = if routed_site(&url, extractor) == Some("mastodon") {
             let category = settings_category(&url, extractor);
             input
@@ -4089,7 +4153,7 @@ async fn resolved_settings(
         site_options: None,
     };
     let mut settings = BTreeMap::new();
-    for category in [
+    for (category, scope) in [
         "instagram",
         "twitter",
         "facebook",
@@ -4132,17 +4196,30 @@ async fn resolved_settings(
     ]
     .into_iter()
     .chain(gallery_dl_rs::sites::categories())
-    {
+    .map(|category| (category, None))
+    .chain(
+        // Other configured `CATEGORY.SUBCATEGORY` scopes, selected per file.
+        config
+            .classes()
+            .filter(|(category, _)| !matches!(*category, "danbooru" | "e621"))
+            .map(|(category, subcategory)| {
+                let key: &'static str =
+                    Box::leak(format!("{category}:{subcategory}").into_boxed_str());
+                (key, Some((category.to_owned(), subcategory.to_owned())))
+            })
+            .collect::<Vec<_>>(),
+    ) {
         let class = category
             .split_once('.')
             .filter(|(base, _)| matches!(*base, "danbooru" | "e621"));
-        let resolved = match class {
-            Some((base, class)) => config.resolve_class(base, class)?,
-            None => config.resolve(category)?,
+        let resolved = match (class, &scope) {
+            (_, Some((base, class))) => config.resolve_class(base, class)?,
+            (Some((base, class)), None) => config.resolve_class(base, class)?,
+            (None, None) => config.resolve(category)?,
         };
         let mut options = defaults.overlay(&resolved).overlay(&overrides);
         if let Some(archive) = &options.archive {
-            let base = category.split('.').next().unwrap_or(category);
+            let base = category.split(['.', ':']).next().unwrap_or(category);
             options.archive = Some(gallery_dl_rs::config::render_archive(archive, base));
         }
         let has_username = options.username.as_ref().is_some_and(|u| !u.is_empty())
@@ -4153,8 +4230,10 @@ async fn resolved_settings(
                 .is_some_and(|u| u.as_str().is_some_and(|u| !u.is_empty()));
         if !has_username
             && let Some(text) = &netrc
-            && let Some((login, password)) =
-                gallery_dl_rs::netrc::lookup(text, category.split('.').next().unwrap_or(category))
+            && let Some((login, password)) = gallery_dl_rs::netrc::lookup(
+                text,
+                category.split(['.', ':']).next().unwrap_or(category),
+            )
         {
             let (username, password, site) = credentials(Some(login), Some(password));
             options = options.overlay(&ConfigOptions {

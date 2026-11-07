@@ -1488,40 +1488,58 @@ impl Config {
             }
         }
         let mut raw_classes = Vec::new();
+        const CLASS_OPTIONS: &[&str] = &[
+            "parent-metadata",
+            "metadata-parent",
+            "init",
+            "postprocessors",
+            "postprocessor-options",
+            "base-directory",
+            "filename",
+            "directory",
+            "child-filter",
+            "child-range",
+            "post-filter",
+            "post-range",
+            "date-before",
+            "date-after",
+        ];
         if let Some(extractor) = shape.get_mut("extractor").and_then(Value::as_object_mut) {
-            for category in ["danbooru", "e621"] {
-                if let Some(settings) = extractor.get_mut(category).and_then(Value::as_object_mut) {
-                    for subcategory in ["artist", "artist-search", "tag"] {
-                        if let Some(value) = settings.remove(subcategory) {
-                            let fields = value.as_object().ok_or_else(|| {
-                                error("native configuration class must be a JSON object")
-                            })?;
-                            if fields.keys().any(|key| {
-                                !matches!(
-                                    key.as_str(),
-                                    "parent-metadata"
-                                        | "metadata-parent"
-                                        | "init"
-                                        | "postprocessors"
-                                        | "postprocessor-options"
-                                        | "base-directory"
-                                        | "filename"
-                                        | "directory"
-                                        | "child-filter"
-                                        | "child-range"
-                                        | "post-filter"
-                                        | "post-range"
-                                        | "date-before"
-                                        | "date-after"
-                                )
-                            }) {
-                                return Err(error("unsupported native booru class option"));
-                            }
-                            let raw: RawOptions = serde_json::from_value(value)
-                                .map_err(|_| error("invalid native booru class settings"))?;
-                            raw_classes.push((category.to_owned(), subcategory.to_owned(), raw));
+            for (category, settings) in extractor.iter_mut() {
+                let Some(settings) = settings.as_object_mut() else {
+                    continue;
+                };
+                let booru = matches!(category.as_str(), "danbooru" | "e621");
+                // Upstream `extractor.CATEGORY.SUBCATEGORY` scopes, by the
+                // subcategory names of upstream's extractor classes.
+                let subcategories: Vec<String> = settings
+                    .iter()
+                    .filter(|(key, value)| {
+                        if booru {
+                            matches!(key.as_str(), "artist" | "artist-search" | "tag")
+                        } else {
+                            value.is_object() && upstream_subcategory(key)
                         }
+                    })
+                    .map(|(key, _)| key.clone())
+                    .collect();
+                for subcategory in subcategories {
+                    let mut value = settings.remove(&subcategory).expect("listed key");
+                    let fields = value
+                        .as_object_mut()
+                        .ok_or_else(|| error("native configuration class must be a JSON object"))?;
+                    if booru
+                        && fields
+                            .keys()
+                            .any(|key| !CLASS_OPTIONS.contains(&key.as_str()))
+                    {
+                        return Err(error("unsupported native booru class option"));
                     }
+                    // Other sites keep the class options natively supported.
+                    fields.retain(|key, _| CLASS_OPTIONS.contains(&key.as_str()));
+                    let raw: RawOptions = serde_json::from_value(value)
+                        .map_err(|_| error("invalid native class settings"))?;
+                    raw_classes.push((category.clone(), subcategory, raw));
                 }
             }
         }
@@ -2208,6 +2226,13 @@ impl Config {
     pub fn parent_keywords(&self) -> &[String] {
         &self.parent_keywords
     }
+    /// Configured `(category, subcategory)` scopes.
+    pub fn classes(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.classes
+            .keys()
+            .map(|(category, subcategory)| (category.as_str(), subcategory.as_str()))
+    }
+
     pub fn resolve_class(&self, category: &str, subcategory: &str) -> Result<Options> {
         let mut resolved = self.resolve(category)?;
         if let Some(class) = self.classes.get(&(category.into(), subcategory.into())) {
@@ -3205,6 +3230,22 @@ fn archive_path(field: Field, directory: &Path) -> Result<Option<PathBuf>> {
     // Like upstream, relative paths resolve against the working directory.
     let _ = directory;
     Ok(Some(joined))
+}
+
+/// Whether `name` is the subcategory of one of upstream's extractor classes.
+fn upstream_subcategory(name: &str) -> bool {
+    static NAMES: std::sync::OnceLock<std::collections::HashSet<&'static str>> =
+        std::sync::OnceLock::new();
+    NAMES
+        .get_or_init(|| {
+            include_str!("upstream_extractors.tsv")
+                .lines()
+                .filter(|line| !line.starts_with('#'))
+                .filter_map(|line| line.split('\t').nth(3))
+                .filter(|subcategory| !subcategory.is_empty())
+                .collect()
+        })
+        .contains(name)
 }
 
 /// Replace `{category}` in an archive path from a segment list.

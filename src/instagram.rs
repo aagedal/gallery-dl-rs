@@ -861,6 +861,43 @@ impl From<crate::Error> for Failure {
     }
 }
 
+/// The upstream extractor class of an Instagram URL.
+pub fn subcategory(url: &Url) -> Option<&'static str> {
+    let segments: Vec<&str> = url
+        .path_segments()?
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    Some(match segments.as_slice() {
+        ["share", "reel" | "reels", ..] | ["reel" | "reels", _, ..] => "reel",
+        ["share", ..] | ["p" | "tv", _, ..] | [_, "p" | "tv", _, ..] => "post",
+        [_, "reel" | "reels", _, ..] => "reel",
+        ["stories", "highlights", ..] | ["s", ..] => "highlights",
+        ["stories", "me" | "tray", ..] => "stories-tray",
+        ["stories", ..] => "stories",
+        ["explore", "tags", ..] => "tag",
+        [_, "saved", "collection" | "collections", ..] => "collection",
+        [_, "saved", ..] => "saved",
+        [_, "guide", ..] => "guide",
+        [
+            _,
+            view @ ("posts" | "reels" | "tagged" | "highlights" | "info" | "avatar" | "followers"
+            | "following"),
+            ..,
+        ] => match *view {
+            "posts" => "posts",
+            "reels" => "reels",
+            "tagged" => "tagged",
+            "highlights" => "highlights",
+            "info" => "info",
+            "avatar" => "avatar",
+            "followers" => "followers",
+            _ => "following",
+        },
+        [_] => "user",
+        _ => return None,
+    })
+}
+
 pub fn shortcode(url: &Url) -> Result<String> {
     if !matches!(url.scheme(), "http" | "https")
         || !matches!(

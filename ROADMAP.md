@@ -1733,8 +1733,15 @@ inherited), credential and class settings for categories that do not use
 them natively are ignored instead of rejected, `cookies` may be a
 `{"name": "value"}` object, `sleep-retries`/`sleep-429` accept
 `lin[:START[:MAX]]=`/`exp[:BASE[:START[:MAX]]]=` backoff, `cursor: true` is
-the default, and unopenable `output` files only warn. Per-subcategory
-settings (`CATEGORY.SUBCATEGORY.option`) still apply only to Danbooru/e621.
+the default, and unopenable `output` files only warn.
+`extractor.CATEGORY.SUBCATEGORY` scopes (named after upstream's extractor
+classes) now work for every category: their template, filter, range, date
+and postprocessor options apply to files of that class (other options in
+them are ignored; Danbooru/e621 keep their stricter class handling). Files
+of Mastodon, Bluesky, Twitter, Kemono/Coomer and Instagram now carry their
+job's upstream class (e.g. Mastodon `user`, Kemono's service name, Instagram
+dispatch children `posts`/`reels`/...), and dedicated extractors expose
+`{subcategory}`.
 Registry sites apply user `keywords`/`keywords-global` (with `keywords-eval`
 format strings), `metadata-url` and `metadata-version`; `cookies-update` with
 a path writes session cookies there (rewriting the input file with `true` is

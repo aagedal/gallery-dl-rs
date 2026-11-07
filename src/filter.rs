@@ -1638,6 +1638,12 @@ fn context_parts(
                 };
                 values.insert(key.clone(), value);
             }
+            // Upstream's extractor class of the file.
+            if !keywords.route.subcategory.is_empty() {
+                values
+                    .entry("subcategory".into())
+                    .or_insert_with(|| text(keywords.route.subcategory));
+            }
         }
     }
     map_category(&mut values);

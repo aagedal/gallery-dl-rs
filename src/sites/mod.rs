@@ -107,6 +107,32 @@ pub const GENERIC_CATEGORY: &str = "gallery-dl";
 /// not reported by gallery-dl.
 pub static GENERIC: Route = Route::new("", "{filename}.{extension}", &["{category}"], "");
 
+/// `route`'s formats under upstream class `subcategory`, for extractors that
+/// share one set of formats between classes.
+pub fn class_route(route: &'static Route, subcategory: &'static str) -> &'static Route {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    if route.subcategory == subcategory {
+        return route;
+    }
+    type Cache = Mutex<HashMap<(usize, &'static str), &'static Route>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
+    let mut cache = CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    cache
+        .entry((std::ptr::from_ref(route) as usize, subcategory))
+        .or_insert_with(|| {
+            Box::leak(Box::new(Route::new(
+                subcategory,
+                route.filename,
+                route.directory,
+                route.archive,
+            )))
+        })
+}
+
 /// A file's upstream keyword dictionary and the class that produced it.
 #[derive(Clone, Debug)]
 pub struct SiteKeywords {
@@ -769,7 +795,8 @@ pub(crate) fn is_custom_root(key: &str) -> bool {
     key.starts_with("https://") || key.starts_with("http://")
 }
 
-fn intern(value: String) -> &'static str {
+/// A `'static` copy of one of a small, bounded set of strings.
+pub(crate) fn intern(value: String) -> &'static str {
     static STRINGS: std::sync::Mutex<std::collections::BTreeSet<&'static str>> =
         std::sync::Mutex::new(std::collections::BTreeSet::new());
     let mut strings = STRINGS.lock().unwrap_or_else(|e| e.into_inner());

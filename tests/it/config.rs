@@ -4128,3 +4128,27 @@ fn upstream_sample_configuration_patterns_load() {
     assert_eq!(config.resolve("newgrounds").unwrap().username, None);
     assert!(parse(r#"{"extractor":{"furaffinity":{"cookies":{"a":["x"]}}}}"#).is_err());
 }
+
+#[test]
+fn subcategory_scopes_apply_to_every_category() {
+    let config = parse(
+        r#"{"extractor":{
+            "twitter":{"timeline":{"directory":["tw","{author[name]}"],"cookies":"ignored"},
+                       "keywords":{"a":1}},
+            "tbib":{"tag":{"filename":"{id}.{extension}"}}
+        }}"#,
+    )
+    .unwrap();
+    let classes: Vec<_> = config.classes().collect();
+    assert!(classes.contains(&("twitter", "timeline")));
+    assert!(classes.contains(&("tbib", "tag")));
+    // Object-valued site options are not subcategories.
+    assert!(!classes.iter().any(|(_, sub)| *sub == "keywords"));
+    let timeline = config.resolve_class("twitter", "timeline").unwrap();
+    assert_eq!(
+        timeline.directory.as_deref(),
+        Some(&["tw".to_owned(), "{author[name]}".to_owned()][..])
+    );
+    assert_eq!(timeline.cookies, None);
+    assert_eq!(config.resolve("twitter").unwrap().directory, None);
+}
