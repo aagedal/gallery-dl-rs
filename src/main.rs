@@ -591,13 +591,7 @@ fn routed_site(url: &url::Url, extractor: Extractor) -> Option<&'static str> {
             || (gallery_dl_rs::booru::Site::from_category(site).is_some()
                 || matches!(
                     *site,
-                    "mastodon"
-                        | "kemono"
-                        | "coomer"
-                        | "pixeldrain"
-                        | "catbox"
-                        | "imgbox"
-                        | "postimg"
+                    "mastodon" | "kemono" | "coomer" | "pixeldrain" | "catbox" | "postimg"
                 ))
                 && file)
     })

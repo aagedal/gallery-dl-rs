@@ -504,7 +504,10 @@ fn routes_social_hosts_without_lookalike_domains() {
         ("https://catbox.moe/c/abc", Some("catbox")),
         ("https://files.catbox.moe/abc.png", None),
         ("https://imgbox.com/g/AbCdEfGhIj", Some("imgbox")),
-        ("https://images2.imgbox.com/ab/cd/x_o.png", None),
+        (
+            "https://images2.imgbox.com/ab/cd/AbCd1234_o.png",
+            Some("imgbox"),
+        ),
         ("https://postimg.cc/gallery/abc", Some("postimg")),
         ("https://i.postimg.cc/abc/x.png", None),
         ("https://imgbox.com.evil.example/AbCd1234", None),

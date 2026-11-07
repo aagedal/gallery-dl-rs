@@ -1844,7 +1844,8 @@ folder extractor, and fixed host-less `tumblr:DOMAIN` inputs. Reddit
 (`i.redd.it`, `preview.redd.it` rewritten to the original) and Catbox file
 links keep downloading directly but carry upstream's `reddit:image` and
 `catbox:file` classes and paths; Flickr static file and Wallhaven full-size
-URLs resolve their photo/wallpaper like upstream's image extractors.
+URLs resolve their photo/wallpaper, and imgbox file URLs their image page
+(and so the original file), like upstream's image extractors.
 
 **Implemented upstream URL coverage for dedicated extractors, 2026-10-28:**
 a sweep of every `#url` in upstream's `test/results` (excluding `#fail` and

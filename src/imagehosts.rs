@@ -80,7 +80,16 @@ impl Site {
         Some(match host.strip_prefix("www.").unwrap_or(host) {
             "pixeldrain.com" => Self::Pixeldrain,
             "catbox.moe" => Self::Catbox,
-            "imgbox.com" => Self::Imgbox,
+            "imgbox.com" | "i.imgbox.com" => Self::Imgbox,
+            // Upstream's `images\d+.imgbox.com` file hosts.
+            images
+                if images
+                    .strip_prefix("images")
+                    .and_then(|rest| rest.strip_suffix(".imgbox.com"))
+                    .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) =>
+            {
+                Self::Imgbox
+            }
             // Upstream's `(?:postim(?:ages|g)|pixxxels)\.(?:cc|org)`.
             "postimg.cc" | "postimg.org" | "postimages.cc" | "postimages.org" | "pixxxels.cc"
             | "pixxxels.org" => Self::Postimg,
@@ -210,7 +219,19 @@ pub fn target(url: &Url) -> Result<Target> {
         }),
         (Site::Catbox, ["c", album]) => id(album, 1..=32).map(Target::CatboxAlbum),
         (Site::Imgbox, ["g", gallery]) => id(gallery, 10..=10).map(Target::ImgboxGallery),
-        (Site::Imgbox, [image]) => id(image, 8..=8).map(Target::ImgboxImage),
+        (Site::Imgbox, [image]) if url.host_str() != Some("i.imgbox.com") => {
+            id(image, 8..=8).map(Target::ImgboxImage)
+        }
+        // File URLs name their image by the first eight characters.
+        (Site::Imgbox, [file]) | (Site::Imgbox, [_, _, file]) => {
+            let hex = |part: &str| part.len() == 2 && part.bytes().all(|b| b.is_ascii_hexdigit());
+            file.get(..8)
+                .filter(|key| {
+                    alnum(key, 8..=8)
+                        && (segments.len() == 1 || hex(segments[0]) && hex(segments[1]))
+                })
+                .map(|key| Target::ImgboxImage(key.to_owned()))
+        }
         (Site::Postimg, ["gallery", gallery]) => id(gallery, 1..=32).map(Target::PostimgGallery),
         (Site::Postimg, ["image" | "img", image] | [image]) if *image != "gallery" => {
             id(image, 1..=32).map(Target::PostimgImage)
