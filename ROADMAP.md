@@ -652,9 +652,10 @@ API-only username/password Basic authentication and Gelbooru/Safebooru support A
 user-id/api-key credentials, with same-origin redirects and no credentials in
 media metadata. API-reported file size, rating and signed score are exposed.
 The `[booru]` `tags` (per-type `tags_TYPE`) and `notes` options read post pages
-for the gelbooru_v02 and moebooru engines (2026-11-07). Remaining: other
-favorites, the Danbooru-family `metadata` option and authenticated live
-verification.
+for the gelbooru_v02 and moebooru engines (2026-11-07). Danbooru's `metadata`
+includes (boolean, string or list) are merged per page for native tag
+listings. Remaining: other favorites, `metadata` for pool/favorite-group and
+e621 listings, and authenticated live verification.
 
 **Implemented experimental native Mastodon:** statuses, user timelines,
 bookmarks, favourites, list timelines and Unicode hashtags on mastodon.social,
