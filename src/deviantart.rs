@@ -14,6 +14,7 @@
 //! (`/_puppy`) web API with the page's `__CSRF_TOKEN__` and the session
 //! cookies; each listed deviation is then fetched through the OAuth API.
 //! Without login cookies, site searches scrape the search result pages.
+use crate::sites::{Route, SiteKeywords};
 use crate::{
     Result,
     cookies::CookieJar,
@@ -29,9 +30,10 @@ use futures_util::{
     stream::{self, BoxStream},
 };
 use reqwest::{Client, RequestBuilder, StatusCode};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::{
     collections::{BTreeMap, VecDeque},
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 use url::Url;
@@ -401,6 +403,174 @@ pub fn wants_download(deviation: &Value) -> bool {
         && deviation.get("content").is_some()
 }
 
+const FILENAME: &str = "{category}_{index}_{title}.{extension}";
+const DIRECTORY: &[&str] = &["{category}", "{username}"];
+static DEVIATION: Route = Route::new(
+    "deviation",
+    FILENAME,
+    DIRECTORY,
+    "g_{_username}_{index}.{extension}",
+);
+static GALLERY: Route = Route::new(
+    "gallery",
+    FILENAME,
+    DIRECTORY,
+    "g_{_username}_{index}.{extension}",
+);
+static FOLDER: Route = Route::new(
+    "folder",
+    FILENAME,
+    &["{category}", "{username}", "{folder[title]}"],
+    "F_{folder[uuid]}_{index}.{extension}",
+);
+static FAVORITE: Route = Route::new(
+    "favorite",
+    FILENAME,
+    &["{category}", "{username}", "Favourites"],
+    "f_{_username}_{index}.{extension}",
+);
+static COLLECTION: Route = Route::new(
+    "collection",
+    FILENAME,
+    &[
+        "{category}",
+        "{username}",
+        "Favourites",
+        "{collection[title]}",
+    ],
+    "C_{collection[uuid]}_{index}.{extension}",
+);
+static JOURNAL: Route = Route::new(
+    "journal",
+    FILENAME,
+    &["{category}", "{username}", "Journal"],
+    "j_{_username}_{index}.{extension}",
+);
+static TAG: Route = Route::new(
+    "tag",
+    FILENAME,
+    &["{category}", "Tags", "{search_tags}"],
+    "T_{search_tags}_{index}.{extension}",
+);
+
+/// Upstream `util.b36encode`.
+fn to_base36(mut value: u64) -> String {
+    const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let mut out = Vec::new();
+    loop {
+        out.push(DIGITS[(value % 36) as usize]);
+        value /= 36;
+        if value == 0 {
+            break;
+        }
+    }
+    out.reverse();
+    String::from_utf8(out).expect("ASCII digits")
+}
+
+/// Upstream `prepare` and `commit` keywords of one deviation file.
+fn deviation_keywords(
+    deviation: &Value,
+    target: &Value,
+    url: &Url,
+    original: bool,
+) -> Map<String, Value> {
+    let mut data = deviation.as_object().cloned().unwrap_or_default();
+    let index = string(deviation, "url")
+        .and_then(|url| url.rsplit('-').next())
+        .and_then(|id| id.parse::<u64>().ok())
+        .unwrap_or(0);
+    if !data.contains_key("index") {
+        data.insert("index".into(), index.into());
+    }
+    let index = data.get("index").and_then(Value::as_u64).unwrap_or(index);
+    data.entry("index_base36")
+        .or_insert_with(|| to_base36(index).into());
+    let author = deviation
+        .pointer("/author/username")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    data.insert("username".into(), author.clone().into());
+    data.insert("_username".into(), author.to_lowercase().into());
+    let published = match deviation.get("published_time") {
+        Some(Value::String(s)) => s.trim().parse::<i64>().unwrap_or(0),
+        Some(Value::Number(n)) => n.as_i64().unwrap_or(0),
+        _ => 0,
+    };
+    data.insert("published_time".into(), published.into());
+    data.insert(
+        "date".into(),
+        crate::filter::source_date_text(Some(published)).into(),
+    );
+    let word = |text: &str| -> String {
+        text.to_lowercase()
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect()
+    };
+    let title = string(deviation, "title").unwrap_or("");
+    let base36 = data
+        .get("index_base36")
+        .and_then(Value::as_str)
+        .unwrap_or("0")
+        .to_owned();
+    let filename = format!("{}_by_{}-d{base36}", word(title), word(&author));
+    data.insert("filename".into(), filename.clone().into());
+    // `commit`: the chosen target with the shared filename and extension.
+    let name = target
+        .get("filename")
+        .and_then(Value::as_str)
+        .unwrap_or(url.as_str());
+    let name = name.split('?').next().unwrap_or(name);
+    let extension = name
+        .rsplit('/')
+        .next()
+        .and_then(|name| name.rsplit_once('.'))
+        .map(|(_, ext)| ext.to_lowercase())
+        .unwrap_or_default();
+    let extension = crate::path_options::map_extension(&extension).unwrap_or(extension);
+    let mut target = target.as_object().cloned().unwrap_or_default();
+    target.insert("filename".into(), filename.into());
+    target.insert("extension".into(), extension.clone().into());
+    data.insert("target".into(), target.into());
+    data.insert("extension".into(), extension.into());
+    let original = original || !url.as_str().contains("/v1/");
+    data.insert("is_original".into(), original.into());
+    data
+}
+
+/// Use another upstream class's formats and metadata for a built file.
+fn retarget(
+    media: &mut Media,
+    route: &'static Route,
+    extra: &Map<String, Value>,
+    user: Option<&str>,
+) {
+    let Some(keywords) = media
+        .metadata
+        .as_mut()
+        .and_then(|m| m.site_keywords.as_mut())
+    else {
+        return;
+    };
+    let keywords = Arc::make_mut(keywords);
+    keywords.route = route;
+    keywords.fields.extend(extra.clone());
+    if let Some(user) = user.filter(|user| !user.is_empty()) {
+        keywords.fields.insert("username".into(), user.into());
+        keywords
+            .fields
+            .insert("_username".into(), user.to_lowercase().into());
+    }
+}
+
 /// Parse one deviation into its file, optionally using a `deviation/download`
 /// response for the original. `None` for deviations without image content.
 pub fn parse_deviation(deviation: &Value, download: Option<&Value>) -> Option<Media> {
@@ -408,6 +578,7 @@ pub fn parse_deviation(deviation: &Value, download: Option<&Value>) -> Option<Me
     let content = deviation.get("content")?;
     let preview = string(content, "src").and_then(media_url)?;
     let original = download.and_then(|d| Some((d, string(d, "src").and_then(media_url)?)));
+    let is_download = original.is_some();
     let (source, url) = original.unwrap_or((content, preview));
     let timestamp = match deviation.get("published_time") {
         Some(Value::String(s)) => s.trim().parse::<i64>().ok(),
@@ -434,6 +605,10 @@ pub fn parse_deviation(deviation: &Value, download: Option<&Value>) -> Option<Me
             caption: string(deviation, "title").map(Into::into),
             timestamp,
             index: 1,
+            site_keywords: Some(Arc::new(SiteKeywords {
+                route: &DEVIATION,
+                fields: deviation_keywords(deviation, source, &url, is_download),
+            })),
             ..PostMetadata::default()
         }),
         url,
@@ -517,6 +692,8 @@ struct ListingState {
     /// The API listing: `gallery`, `collections` or `browse/tags`.
     kind: &'static str,
     folder: Option<String>,
+    /// The folder's URL ID and name, for `folder`/`collection` metadata.
+    folder_info: Option<(String, Option<String>)>,
     offset: Option<u64>,
     pages: usize,
     pending: VecDeque<ExtractionEvent>,
@@ -867,11 +1044,54 @@ impl DeviantArt {
             {
                 continue;
             }
-            if let Some(media) = self.media(deviation).await {
+            if let Some(mut media) = self.media(deviation).await {
+                let (route, extra, user) = self.listing_route(state);
+                retarget(&mut media, route, &extra, user.as_deref());
                 state.pending.extend(group(vec![media], "deviantart"));
             }
         }
         Ok(())
+    }
+
+    /// The upstream class, metadata and `username` of a listing's files.
+    fn listing_route(
+        &self,
+        state: &ListingState,
+    ) -> (&'static Route, Map<String, Value>, Option<String>) {
+        let mut extra = Map::new();
+        let user = Some(state.user.clone());
+        let folder = |key: &str| {
+            let (id, name) = state.folder_info.clone().unwrap_or_default();
+            let mut folder = Map::new();
+            folder.insert("title".into(), name.unwrap_or_default().into());
+            folder.insert(
+                "uuid".into(),
+                state.folder.clone().unwrap_or_default().into(),
+            );
+            folder.insert("index".into(), id.into());
+            folder.insert("owner".into(), state.user.clone().into());
+            (key.to_owned(), Value::Object(folder))
+        };
+        match (state.kind, &state.folder) {
+            ("gallery", None) => (&GALLERY, extra, user),
+            ("gallery", Some(_)) => {
+                let (key, value) = folder("folder");
+                extra.insert(key, value);
+                (&FOLDER, extra, user)
+            }
+            ("collections", None) => (&FAVORITE, extra, user),
+            ("collections", Some(_)) => {
+                let (key, value) = folder("collection");
+                extra.insert(key, value);
+                (&COLLECTION, extra, user)
+            }
+            ("browse/tags", _) => {
+                extra.insert("search_tags".into(), state.user.clone().into());
+                (&TAG, extra, None)
+            }
+            ("user/profile/posts", _) => (&JOURNAL, extra, user),
+            _ => (&DEVIATION, extra, None),
+        }
     }
 
     pub fn stream(&self, url: &Url) -> BoxStream<'_, Result<Media>> {
@@ -1484,6 +1704,7 @@ impl DeviantArt {
             kind,
             user,
             folder: None,
+            folder_info: folder.clone(),
             offset: None,
             pages: 0,
             pending: VecDeque::new(),
@@ -2089,5 +2310,39 @@ mod tests {
         assert!(error.contains("client-secret"), "{error}");
         assert!(!error.contains("topsecret") && !error.contains("127.0.0.1"));
         assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn deviation_keywords_follow_upstream_prepare_and_commit() {
+        let mut value = deviation(&uuid(1), false);
+        value["url"] = json!("https://www.deviantart.com/alice/art/My-Art-123456");
+        let media = parse_deviation(&value, None).unwrap();
+        let keywords = media
+            .metadata
+            .as_ref()
+            .unwrap()
+            .site_keywords
+            .clone()
+            .unwrap();
+        let fields = &keywords.fields;
+        assert_eq!(fields["index"], 123456);
+        assert_eq!(fields["index_base36"], "2n9c");
+        assert_eq!(fields["username"], "alice");
+        assert_eq!(fields["published_time"], 1704067200);
+        assert_eq!(fields["date"], "2024-01-01 00:00:00");
+        assert_eq!(fields["filename"], "my_art_by_alice-d2n9c");
+        assert_eq!(fields["extension"], "jpg");
+        assert_eq!(fields["target"]["filename"], "my_art_by_alice-d2n9c");
+        assert_eq!(fields["is_original"], true);
+        let mut media = media;
+        let mut extra = Map::new();
+        extra.insert("search_tags".into(), json!("cats"));
+        retarget(&mut media, &TAG, &extra, None);
+        let keywords = media.metadata.unwrap().site_keywords.unwrap();
+        assert_eq!(
+            keywords.route.archive,
+            "T_{search_tags}_{index}.{extension}"
+        );
+        assert_eq!(keywords.fields["search_tags"], "cats");
     }
 }
