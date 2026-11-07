@@ -445,7 +445,7 @@ fn content_disposition_filename(value: &str) -> Option<String> {
 }
 
 /// Upstream `util.format_value`: `1234567` → `1.23M`.
-fn format_value(value: u64) -> String {
+pub fn format_value(value: u64) -> String {
     let text = value.to_string();
     if text.len() < 4 {
         return text;

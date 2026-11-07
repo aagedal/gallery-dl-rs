@@ -683,8 +683,7 @@ moebooru, szurubooru, shimmie2, foolfuuka, vichan and lynxchan) route plain
 URLs on their hosts to the `BASE:` readers (2026-11-07).
 Failed account lookups fall back to `accounts/search` and moved accounts
 warn like upstream (2026-11-07).
-Remaining: OAuth/cache discovery, followed views, and fuller metadata/default
-naming. Authenticated live verification and real captures remain required.
+Remaining: fuller metadata/default naming. Authenticated live verification and real captures remain required.
 
 **Implemented experimental native Kemono/Coomer:** posts, creator post listings
 and global `/posts` feeds with deduplicated files. Creator/global listings accept
@@ -1676,7 +1675,8 @@ configuration file. `-U/--update`, `--update-check` and `--update-to` report
 that self-updating is unsupported. `--xff` sends a random `X-Forwarded-For` address from CIDR blocks or
 country codes (upstream's table), `--blacklist`/`--whitelist` filter child
 extractors for external URLs by category, `--write-log` copies standard error
-(Unix), and the `--cache-*` commands report that no cache is kept. `-X` and
+(Unix), and the `--cache-status`/`-show`/`-clear`/`-vacuum` commands and
+`--cache-file` work on upstream's shared `cache.sqlite3` (2026-11-07). `-X` and
 `--compat` fail explicitly. `--tags-blacklist`/`--tags-whitelist` (and the
 `tags-*`/`*-tags` options) filter posts by tags with Danbooru-style rules;
 `/import` is unsupported. `-E/--extractor-info` prints each registry route's
@@ -1740,7 +1740,12 @@ code), `oauth:deviantart`, `oauth:reddit`, `oauth:mastodon:INSTANCE`
 (registering an application for unknown instances), `oauth:tumblr`,
 `oauth:smugmug` and `oauth:flickr` (OAuth 1.0a) open the authorization page,
 receive the callback on `localhost:6414` (`extractor.oauth.host`/`port`), and
-print the token with the configuration key to set. Tokens are never cached.
+print the token with the configuration key to set. Since 2026-11-07 they also
+store it in upstream's `cache.sqlite3` (`cache.file`, same keys and pickled
+string values, so tokens are shared with Python gallery-dl), and Pixiv,
+DeviantArt (including rotated refresh tokens), Reddit and Mastodon read it
+when their token setting is absent or `"cache"`. Login sessions and cookies
+are not cached.
 
 **Implemented special inputs, 2026-10-28:** `recursive:URL`/`r:URL` (also
 `file://` documents) queues every URL found, and `ytdl:URL` hands any HTTP(S)

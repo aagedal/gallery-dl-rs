@@ -74,11 +74,25 @@ struct Helper<'a> {
     options: Options<'a>,
     client: reqwest::Client,
     connection: Option<TcpStream>,
+    /// Upstream's cache key for the obtained token.
+    cache_key: Option<String>,
 }
 
 impl Helper<'_> {
     fn option(&self, key: &str) -> Option<String> {
         (self.options)(&self.category, key)
+    }
+
+    /// Upstream `extractor.oauth.cache` (default true): store the token
+    /// where extractors with a `"cache"` (or absent) token setting find it.
+    fn store(&self, name: &str, token: &str) {
+        let enabled = (self.options)("oauth", "cache").is_none_or(|v| v != "false" && v != "0");
+        if let (true, Some(key)) = (enabled, &self.cache_key) {
+            match crate::cache::set(key, token) {
+                Ok(()) => eprintln!("[oauth][info] Writing '{name}' to cache"),
+                Err(e) => eprintln!("[oauth][warning] Could not write '{name}' to cache ({e})"),
+            }
+        }
     }
 
     /// Open a local HTTP server and receive the callback's query parameters.
@@ -286,6 +300,7 @@ impl Helper<'_> {
         let data: Value = serde_json::from_slice(&data)?;
         match data.get(key).and_then(Value::as_str) {
             Some(token) if data.get("error").is_none() => {
+                self.store(&key.replace('_', "-"), token);
                 let message = self.message(&[&key.replace('_', "-")], &[token.to_owned()]);
                 self.send(&message);
             }
@@ -363,6 +378,13 @@ impl Helper<'_> {
             .get("refresh_token")
             .and_then(Value::as_str)
             .ok_or_else(|| error("pixiv returned no refresh token"))?;
+        let username = self.option("username");
+        self.cache_key = Some(crate::cache::key(
+            "pixiv",
+            "_refresh_token_cache",
+            username.as_deref().unwrap_or("None"),
+        ));
+        self.store("refresh-token", token);
         print!("{}", self.message(&["refresh-token"], &[token.to_owned()]));
         Ok(())
     }
@@ -420,6 +442,11 @@ impl Helper<'_> {
         };
         eprintln!("Using default {instance} client ID ({id})");
         self.category = "mastodon".into();
+        self.cache_key = Some(crate::cache::key(
+            "mastodon",
+            "_access_token_cache",
+            instance,
+        ));
         self.oauth2(
             (&id, &secret),
             &format!("https://{instance}/oauth/authorize"),
@@ -455,6 +482,7 @@ pub async fn run(target: &str, options: Options<'_>) -> Result<()> {
             .user_agent(concat!("gallery-dl-rs/", env!("CARGO_PKG_VERSION")))
             .build()?,
         connection: None,
+        cache_key: None,
     };
     let custom = |helper: &Helper<'_>, key: &str, default: &str| {
         helper.option(key).unwrap_or_else(|| default.to_owned())
@@ -464,6 +492,11 @@ pub async fn run(target: &str, options: Options<'_>) -> Result<()> {
         ("deviantart", None) => {
             let id = custom(&helper, "client-id", crate::deviantart::CLIENT_ID);
             let secret = custom(&helper, "client-secret", crate::deviantart::CLIENT_SECRET);
+            helper.cache_key = Some(crate::cache::key(
+                "deviantart",
+                "_refresh_token_cache",
+                &format!("#{id}"),
+            ));
             helper
                 .oauth2(
                     (&id, &secret),
@@ -477,7 +510,12 @@ pub async fn run(target: &str, options: Options<'_>) -> Result<()> {
                 .await
         }
         ("reddit", None) => {
-            let id = custom(&helper, "client-id", "6N9uN0krSDE-ig");
+            let id = custom(&helper, "client-id", crate::reddit::DEFAULT_CLIENT_ID);
+            helper.cache_key = Some(crate::cache::key(
+                "reddit",
+                "_refresh_token_cache",
+                &format!("#{id}"),
+            ));
             helper.client = reqwest::Client::builder()
                 .user_agent("Python:gallery-dl:0.8.4 (by /u/mikf1)")
                 .build()?;
@@ -566,6 +604,7 @@ mod tests {
             options: &options,
             client: reqwest::Client::new(),
             connection: None,
+            cache_key: None,
         };
         let client = std::thread::spawn(move || {
             let mut stream = loop {

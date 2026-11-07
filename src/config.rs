@@ -2455,8 +2455,7 @@ impl RawOptions {
             None => None,
             Some(Value::Bool(false)) => Some(String::new()),
             Some(Value::String(value))
-                if value != "cache"
-                    && value.len() <= 4096
+                if value.len() <= 4096
                     && value
                         .bytes()
                         .all(|b| b.is_ascii_alphanumeric() || b"-._~+/=".contains(&b)) =>
@@ -2465,7 +2464,7 @@ impl RawOptions {
             }
             Some(_) => {
                 return Err(error(
-                    "native configuration access-token must be a token string or false; OAuth cache discovery is not implemented",
+                    "native configuration access-token must be a token string, \"cache\" or false",
                 ));
             }
         };

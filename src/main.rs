@@ -271,8 +271,8 @@ struct Args {
     /// Append FORMAT during EVENT to FILE instead of downloading files
     #[arg(long, num_args = 2, value_names = ["[EVENT:]FORMAT", "FILE"])]
     print_to_file: Vec<String>,
-    /// Accepted for compatibility: gallery-dl-rs keeps no cache file
-    #[arg(long, value_name = "PATH", hide = true)]
+    /// Use PATH as the cache database (upstream `cache.file`)
+    #[arg(long, value_name = "PATH")]
     cache_file: Option<PathBuf>,
     /// Show cache file information
     #[arg(long)]
@@ -790,8 +790,8 @@ async fn run(args: Args) -> Result<()> {
         || args.cache_clear.is_some()
         || args.cache_vacuum
     {
-        println!("gallery-dl-rs keeps no cache file; login sessions are not stored between runs");
-        return Ok(());
+        resolved_settings(&args, &[]).await?;
+        return cache_command(&args);
     }
     if args.config_status || args.config_create || args.config_open {
         return config_command(&args).await;
@@ -2328,7 +2328,18 @@ fn extract_input<'a>(
                                     .with_cookies(jar)
                                     .with_credentials(
                                         options.client_id.as_deref(),
-                                        options.refresh_token.as_deref(),
+                                        cached_token(
+                                            options.refresh_token.as_deref(),
+                                            "reddit",
+                                            "_refresh_token_cache",
+                                            &format!(
+                                                "#{}",
+                                                options.client_id.as_deref().unwrap_or(
+                                                    gallery_dl_rs::reddit::DEFAULT_CLIENT_ID
+                                                )
+                                            ),
+                                        )
+                                        .as_deref(),
                                     )
                                     .with_options(options.site_options.as_deref())?
                                     .with_retries(options.retries.unwrap())
@@ -2357,10 +2368,16 @@ fn extract_input<'a>(
                     let (host, token) = match builtin {
                         Some(index) => (
                             gallery_dl_rs::mastodon::INSTANCES[index],
-                            options.access_token.as_deref(),
+                            cached_token(
+                                options.access_token.as_deref(),
+                                "mastodon",
+                                "_access_token_cache",
+                                gallery_dl_rs::mastodon::INSTANCES[index],
+                            ),
                         ),
                         None => (gallery_dl_rs::mastodon::INSTANCES[0], None),
                     };
+                    let token = token.as_deref();
                     let native = extractors.mastodon[slot]
                         .get_or_init(|| async {
                             gallery_dl_rs::mastodon::Mastodon::new(backend.timeout).and_then(
@@ -2451,7 +2468,9 @@ fn extract_input<'a>(
                                     .with_selection(options.tumblr_selection())
                                     .with_options(options.site_options.as_deref())?
                                     .with_api_key(options.api_key.as_deref())
-                                    .with_access_token(options.access_token.as_deref())
+                                    .with_access_token(
+                                        options.access_token.as_deref().filter(|t| *t != "cache"),
+                                    )
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -2702,7 +2721,7 @@ fn extract_input<'a>(
                                             options.client_id.as_deref(),
                                             options.client_secret.as_deref(),
                                         )
-                                        .with_refresh_token(options.refresh_token.as_deref())
+                                        .with_refresh_token_cache(options.refresh_token.as_deref())
                                         .with_content_options(
                                             gallery_dl_rs::deviantart::ContentOptions::from_options_with(
                                                 options.site_options.as_deref(),
@@ -2760,9 +2779,7 @@ fn extract_input<'a>(
                                                 .with_max_posts(artwork_options.max_posts)
                                                 .with_tags(artwork_options.tags.unwrap_or_default())
                                                 .with_cursor(artwork_options.cursor.clone())
-                                                .with_refresh_token(
-                                                    artwork_options.refresh_token.as_deref(),
-                                                )
+                                                .with_refresh_token(pixiv_refresh_token(artwork_options).as_deref())
                                                 .with_retries(artwork_options.retries.unwrap())
                                                 .with_request_timeout(
                                                     artwork_options.timeout.unwrap(),
@@ -2809,7 +2826,7 @@ fn extract_input<'a>(
                                     .with_max_posts(novel_options.max_posts)
                                     .with_tags(novel_options.tags.unwrap_or_default())
                                     .with_cursor(novel_options.cursor.clone())
-                                    .with_refresh_token(novel_options.refresh_token.as_deref())
+                                    .with_refresh_token(pixiv_refresh_token(novel_options).as_deref())
                                     .with_retries(novel_options.retries.unwrap())
                                     .with_request_timeout(novel_options.timeout.unwrap())
                                     .with_network(&novel_settings.network)
@@ -2845,7 +2862,7 @@ fn extract_input<'a>(
                                             .with_max_posts(options.max_posts)
                                             .with_tags(options.tags.unwrap_or_default())
                                             .with_cursor(options.cursor.clone())
-                                            .with_refresh_token(options.refresh_token.as_deref())
+                                            .with_refresh_token(pixiv_refresh_token(options).as_deref())
                                             .with_retries(options.retries.unwrap())
                                             .with_request_timeout(options.timeout.unwrap())
                                             .with_network(&configured.network)
@@ -3504,6 +3521,85 @@ fn ugoira_postprocessor(format: &str) -> Result<serde_json::Value> {
     Ok(pp)
 }
 
+/// A configured token, or upstream's cached one (written by `oauth:`
+/// helpers) when the setting is absent or `"cache"`.
+fn cached_token(
+    configured: Option<&str>,
+    module: &str,
+    function: &str,
+    argument: &str,
+) -> Option<String> {
+    match configured {
+        Some(token) if token != "cache" => Some(token.to_owned()),
+        _ => gallery_dl_rs::cache::get(&gallery_dl_rs::cache::key(module, function, argument)),
+    }
+}
+
+/// Pixiv's `refresh-token`, else the one `oauth:pixiv` cached for the
+/// configured `username` (upstream keys it `None` without one).
+fn pixiv_refresh_token(options: &gallery_dl_rs::config::Options) -> Option<String> {
+    cached_token(
+        options.refresh_token.as_deref(),
+        "pixiv",
+        "_refresh_token_cache",
+        options.username.as_deref().unwrap_or("None"),
+    )
+}
+
+/// Upstream `--cache-status`, `--cache-show`, `--cache-clear` and
+/// `--cache-vacuum` on the shared `cache.sqlite3`.
+fn cache_command(args: &Args) -> Result<()> {
+    use gallery_dl_rs::cache;
+    if args.cache_status {
+        let cache::Status { path, size, counts } = cache::status()?;
+        let width = counts
+            .iter()
+            .map(|(name, _)| name.len())
+            .max()
+            .unwrap_or(0)
+            .min(24);
+        let digits = counts
+            .iter()
+            .find(|(name, _)| name == "Total")
+            .map_or(1, |(_, count)| count.to_string().len());
+        println!(
+            "File:\n  {}\nSize:\n  {}\nEntries:",
+            path.display(),
+            gallery_dl_rs::download::format_value(size)
+        );
+        for (name, count) in counts {
+            println!("  {name:<width$}: {count:>digits$}");
+        }
+    } else if let Some(module) = &args.cache_show {
+        for (key, value, expires) in cache::show(module)? {
+            let expires = if expires != 0 {
+                format!(" ({expires})")
+            } else {
+                String::new()
+            };
+            println!("{key}{expires}:\n  {value}\n");
+        }
+    } else if let Some(module) = &args.cache_clear {
+        let count = cache::clear(module)?;
+        let path = cache::path().unwrap_or_default();
+        eprintln!(
+            "[cache][info] Deleted {count} entr{} from '{}'",
+            if count == 1 { "y" } else { "ies" },
+            path.display()
+        );
+    } else if args.cache_vacuum {
+        eprintln!("[cache][info] Running 'VACUUM'");
+        let saved = cache::vacuum()?;
+        if saved > 0 {
+            eprintln!(
+                "[cache][info] Reduced database size by {} bytes",
+                gallery_dl_rs::download::format_value(saved)
+            );
+        }
+    }
+    Ok(())
+}
+
 async fn resolved_settings(
     args: &Args,
     extra: &[String],
@@ -3660,6 +3756,19 @@ async fn resolved_settings(
                 .insert(key.into(), value.clone().into());
         }
     }
+    // Upstream `cache.file` (`--cache-file` takes precedence).
+    gallery_dl_rs::cache::set_path(
+        args.cache_file
+            .as_deref()
+            .and_then(std::path::Path::to_str)
+            .or_else(|| {
+                config
+                    .sections()
+                    .get("cache")
+                    .and_then(|cache| cache.get("file"))
+                    .and_then(serde_json::Value::as_str)
+            }),
+    );
     let _ = GLOBAL_OPTIONS.set({
         let mut globals = config.globals().clone();
         for section in ["downloader", "output"] {

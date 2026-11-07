@@ -2153,7 +2153,6 @@ fn mastodon_instance_credentials_are_separate_and_inherit_shared_settings() {
         serde_json::json!(7),
         serde_json::json!("private token"),
         serde_json::json!("private\r\ntoken"),
-        serde_json::json!("cache"),
         serde_json::json!("x".repeat(4097)),
     ] {
         let error =
