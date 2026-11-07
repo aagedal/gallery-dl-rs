@@ -2213,6 +2213,25 @@ mod kemono_redirect_tests {
 #[cfg(test)]
 mod directlink_tests {
     #[test]
+    fn hosted_files_use_their_sites_class() {
+        for (url, expected) in [
+            ("https://i.redd.it/abc.jpg", "out/reddit/abc.jpg"),
+            (
+                "https://preview.redd.it/abc.jpg?width=640&s=x",
+                "out/reddit/abc.jpg",
+            ),
+            ("https://files.catbox.moe/abc.png", "out/catbox/abc.png"),
+        ] {
+            let media = crate::extract::direct(&url::Url::parse(url).unwrap()).unwrap();
+            assert_eq!(
+                super::destination(std::path::Path::new("out"), &media),
+                std::path::Path::new(expected),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
     fn direct_links_use_upstream_directlink_layout() {
         let url = url::Url::parse("https://en.wikipedia.org/static/images/enwiki.PNG?x=1").unwrap();
         let media = crate::extract::direct(&url).unwrap();

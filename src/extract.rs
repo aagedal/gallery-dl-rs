@@ -961,7 +961,38 @@ pub fn social_site(url: &Url) -> Option<&'static str> {
     None
 }
 
+/// Upstream classes for files on hosts with their own extractors, which
+/// download them directly: `(category, route)`.
+fn hosted_file(url: &Url) -> Option<(&'static str, &'static crate::sites::Route)> {
+    static REDDIT_IMAGE: crate::sites::Route = crate::sites::Route::new(
+        "image",
+        "{filename}.{extension}",
+        &["{category}"],
+        "{filename}",
+    );
+    static CATBOX_FILE: crate::sites::Route = crate::sites::Route::new(
+        "file",
+        "{filename}.{extension}",
+        &["{category}"],
+        "{filename}",
+    );
+    match url.host_str()? {
+        "i.redd.it" | "preview.redd.it" | "i.reddituploads.com" => Some(("reddit", &REDDIT_IMAGE)),
+        "files.catbox.moe" | "litter.catbox.moe" | "de.catbox.moe" => {
+            Some(("catbox", &CATBOX_FILE))
+        }
+        _ => None,
+    }
+}
+
 pub fn direct(url: &Url) -> Option<Media> {
+    // Upstream downloads the original of a `preview.redd.it` image.
+    if url.host_str() == Some("preview.redd.it") {
+        let mut original = url.clone();
+        original.set_host(Some("i.redd.it")).ok()?;
+        original.set_query(None);
+        return direct(&original);
+    }
     let filename = url.path_segments()?.next_back()?;
     let (_, extension) = filename.rsplit_once('.')?;
     let manifest = manifest_protocol(url);
@@ -988,7 +1019,20 @@ pub fn direct(url: &Url) -> Option<Media> {
         },
         category: "direct".into(),
         filename: filename.into(),
-        metadata: None,
+        metadata: hosted_file(url).map(|(category, route)| {
+            let (stem, extension) = crate::sites::nameext(url);
+            let mut fields = serde_json::Map::new();
+            fields.insert("category".into(), category.into());
+            fields.insert("filename".into(), stem.into());
+            fields.insert("extension".into(), extension.into());
+            PostMetadata {
+                site_keywords: Some(std::sync::Arc::new(crate::sites::SiteKeywords {
+                    route,
+                    fields,
+                })),
+                ..PostMetadata::default()
+            }
+        }),
         headers: BTreeMap::new(),
         handoff: BTreeMap::new(),
     })

@@ -1840,7 +1840,10 @@ Instagram omits the sidecar prefix, Reddit uses the user directory).
 A 2026-11-07 re-run of the URL sweep routed Pixiv image URLs
 (`i.pximg.net`, legacy `iN`/`img.pixiv.net`) to their works like upstream's
 `PixivWorkExtractor`, Pixeldrain `/d/` paths ending in a file name to the
-folder extractor, and fixed host-less `tumblr:DOMAIN` inputs.
+folder extractor, and fixed host-less `tumblr:DOMAIN` inputs. Reddit
+(`i.redd.it`, `preview.redd.it` rewritten to the original) and Catbox file
+links keep downloading directly but carry upstream's `reddit:image` and
+`catbox:file` classes and paths.
 
 **Implemented upstream URL coverage for dedicated extractors, 2026-10-28:**
 a sweep of every `#url` in upstream's `test/results` (excluding `#fail` and
