@@ -410,6 +410,34 @@ fn map(values: BTreeMap<String, Value>) -> Value {
     Value::Map(Arc::new(values.into()))
 }
 // Structured public metadata is validated before reaching this context.
+/// A JSON rendering of a value for external interpreters; dates become
+/// ISO 8601 strings.
+pub(crate) fn value_json(value: &Value) -> serde_json::Value {
+    use serde_json::Value as Json;
+    match value {
+        Value::None => Json::Null,
+        Value::SourceDate(date) => Json::String(source_date_text(*date)),
+        Value::SourceNullDate(seconds) => Json::String(source_date_text(Some(*seconds))),
+        Value::SourcePrimitive(value) => value_json(value),
+        Value::Bool(value) => Json::Bool(*value),
+        Value::Int(value) => serde_json::Number::from_i128(*value)
+            .map_or_else(|| Json::String(value.to_string()), Json::Number),
+        Value::Float(value) => {
+            serde_json::Number::from_f64(*value).map_or(Json::Null, Json::Number)
+        }
+        Value::String(value) => Json::String(value.to_string()),
+        Value::List(values) | Value::Tuple(values) => {
+            Json::Array(values.iter().map(value_json).collect())
+        }
+        Value::Map(values) => Json::Object(
+            values
+                .iter()
+                .map(|(key, value)| (key.clone(), value_json(value)))
+                .collect(),
+        ),
+    }
+}
+
 pub(crate) fn json_value(value: &serde_json::Value) -> Value {
     if let Some(value) = source_primitive_from_json(value) {
         return Value::SourcePrimitive(Arc::new(json_value(value)));

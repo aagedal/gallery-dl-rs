@@ -13,6 +13,8 @@ enum Part {
     Field(Field),
     /// A `\fE`/`\fF` expression, resolved against the JSON context.
     Expr(std::sync::Arc<(crate::filter::Expression, Field)>),
+    /// A `\fJ`/`\fM` format run by Python.
+    Python(std::sync::Arc<(String, String)>),
 }
 #[derive(Clone)]
 pub struct Template {
@@ -40,6 +42,9 @@ impl Template {
                             crate::naming::Segment::Text(text) => Part::Text(text),
                             crate::naming::Segment::Expr(expression) => {
                                 Part::Expr(std::sync::Arc::from(expression))
+                            }
+                            crate::naming::Segment::Python(kind, source) => {
+                                Part::Python(std::sync::Arc::new((kind, source)))
                             }
                         })
                         .collect(),
@@ -95,7 +100,11 @@ impl Template {
 
     /// Evaluate expression parts against the JSON context into text.
     fn resolve(&self, context: &Map<String, Value>) -> Result<std::borrow::Cow<'_, Self>> {
-        if !self.parts.iter().any(|part| matches!(part, Part::Expr(_))) {
+        if !self
+            .parts
+            .iter()
+            .any(|part| matches!(part, Part::Expr(_) | Part::Python(_)))
+        {
             return Ok(std::borrow::Cow::Borrowed(self));
         }
         let keywords: std::collections::BTreeMap<_, _> = context
@@ -108,6 +117,9 @@ impl Template {
             .map(|part| match part {
                 Part::Expr(expression) => {
                     crate::naming::render_expression(expression, &keywords).map(Part::Text)
+                }
+                Part::Python(format) => {
+                    crate::naming::render_python(&format.0, &format.1, &keywords).map(Part::Text)
                 }
                 part => Ok(part.clone()),
             })
@@ -123,7 +135,9 @@ impl Template {
         for part in &self.parts {
             let text = match part {
                 Part::Text(text) => text.clone(),
-                Part::Expr(_) => return Err(error("template expression needs keyword context")),
+                Part::Expr(_) | Part::Python(_) => {
+                    return Err(error("template expression needs keyword context"));
+                }
                 Part::Field(field) => {
                     let value = field.render_default_value(|name| context.get(name).cloned())?;
                     if !single && !matches!(value, FormatValue::Str(_)) {
@@ -191,7 +205,7 @@ impl Template {
             for part in &self.parts {
                 let text = match part {
                     Part::Text(text) => text.clone(),
-                    Part::Expr(_) => {
+                    Part::Expr(_) | Part::Python(_) => {
                         return Err(error("template expression needs keyword context"));
                     }
                     Part::Field(field) => field
@@ -511,7 +525,7 @@ mod tests {
                 .unwrap(),
             serde_json::json!(7)
         );
-        for selector in ["J", "M", "T", "TF", "PRIVATE"] {
+        for selector in ["T", "TF", "PRIVATE"] {
             let error = Template::parse(&format!("\u{000c}{selector} PRIVATE"))
                 .unwrap_err()
                 .to_string();

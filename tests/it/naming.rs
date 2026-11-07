@@ -622,5 +622,16 @@ fn format_string_dialects_follow_upstream() {
     assert_eq!(render(&format!("\u{c}T {}", file.display())), "7-1.jpg");
     let directory = DirectoryTemplate::parse(&["\u{c}F {service}/{user}".into()]).unwrap();
     assert!(directory.render(&media).unwrap().is_some());
-    assert!(FilenameTemplate::parse("\u{c}J {{ id }}").is_err());
+    assert!(FilenameTemplate::parse("\u{c}X {id}").is_err());
+    // `\fM` calls a Python function with the keywords.
+    let module = dir.path().join("fmt.py");
+    std::fs::write(
+        &module,
+        "def name(kw):\n    return kw['title'].replace(' ', '-') + '.' + kw['extension']\n",
+    )
+    .unwrap();
+    assert_eq!(
+        render(&format!("\u{c}M {}:name", module.display())),
+        "Hello-World.jpg"
+    );
 }

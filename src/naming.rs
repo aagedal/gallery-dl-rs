@@ -147,12 +147,67 @@ enum Part {
     Field(Field),
     /// A `\fE`/`\fF` expression, formatted through a `_value` field.
     Expr(Box<(crate::filter::Expression, Field)>),
+    /// A `\fJ`/`\fM` format run by Python: its kind and source.
+    Python(String, String),
 }
 
 /// A part of an expression-dialect format string.
 pub(crate) enum Segment {
     Text(String),
     Expr(Box<(crate::filter::Expression, Field)>),
+    Python(String, String),
+}
+
+/// `\fJ` (Jinja) and `\fM` (module function) formats, which run in an
+/// external Python interpreter (`python3` or `$GALLERY_DL_PYTHON`).
+const PYTHON_FORMAT: &str = r#"
+import importlib, importlib.util, json, os, sys
+spec = json.loads(sys.argv[1])
+kwdict = json.load(sys.stdin)
+if spec["kind"] == "J":
+    import jinja2
+    result = jinja2.Environment().from_string(spec["source"]).render(kwdict)
+else:
+    module_name, _, function_name = spec["source"].rpartition(":")
+    path = os.path.expanduser(module_name)
+    if os.sep in path or path.endswith(".py"):
+        loader = importlib.util.spec_from_file_location("gdl_format_module", path)
+        module = importlib.util.module_from_spec(loader)
+        loader.loader.exec_module(module)
+    else:
+        module = importlib.import_module(module_name)
+    result = getattr(module, function_name)(kwdict)
+sys.stdout.write(str(result))
+"#;
+
+/// Render a `\fJ`/`\fM` segment through Python.
+pub(crate) fn render_python(
+    kind: &str,
+    source: &str,
+    context: &BTreeMap<String, crate::filter::Value>,
+) -> Result<String> {
+    use std::io::Write;
+    let keywords: serde_json::Map<_, _> = context
+        .iter()
+        .map(|(key, value)| (key.clone(), crate::filter::value_json(value)))
+        .collect();
+    let python = std::env::var_os("GALLERY_DL_PYTHON").unwrap_or_else(|| "python3".into());
+    let spec = serde_json::json!({"kind": kind, "source": source}).to_string();
+    let mut child = std::process::Command::new(python)
+        .args(["-c", PYTHON_FORMAT, &spec])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|_| error("Jinja and module format strings need python3"))?;
+    let input = serde_json::to_vec(&keywords)?;
+    child.stdin.take().expect("piped stdin").write_all(&input)?;
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        return Err(error("Python format string failed"));
+    }
+    String::from_utf8(output.stdout)
+        .map_err(|_| error("Python format string returned invalid UTF-8"))
 }
 
 /// The segments of a `\fE`/`\fF`/`\fTF` format string, or `None` for
@@ -176,17 +231,15 @@ pub(crate) fn dialect(template: &str) -> Result<std::result::Result<Vec<Segment>
         "E" => vec![expression_part(body, None, "")?],
         "F" => fstring_parts(body)?,
         "TF" => fstring_parts(&read(body)?)?,
-        _ => {
-            return Err(error(
-                "unsupported format string dialect (J and M need Python)",
-            ));
-        }
+        "J" | "M" => vec![Part::Python(mode.to_owned(), body.to_owned())],
+        _ => return Err(error("unsupported format string dialect")),
     };
     Ok(Ok(parts
         .into_iter()
         .map(|part| match part {
             Part::Literal(text) => Segment::Text(text),
             Part::Expr(expression) => Segment::Expr(expression),
+            Part::Python(kind, source) => Segment::Python(kind, source),
             Part::Field(_) => unreachable!("dialects have no standard fields"),
         })
         .collect()))
@@ -399,6 +452,7 @@ impl FilenameTemplate {
                             .map(|segment| match segment {
                                 Segment::Text(text) => Part::Literal(text),
                                 Segment::Expr(expression) => Part::Expr(expression),
+                                Segment::Python(kind, source) => Part::Python(kind, source),
                             })
                             .collect(),
                     ),
@@ -595,6 +649,14 @@ impl FilenameTemplate {
         for part in parts {
             let text = match part {
                 Part::Literal(value) => value.clone(),
+                Part::Python(kind, code) => {
+                    let context = context.get_or_insert_with(|| crate::filter::context(media));
+                    let value = render_python(kind, code, context)?;
+                    if parts.len() == 1 {
+                        return Ok(Value::Str(value));
+                    }
+                    value
+                }
                 Part::Expr(expression) => {
                     let context = context.get_or_insert_with(|| crate::filter::context(media));
                     let value = render_expression(expression, context)?;
@@ -646,6 +708,10 @@ impl FilenameTemplate {
                 Part::Expr(expression) => {
                     let context = context.get_or_insert_with(|| crate::filter::context(media));
                     output.push_str(&render_expression(expression, context)?);
+                }
+                Part::Python(kind, code) => {
+                    let context = context.get_or_insert_with(|| crate::filter::context(media));
+                    output.push_str(&render_python(kind, code, context)?);
                 }
                 Part::Field(field) => {
                     let context = context.get_or_insert_with(|| crate::filter::context(media));
