@@ -774,6 +774,12 @@ fn context_parts(
     post: Option<&crate::extract::PostMetadata>,
     media: Option<&Media>,
 ) -> BTreeMap<String, Value> {
+    // Native direct links are upstream's `directlink` category.
+    let category = if category == "direct" {
+        "directlink"
+    } else {
+        category
+    };
     let mut values = BTreeMap::from([("category".into(), text(category))]);
     if let Some(media) = media {
         let (stem, extension) = media

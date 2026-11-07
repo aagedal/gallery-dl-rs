@@ -560,7 +560,7 @@ async fn invalid_per_media_names_fail_before_requests_or_archive_records() {
 #[test]
 fn cli_native_names_skip_without_overwriting_and_repair_metadata() {
     let root = tempfile::tempdir().unwrap();
-    let saved = root.path().join("direct/picture.jpg");
+    let saved = root.path().join("directlink/picture.jpg");
     std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
     std::fs::write(&saved, b"keep existing").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))

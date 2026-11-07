@@ -310,9 +310,9 @@ fn inline_options_apply_per_url_and_delete_removes_successful_lines() {
         .unwrap();
     handle.join().unwrap();
     assert_eq!(output.status.code(), Some(4));
-    assert!(root.path().join("out/direct/custom.jpg").is_file());
+    assert!(root.path().join("out/directlink/custom.jpg").is_file());
     assert_eq!(
-        std::fs::read_dir(root.path().join("out/direct"))
+        std::fs::read_dir(root.path().join("out/directlink"))
             .unwrap()
             .count(),
         2
@@ -327,8 +327,8 @@ fn inline_options_apply_per_url_and_delete_removes_successful_lines() {
 fn no_skip_replaces_files_and_compare_enumerates_differing_downloads() {
     let root = tempfile::tempdir().unwrap();
     let out = root.path().join("out");
-    std::fs::create_dir_all(out.join("direct")).unwrap();
-    let existing = out.join("direct/a.jpg");
+    std::fs::create_dir_all(out.join("directlink")).unwrap();
+    let existing = out.join("directlink/a.jpg");
     let run = |extra: &[&str]| {
         let (origin, handle) = serve(1);
         let output = binary()
@@ -352,7 +352,10 @@ fn no_skip_replaces_files_and_compare_enumerates_differing_downloads() {
         r#"postprocessors=[{"name":"compare","action":"enumerate"}]"#,
     ]);
     assert_eq!(std::fs::read(&existing).unwrap(), b"old");
-    assert_eq!(std::fs::read(out.join("direct/a.1.jpg")).unwrap(), b"data");
+    assert_eq!(
+        std::fs::read(out.join("directlink/a.1.jpg")).unwrap(),
+        b"data"
+    );
     run(&["--no-skip"]);
     assert_eq!(std::fs::read(&existing).unwrap(), b"data");
 }

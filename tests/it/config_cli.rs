@@ -91,7 +91,7 @@ async fn category_destinations_and_filenames_resolve_against_working_directory()
         ("tw", "twitter"),
         ("fb", "facebook"),
         ("novels", "pixiv-novel"),
-        ("direct", "direct"),
+        ("direct", "directlink"),
     ] {
         touch(
             &cwd.join(folder)
@@ -207,7 +207,7 @@ async fn archives_open_only_for_relevant_categories_and_cli_paths_override_confi
             "twitter":{"archive":"missing-parent/twitter.sqlite"}
         }}),
     );
-    touch(&root.path().join("gallery-dl/direct/cli.jpg"));
+    touch(&root.path().join("gallery-dl/directlink/cli.jpg"));
     let mut command = binary(root.path(), &cfg);
     command.args([
         "--destination",
@@ -226,7 +226,7 @@ async fn archives_open_only_for_relevant_categories_and_cli_paths_override_confi
 
     // Without a CLI override, only the direct archive is needed. The Twitter
     // archive's missing parent must not make this direct input fail.
-    touch(&root.path().join("configured/direct/configured.jpg"));
+    touch(&root.path().join("configured/directlink/configured.jpg"));
     let mut command = binary(root.path(), &cfg);
     command.arg("https://example.com/second.jpg");
     success(&output(&mut command).await);
@@ -421,7 +421,9 @@ async fn configured_retry_count_is_used_and_explicit_default_looking_cli_value_w
         );
         assert_eq!(server.count(), if override_cli { 3 } else { 2 });
         assert_eq!(
-            root.path().join("gallery-dl/direct/result.jpg").exists(),
+            root.path()
+                .join("gallery-dl/directlink/result.jpg")
+                .exists(),
             override_cli
         );
     }
@@ -449,7 +451,7 @@ async fn fractional_configured_timeout_is_applied_and_explicit_sixty_seconds_win
             String::from_utf8_lossy(&result.stderr)
         );
         assert_eq!(server.count(), 1);
-        let path = root.path().join("gallery-dl/direct/result.jpg");
+        let path = root.path().join("gallery-dl/directlink/result.jpg");
         assert_eq!(path.exists(), override_cli);
         if override_cli {
             assert_eq!(std::fs::read(path).unwrap(), b"abc");
@@ -485,15 +487,15 @@ async fn directory_config_cli_override_and_empty_list_choose_exact_parent() {
             "base-directory":"output", "directory":["config", "{category}"], "filename":"custom.jpg"
         }),
     );
-    let configured = root.path().join("output/config/direct/custom.jpg");
+    let configured = root.path().join("output/config/directlink/custom.jpg");
     touch(&configured);
     let result = output(binary(root.path(), &cfg).arg(url)).await;
     success(&result);
     let exact = root.path().join("exact");
     touch(&exact.join("custom.jpg"));
     success(&output(binary(root.path(), &cfg).arg("-D").arg(&exact).arg(url)).await);
-    assert!(!exact.join("direct").exists());
-    let custom = root.path().join("output/cli/direct/custom.jpg");
+    assert!(!exact.join("directlink").exists());
+    let custom = root.path().join("output/cli/directlink/custom.jpg");
     touch(&custom);
     let result = output(binary(root.path(), &cfg).args([
         "--directory-template",

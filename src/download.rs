@@ -532,11 +532,44 @@ pub fn destination(root: &Path, media: &Media) -> PathBuf {
     {
         return root.join(directory).join(name);
     }
+    // Upstream `directlink`: `{domain}/{path}/{filename}.{extension}` as one
+    // cleaned segment (separators become `_`) under the category directory.
+    if let Some(name) = directlink_name(media) {
+        return root.join("directlink").join(name);
+    }
     // Hash URL and job/request context so different manifests or authenticated
     // representations cannot share a path. This is not a stable archive identity.
     let digest = format!("{:x}", Sha256::digest(media.identity().as_bytes()));
-    root.join(safe_component(&media.category))
+    root.join(category_directory(media))
         .join(format!("{digest}_{}", safe_component(&media.filename)))
+}
+
+/// The default `{category}` directory; direct links use upstream's name.
+fn category_directory(media: &Media) -> String {
+    match media.category.as_str() {
+        "direct" => "directlink".into(),
+        category => safe_component(category),
+    }
+}
+
+fn directlink_name(media: &Media) -> Option<String> {
+    use std::sync::OnceLock;
+    if media.category != "direct"
+        || media.metadata.is_some()
+        || !matches!(media.job, crate::extract::MediaJob::DirectHttp)
+        || crate::extract::direct(&media.url).is_none()
+    {
+        return None;
+    }
+    static TEMPLATE: OnceLock<FilenameTemplate> = OnceLock::new();
+    TEMPLATE
+        .get_or_init(|| {
+            FilenameTemplate::parse("{domain}_{path}_{filename}.{extension}")
+                .expect("valid directlink template")
+        })
+        .render_optional(media)
+        .ok()
+        .flatten()
 }
 
 /// Custom names replace the default digest-prefixed basename. Publication still
@@ -565,7 +598,7 @@ pub fn destination_with_templates(
         .transpose()?
         .flatten()
     {
-        Some(name) => root.join(safe_component(&media.category)).join(name),
+        Some(name) => root.join(category_directory(media)).join(name),
         None => destination(root, media),
     };
     match directory
@@ -621,7 +654,7 @@ pub(crate) fn directory_with_keywords(
         .flatten();
     Ok(match directory {
         Some(directory) => root.join(directory),
-        None => root.join(safe_component(&media.category)),
+        None => root.join(category_directory(media)),
     })
 }
 
@@ -2158,6 +2191,20 @@ mod kemono_redirect_tests {
             media.url = url::Url::parse(url).unwrap();
             assert!(!kemono_public_redirects(&media, &HeaderMap::new()));
         }
+    }
+}
+
+#[cfg(test)]
+mod directlink_tests {
+    #[test]
+    fn direct_links_use_upstream_directlink_layout() {
+        let url = url::Url::parse("https://en.wikipedia.org/static/images/enwiki.PNG?x=1").unwrap();
+        let media = crate::extract::direct(&url).unwrap();
+        let path = super::destination(std::path::Path::new("out"), &media);
+        assert_eq!(
+            path,
+            std::path::Path::new("out/directlink/en.wikipedia.org_static_images_enwiki.png")
+        );
     }
 }
 

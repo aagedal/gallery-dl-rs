@@ -245,7 +245,7 @@ async fn source_filename_preparation_runs_without_hooks_for_downloads_and_archiv
                     directory: Some(directory),
                     ..Default::default()
                 };
-                let direct_root = root.path().join("direct");
+                let direct_root = root.path().join("directlink");
                 let path = direct_root.join(folder).join(format!("source.{prepared}"));
                 let outcome = download::download_with_template(
                     &client,

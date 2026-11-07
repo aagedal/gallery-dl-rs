@@ -689,12 +689,12 @@ mod cancellation {
                 b"HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\nConnection: close\r\n\r\npartial",
             )
             .unwrap();
-        wait_until(|| file_count(&destination.join("direct")) == 1);
+        wait_until(|| file_count(&destination.join("directlink")) == 1);
         let pid_file = root.path().join("backend.pid");
         wait_until(|| std::fs::read_to_string(&pid_file).is_ok_and(|s| !s.is_empty()));
         let pid = std::fs::read_to_string(pid_file).unwrap();
         interrupt(child);
-        assert_eq!(file_count(&destination.join("direct")), 0);
+        assert_eq!(file_count(&destination.join("directlink")), 0);
         wait_until(|| {
             let state = Command::new("ps")
                 .args(["-o", "stat=", "-p", &pid])
@@ -749,7 +749,7 @@ mod cancellation {
                 b"HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\nConnection: close\r\n\r\npartial",
             )
             .unwrap();
-        let category = root.path().join("direct");
+        let category = root.path().join("directlink");
         wait_until(|| file_count(&category) == 1);
         interrupt(child);
         assert_eq!(file_count(&category), 0);

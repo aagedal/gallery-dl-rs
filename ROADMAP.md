@@ -1658,8 +1658,10 @@ root or `extractor` scope or `-o`, with `--restrict-filenames VALUE` and
 native filename templates kept the conservative ASCII cleaning (since
 2026-10-28 `path-restrict` defaults to `auto`). `{filename}`
 now excludes the extension for every extractor, as upstream.
-**Remaining divergences:** direct links (`direct/<digest>_NAME` versus
-upstream `directlink` with `{domain}`, `{path}`, `{query}` and `{fragment}`).
+Direct links follow upstream's `directlink` layout
+(`directlink/{domain}_{path}_{filename}.{extension}`, `{category}` is
+`directlink`, and `extractor.directlink` configures them) since 2026-11-07;
+manifests and other unnamed direct media keep the digest-prefixed name.
 The default base directory is `./gallery-dl/` like upstream (since
 2026-10-28; it was `downloads`).
 

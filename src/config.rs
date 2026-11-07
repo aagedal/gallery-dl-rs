@@ -1599,6 +1599,16 @@ impl Config {
             known.push("extractor");
             root_extra = take_unknown(object, &known);
             if let Some(extractor) = object.get_mut("extractor").and_then(Value::as_object_mut) {
+                // Upstream names the direct-link scope `directlink`.
+                if let Some(Value::Object(fields)) = extractor.remove("directlink") {
+                    match extractor
+                        .entry("direct")
+                        .or_insert_with(|| Value::Object(Default::default()))
+                    {
+                        Value::Object(direct) => direct.extend(fields),
+                        _ => return Err(error("invalid native configuration JSON")),
+                    }
+                }
                 extractor_extra = take_unknown(extractor, struct_fields::<RawExtractor>());
                 let options = struct_fields::<RawOptions>();
                 for category in DEDICATED_CATEGORIES {
@@ -3333,6 +3343,19 @@ fn value_truthy(value: &Value) -> bool {
 
 #[cfg(test)]
 mod site_scope_tests {
+    #[test]
+    fn directlink_scope_is_an_alias_for_direct() {
+        let dir = std::env::temp_dir();
+        let config = super::Config::parse(
+            br#"{"extractor":{"directlink":{"retries":4},"direct":{"retries":2,"timeout":3}}}"#,
+            &dir,
+        )
+        .unwrap();
+        let resolved = config.resolve("direct").unwrap();
+        assert_eq!(resolved.retries, Some(4));
+        assert!(resolved.timeout.is_some());
+    }
+
     #[test]
     fn registry_scopes_decode_and_reject_duplicates() {
         let dir = std::env::temp_dir();
