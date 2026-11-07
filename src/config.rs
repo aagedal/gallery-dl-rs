@@ -2100,6 +2100,42 @@ impl Config {
         };
         Ok(resolved)
     }
+    /// Upstream configured `BaseExtractor` instances
+    /// (`extractor.BASE.NAME: {"root": URL, ...}`) as `(base, root)` pairs.
+    pub fn instances(&self) -> Vec<(String, String)> {
+        const BASES: &[&str] = &[
+            "mastodon",
+            "misskey",
+            "moebooru",
+            "szurubooru",
+            "shimmie2",
+            "foolfuuka",
+            "vichan",
+            "lynxchan",
+        ];
+        let mut found = Vec::new();
+        for base in BASES {
+            let sources = [
+                self.extractor
+                    .site_options
+                    .as_deref()
+                    .and_then(|options| options.get(*base))
+                    .and_then(Value::as_object),
+                self.categories
+                    .get(*base)
+                    .and_then(|options| options.site_options.as_deref()),
+            ];
+            for object in sources.into_iter().flatten() {
+                for info in object.values() {
+                    if let Some(root) = info.get("root").and_then(Value::as_str) {
+                        found.push(((*base).to_owned(), root.trim_end_matches('/').to_owned()));
+                    }
+                }
+            }
+        }
+        found
+    }
+
     /// Upstream `downloader`, `output` and `cache` sections.
     pub fn sections(&self) -> &serde_json::Map<String, Value> {
         &self.sections

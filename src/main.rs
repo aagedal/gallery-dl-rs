@@ -3610,6 +3610,7 @@ async fn resolved_settings(
         None if options.is_empty() => Config::default(),
         None => Config::parse_with_options(b"{}", &std::env::current_dir()?, &options)?,
     };
+    gallery_dl_rs::extract::set_instances(config.instances());
     // Upstream -u/-p set root-level options, which every scope may override.
     let credentials = |username: Option<String>, password: Option<String>| {
         let mut site = serde_json::Map::new();

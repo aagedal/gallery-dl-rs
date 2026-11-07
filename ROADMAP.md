@@ -673,7 +673,10 @@ anonymously (category `mastodon`, where upstream uses the host name; tokens
 stay bound to the built-in instances), including Pleroma/Akkoma `notice`
 links and alphanumeric flake IDs; followed accounts on such hosts are queued
 with the prefix. Pleroma `objects/UUID` redirects are not followed yet.
-Remaining: OAuth/cache discovery, configured additional instances, followed views,
+Configured instances (`extractor.mastodon.NAME.root`, also for misskey,
+moebooru, szurubooru, shimmie2, foolfuuka, vichan and lynxchan) route plain
+URLs on their hosts to the `BASE:` readers (2026-11-07).
+Remaining: OAuth/cache discovery, followed views,
 account-search fallback/moved handling, and fuller metadata/default
 naming. Authenticated live verification and real captures remain required.
 

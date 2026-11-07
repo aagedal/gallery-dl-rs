@@ -4052,3 +4052,33 @@ fn unique_predicates_accept_upstream_aliases_and_truthy_values() {
     assert_eq!(other.file_unique, Some(true));
     assert_eq!(other.child_unique, None);
 }
+
+#[test]
+fn configured_base_instances_are_listed_like_upstream() {
+    let config = parse(
+        r#"{"extractor":{"moebooru":{"mybooru":{"root":"https://booru.example.test/"}},
+            "mastodon":{"myinst":{"root":"https://social.example.test","access-token":"t"}}}}"#,
+    )
+    .unwrap();
+    let mut instances = config.instances();
+    instances.sort();
+    assert_eq!(
+        instances,
+        [
+            (
+                "mastodon".to_owned(),
+                "https://social.example.test".to_owned()
+            ),
+            (
+                "moebooru".to_owned(),
+                "https://booru.example.test".to_owned()
+            ),
+        ]
+    );
+    gallery_dl_rs::extract::set_instances(instances);
+    let url = gallery_dl_rs::extract::http_url("https://booru.example.test/post/show/1").unwrap();
+    assert_eq!(
+        url.as_str(),
+        "moebooru:https://booru.example.test/post/show/1"
+    );
+}
