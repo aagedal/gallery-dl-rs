@@ -519,11 +519,21 @@ pub(crate) fn events<'a>(events: Vec<ExtractionEvent>) -> Events<'a> {
 /// `metadata-version` and user-supplied `keywords`/`keywords-global`
 /// (format strings with `keywords-eval`).
 fn user_keywords(http: &Http, url: &Url, keywords: &mut Map<String, Value>) {
-    let option = |primary: &str, alias: &str| http.option(primary).or_else(|| http.option(alias));
-    if let Some(name) = option("metadata-url", "url-metadata").and_then(Value::as_str) {
+    apply_user_keywords(|key| http.option(key), url, keywords);
+}
+
+/// [`user_keywords`] for any option lookup, such as a dedicated
+/// extractor's site options.
+pub(crate) fn apply_user_keywords<'o>(
+    option: impl Fn(&str) -> Option<&'o Value>,
+    url: &Url,
+    keywords: &mut Map<String, Value>,
+) {
+    let either = |primary: &str, alias: &str| option(primary).or_else(|| option(alias));
+    if let Some(name) = either("metadata-url", "url-metadata").and_then(Value::as_str) {
         keywords.insert(name.into(), url.as_str().into());
     }
-    if let Some(name) = option("metadata-version", "version-metadata").and_then(Value::as_str) {
+    if let Some(name) = either("metadata-version", "version-metadata").and_then(Value::as_str) {
         keywords.insert(
             name.into(),
             serde_json::json!({
@@ -533,15 +543,14 @@ fn user_keywords(http: &Http, url: &Url, keywords: &mut Map<String, Value>) {
             }),
         );
     }
-    let mut user = http
-        .option("keywords-global")
+    let mut user = option("keywords-global")
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    if let Some(local) = http.option("keywords").and_then(Value::as_object) {
+    if let Some(local) = option("keywords").and_then(Value::as_object) {
         user.extend(local.clone());
     }
-    let eval = http.option_bool("keywords-eval", false);
+    let eval = option("keywords-eval").is_some_and(crate::postprocess::truthy);
     for (key, value) in user {
         let value = match (&value, eval) {
             (Value::String(format), true) => crate::postprocess::template::Template::parse(format)
@@ -551,6 +560,28 @@ fn user_keywords(http: &Http, url: &Url, keywords: &mut Map<String, Value>) {
             _ => value,
         };
         keywords.insert(key, value);
+    }
+}
+
+/// Apply [`apply_user_keywords`] to a dedicated extractor's file.
+pub fn apply_dedicated_keywords(media: &mut Media, options: Option<&Map<String, Value>>) {
+    let Some(options) = options else {
+        return;
+    };
+    if is_category(&media.category) {
+        return;
+    }
+    let url = media.url.clone();
+    if let Some(keywords) = media
+        .metadata
+        .as_mut()
+        .and_then(|m| m.site_keywords.as_mut())
+    {
+        apply_user_keywords(
+            |key| options.get(key),
+            &url,
+            &mut Arc::make_mut(keywords).fields,
+        );
     }
 }
 
@@ -1026,6 +1057,25 @@ pub(crate) mod testing {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dedicated_files_receive_update_kwdict_options() {
+        let mut media = crate::wallhaven::wallpaper(
+            &serde_json::json!({"id": "abc123", "path": "https://w.wallhaven.cc/full/ab/wallhaven-abc123.jpg"}),
+            1,
+        )
+        .unwrap();
+        let options = serde_json::json!({"metadata-url": "src", "keywords": {"k": "v"},
+            "keywords-eval": true, "keywords-global": {"e": "{id}-x"}});
+        apply_dedicated_keywords(&mut media, options.as_object());
+        let fields = &media.metadata.unwrap().site_keywords.unwrap().fields;
+        assert_eq!(
+            fields["src"],
+            "https://w.wallhaven.cc/full/ab/wallhaven-abc123.jpg"
+        );
+        assert_eq!(fields["k"], "v");
+        assert_eq!(fields["e"], "abc123-x");
+    }
+
     use super::*;
 
     #[test]

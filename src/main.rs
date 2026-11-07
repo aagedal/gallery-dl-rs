@@ -3118,6 +3118,23 @@ fn extract_input<'a>(
                 "unsupported URL; expected a social URL or direct media file (other gallery-dl sites need --extractor compatibility)",
             ));
         };
+        // Upstream `update_kwdict` options for dedicated native extractors.
+        let site_options = settings
+            .get(settings_key(&url, extractor))
+            .and_then(|settings| settings.options.site_options.clone());
+        let input = match site_options.filter(|_| matches!(extractor, Extractor::Native)) {
+            Some(options) => input
+                .map(move |event| {
+                    event.map(|mut event| {
+                        if let ExtractionEvent::Media(media) = &mut event {
+                            gallery_dl_rs::sites::apply_dedicated_keywords(media, Some(&options));
+                        }
+                        event
+                    })
+                })
+                .boxed(),
+            None => input,
+        };
         let input = if routed_site(&url, extractor) == Some("mastodon") {
             let category = settings_category(&url, extractor);
             input
