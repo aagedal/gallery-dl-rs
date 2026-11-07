@@ -1048,7 +1048,7 @@ pub fn parse_photo(bytes: &[u8], requested_id: &str) -> Result<Vec<Media>> {
                 instance: None,
                 site_keywords: Some(std::sync::Arc::new(crate::sites::SiteKeywords {
                     route: &PHOTO,
-                    fields: photo_keywords(page, &photo, requested_id, &url),
+                    fields: photo_keywords(page, photo, requested_id, &url),
                 })),
                 post_id: requested_id.into(),
                 media_id: format!("{requested_id}.{extension}"),

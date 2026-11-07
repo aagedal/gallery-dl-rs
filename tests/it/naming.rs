@@ -623,7 +623,11 @@ fn format_string_dialects_follow_upstream() {
     let directory = DirectoryTemplate::parse(&["\u{c}F {service}/{user}".into()]).unwrap();
     assert!(directory.render(&media).unwrap().is_some());
     assert!(FilenameTemplate::parse("\u{c}X {id}").is_err());
-    // `\fM` calls a Python function with the keywords.
+    // `\fM` calls a Python function with the keywords (when python3 exists).
+    let python = std::process::Command::new("python3").arg("--version").output();
+    if !python.is_ok_and(|output| output.status.success()) {
+        return;
+    }
     let module = dir.path().join("fmt.py");
     std::fs::write(
         &module,
