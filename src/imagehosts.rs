@@ -555,6 +555,13 @@ pub fn parse_catbox_album(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
     let timestamp = between(page, "<p>Created ", "<")
         .or_else(|| between(page, "<p>Uploaded ", "<"))
         .and_then(catbox_date);
+    // Upstream's album `description`: the paragraph after the date.
+    let description = ["<p>Created ", "<p>Uploaded "]
+        .iter()
+        .find_map(|marker| page.find(marker).map(|at| at + marker.len()))
+        .and_then(|at| between(&page[at..], "<p>", "<"))
+        .map(unescape)
+        .filter(|text| !text.is_empty());
     // Albums now quote their links with `'`; accept both styles.
     let items = between_all(page, "href=\"https://files.catbox.moe/", "\"")
         .chain(between_all(page, "href='https://files.catbox.moe/", "'"))
@@ -569,7 +576,7 @@ pub fn parse_catbox_album(bytes: &[u8], id: &str) -> Result<Vec<Media>> {
                 media_id: stem.into(),
                 ext: clean_extension(ext)?,
                 url,
-                name: Some(name),
+                name: description.clone(),
                 mime: None,
                 timestamp: None,
             })

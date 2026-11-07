@@ -808,9 +808,9 @@ and image pages. Catbox album dates accept upstream's `Created Month DD YYYY`
 and the previously accepted `Uploaded DD Month YYYY` format; invalid optional dates do not
 change media selection. Pixeldrain API keys authenticate API requests and file downloads.
 Pixeldrain filesystem (`/d/`) folders (with `recursive`) followed, and since
-2026-11-07 Postimg galleries list every image through `json?action=list`.
-Remaining: other Pixeldrain domains; Catbox file `/c/` descriptions; imgbox
-per-image metadata (width/height).
+2026-11-07 Postimg galleries list every image through `json?action=list`
+and Catbox album files carry the album `description` like upstream
+(upstream supports only `pixeldrain.com` and reports no imgbox dimensions).
 
 **Implemented experimental native Tumblr:** blog listings, single posts and
 tagged listings via API v2 with an overridable `api-key`, original-image token
