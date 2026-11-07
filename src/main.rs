@@ -393,10 +393,10 @@ struct Args {
     /// Append input URLs that returned an error to FILE
     #[arg(short = 'e', long, value_name = "FILE")]
     error_file: Option<PathBuf>,
-    /// Print supported extractor categories and their subcategories
-    #[arg(long)]
-    list_extractors: bool,
-    /// Print supported extractor categories
+    /// Print a list of extractor classes with description, (sub)category and example URL
+    #[arg(long, num_args = 0.., value_name = "CATEGORIES")]
+    list_extractors: Option<Vec<String>>,
+    /// Print a list of available extractor modules
     #[arg(long)]
     list_modules: bool,
     /// Seconds to wait before starting extraction for each input (SECONDS or MIN-MAX)
@@ -767,8 +767,15 @@ async fn async_main(args: Args) {
 }
 
 async fn run(args: Args) -> Result<()> {
-    if args.list_extractors || args.list_modules {
-        list_extractors(args.list_extractors);
+    if args.list_modules {
+        // `lines` also drops carriage returns of CRLF checkouts.
+        for module in include_str!("upstream_modules.txt").lines() {
+            println!("{module}");
+        }
+        return Ok(());
+    }
+    if let Some(categories) = &args.list_extractors {
+        list_extractors(categories);
         return Ok(());
     }
     if let Some(list) = &args.whitelist {
@@ -1927,53 +1934,68 @@ fn python_text(value: &serde_json::Value) -> String {
 }
 
 /// `--list-extractors` / `--list-modules`.
-fn list_extractors(detailed: bool) {
-    let dedicated = [
-        "instagram",
-        "twitter",
-        "facebook",
-        "imgur",
-        "bluesky",
-        "reddit",
-        "danbooru",
-        "e621",
-        "gelbooru",
-        "safebooru",
-        "mastodon.social",
-        "pawoo",
-        "baraag",
-        "kemono",
-        "coomer",
-        "pixeldrain",
-        "catbox",
-        "imgbox",
-        "postimg",
-        "tumblr",
-        "pixiv",
-        "pixiv-novel",
-        "deviantart",
-        "flickr",
-        "wallhaven",
-        "artstation",
-        "pinterest",
-        "newgrounds",
-        "furaffinity",
-        "weasyl",
-        "vsco",
-    ];
-    let mut lines: Vec<String> = dedicated.iter().map(|c| (*c).to_owned()).collect();
-    for site in gallery_dl_rs::sites::sites() {
-        if detailed {
-            let routes: Vec<_> = site.routes.iter().map(|route| route.subcategory).collect();
-            lines.push(format!("{}: {}", site.category, routes.join(", ")));
-        } else {
-            lines.push(site.category.to_owned());
+/// Upstream `--list-extractors [CATEGORIES]`: every extractor class with its
+/// description, (sub)category and example URL, optionally filtered by
+/// `CATEGORY`, `CATEGORY:SUBCATEGORY` or `:SUBCATEGORY` items.
+fn list_extractors(filter: &[String]) {
+    let unescape = |value: &str| {
+        let mut out = String::with_capacity(value.len());
+        let mut chars = value.chars();
+        while let Some(c) = chars.next() {
+            match (c, c == '\\').1.then(|| chars.next()).flatten() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some(other) => out.push(other),
+                None => out.push(c),
+            }
+        }
+        out
+    };
+    let mut categories = Vec::new();
+    let mut subcategories = Vec::new();
+    let mut pairs = Vec::new();
+    for item in filter {
+        let (category, subcategory) = item.split_once(':').unwrap_or((item, ""));
+        match (
+            category.is_empty() || category == "*",
+            subcategory.is_empty() || subcategory == "*",
+        ) {
+            (false, false) => pairs.push((category, subcategory)),
+            (false, true) => categories.push(category),
+            (true, false) => subcategories.push(subcategory),
+            (true, true) => {}
         }
     }
-    lines.sort();
-    for line in lines {
-        println!("{line}");
+    let filtered = !(categories.is_empty() && subcategories.is_empty() && pairs.is_empty());
+    let mut out = String::new();
+    for line in include_str!("upstream_extractors.tsv").lines() {
+        if line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        let [name, doc, category, subcategory, example, base] = fields[..] else {
+            continue;
+        };
+        let matches = |c: &str| c == category || c == base;
+        if filtered
+            && !categories.iter().any(|c| matches(c))
+            && !subcategories.contains(&subcategory)
+            && !pairs.iter().any(|(c, s)| *s == subcategory && matches(c))
+        {
+            continue;
+        }
+        let doc = unescape(doc);
+        out.push_str(&format!(
+            "{name}{}\nCategory: {category} - Subcategory: {subcategory}\nExample : {}\n\n",
+            if doc.is_empty() {
+                String::new()
+            } else {
+                format!("\n{doc}")
+            },
+            unescape(example)
+        ));
     }
+    print!("{out}");
 }
 
 #[derive(Default)]

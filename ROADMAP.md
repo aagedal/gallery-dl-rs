@@ -1691,7 +1691,9 @@ registry responses to numbered files in the working directory, and
 extractors (Instagram, Twitter/X, Facebook, ...) do not report traffic.
 Configuration files may be YAML (`.yaml`/`.yml`) or TOML (`.toml`), or be
 declared with `--config-json`, `--config-yaml` or `--config-toml`;
-`--config-type` selects the `--config-create` format. `subconfigs` (a path
+`--config-type` selects the `--config-create` format. `--list-extractors
+[CATEGORIES]` and `--list-modules` print upstream's class and module lists
+byte for byte (generated tables in `src/upstream_*`, 2026-11-07). `subconfigs` (a path
 or list) merges further files over the current one (2026-11-07). Every upstream 1.32.17
 command-line option is now accepted; `-X` and `--compat` fail explicitly and
 the update options report that self-updating is unsupported.
