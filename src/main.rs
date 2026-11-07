@@ -2168,6 +2168,14 @@ fn extract_input<'a>(
                                         .is_some_and(gallery_dl_rs::postprocess::truthy),
                                 );
                                 native
+                                    .with_retries_api(
+                                        options
+                                            .site_options
+                                            .as_deref()
+                                            .and_then(|o| o.get("retries-api"))
+                                            .and_then(serde_json::Value::as_i64)
+                                            .unwrap_or(9),
+                                    )
                                     .with_include(options.include.clone())
                                     .with_expansion(ExpansionOptions {
                                         retweets: options.retweets.unwrap_or_default(),
