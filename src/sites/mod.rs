@@ -382,6 +382,21 @@ where
     pages(stream::try_unfold(state, next).into_stream())
 }
 
+/// Upstream `categorytransfer` class defaults: manga extractors and a few
+/// listings whose children report the parent's category and subcategory.
+fn transfers_category(category: &str, subcategory: &str) -> bool {
+    subcategory == "manga"
+        || category == "ao3"
+        || matches!(
+            (category, subcategory),
+            ("aryion", "gallery")
+                | ("behance", "user" | "collection")
+                | ("naver-blog", "blog")
+                | ("naver-webtoon" | "webtoons", "comic")
+                | ("xvideos", "user")
+        )
+}
+
 /// Queue a child URL, extracted only once the consumer reaches it.
 pub(crate) fn queue<'a>(
     http: &'a Http,
@@ -390,10 +405,37 @@ pub(crate) fn queue<'a>(
     url: Url,
     data: &Map<String, Value>,
 ) -> Events<'a> {
-    child_job(
+    // Upstream `category-transfer`: the child keeps its own formats but
+    // reports the parent's category and subcategory.
+    let transfer = match http.option("category-transfer") {
+        Some(value) => crate::postprocess::truthy(value),
+        None => transfers_category(category, subcategory),
+    }
+    .then(|| (Value::from(category), Value::from(subcategory)));
+    let child = child_job(
         ChildMetadata::from_raw(category, subcategory, data).with_url(url.as_str()),
         move || extract(http, url),
-    )
+    );
+    match transfer {
+        None => child,
+        Some((category, subcategory)) => child
+            .map(move |event| {
+                event.map(|mut event| {
+                    let metadata = match &mut event {
+                        ExtractionEvent::Media(media) => media.metadata.as_mut(),
+                        ExtractionEvent::Post(post) => post.metadata.as_mut(),
+                        _ => None,
+                    };
+                    if let Some(keywords) = metadata.and_then(|m| m.site_keywords.as_mut()) {
+                        let fields = &mut Arc::make_mut(keywords).fields;
+                        fields.insert("category".into(), category.clone());
+                        fields.insert("subcategory".into(), subcategory.clone());
+                    }
+                    event
+                })
+            })
+            .boxed(),
+    }
 }
 
 /// One file with its upstream keyword dictionary.
