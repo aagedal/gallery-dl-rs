@@ -1614,7 +1614,11 @@ and postprocessor templates accept upstream's `\fE` (expression), `\fF`
 the native expression engine (the same Python subset as filters, which now
 also accepts `start:stop:step` slices). `\fJ` (Jinja) and `\fM` (module
 function) run in an external `python3` (`$GALLERY_DL_PYTHON`), like the
-`python` postprocessor.
+`python` postprocessor. A differential test against upstream's formatter
+added the `!a`, `!n`, `!q`, `!Q`, `!L` and `!R` conversions, the `D`
+(strptime), `M` (map) and `X` (truncate with hint) specifiers, sorting of
+strings, quoted keys, `start:stop:step` field slices and Python's
+`g`/`G`/`n` number formats (2026-11-07).
 
 **Implemented extraction options, 2026-11-07:** `path-convert`,
 `file-unique`/`image-unique`, `child-unique`/`chapter-unique` and

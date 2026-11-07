@@ -146,6 +146,8 @@ enum Accessor {
     /// gallery-dl `[b:start:stop]`: slice the UTF-8 encoding and drop
     /// partial characters at the edges (`decode(errors="ignore")`).
     ByteSlice(Option<i64>, Option<i64>),
+    /// `[start:stop:step]` with an explicit, non-zero step.
+    Stepped(Option<i64>, Option<i64>, i64),
 }
 
 #[derive(Clone, Debug)]
@@ -188,6 +190,16 @@ enum Op {
     Offset(source_offset::Offset),
     /// `[start:stop]` / `[bstart:stop]` slice specifier.
     Slice(Accessor),
+    /// `M<key>/`: each dictionary item's `key`.
+    Map(String),
+    /// `D<format>/`: parse a datetime string.
+    Strptime(String),
+    /// `X<limit>/<hint>/` (`Xb` counts bytes): truncate, ending with `hint`.
+    Truncate {
+        max: usize,
+        hint: String,
+        bytes: bool,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -198,7 +210,7 @@ pub(crate) struct Field {
     spec: String,
 }
 
-const CONVERSIONS: &str = "lucCtsSrjdDTifgUHW";
+const CONVERSIONS: &str = "lucCtsSrjdDTifgUHWnqQaLR";
 
 impl Field {
     /// Parse the text between braces. `known` validates top-level names.
@@ -482,7 +494,18 @@ fn apply(ops: &[Op], spec: &str, value: Value) -> Result<Option<String>> {
             }
             value
         }
+        Op::Map(_) | Op::Strptime(_) | Op::Truncate { .. } => {
+            apply_extra(op, value).expect("extra specifier")
+        }
         Op::Sort { reverse } => match value {
+            Value::Str(text) => {
+                let mut chars: Vec<char> = text.chars().collect();
+                chars.sort_unstable();
+                if *reverse {
+                    chars.reverse();
+                }
+                Value::List(chars.into_iter().map(|c| Value::Str(c.into())).collect())
+            }
             Value::List(mut values) => {
                 values.sort_by(|a, b| {
                     a.partial_cmp_value(b)
@@ -648,6 +671,9 @@ fn apply_identity(ops: &[Op], spec: &str, value: Value) -> Result<Value> {
                 value = convert_identity(value, *conversion)?;
             }
             value
+        }
+        Op::Map(_) | Op::Strptime(_) | Op::Truncate { .. } => {
+            apply_extra(op, value).expect("extra specifier")
         }
         Op::Sort { reverse } => {
             let mut values = match value {
@@ -1020,6 +1046,19 @@ fn access(value: Value, accessor: &Accessor) -> Value {
             let (start, stop) = bounds(*start, *stop, chars.len());
             Value::Str(chars[start..stop].iter().collect())
         }
+        (Value::List(values), Accessor::Stepped(start, stop, step)) => Value::List(
+            stepped(*start, *stop, *step, values.len())
+                .map(|index| values[index].clone())
+                .collect(),
+        ),
+        (Value::Str(text), Accessor::Stepped(start, stop, step)) => {
+            let chars: Vec<char> = text.chars().collect();
+            Value::Str(
+                stepped(*start, *stop, *step, chars.len())
+                    .map(|index| chars[index])
+                    .collect(),
+            )
+        }
         (Value::Str(text), Accessor::ByteSlice(start, stop)) => {
             let (start, stop) = bounds(*start, *stop, text.len());
             Value::Str(
@@ -1031,6 +1070,94 @@ fn access(value: Value, accessor: &Accessor) -> Value {
         }
         _ => Value::Missing,
     }
+}
+
+/// Upstream `M`, `D` and `X` specifiers.
+fn apply_extra(op: &Op, value: Value) -> Option<Value> {
+    Some(match op {
+        Op::Map(key) => match value {
+            Value::List(values) => Value::List(
+                values
+                    .into_iter()
+                    .map(|item| match item {
+                        Value::Map(fields) => fields
+                            .into_iter()
+                            .find(|(name, _)| name == key)
+                            .map_or(Value::None, |(_, value)| value),
+                        item => item,
+                    })
+                    .collect(),
+            ),
+            value => value,
+        },
+        Op::Strptime(format) => match value {
+            Value::Str(text) => crate::sites::art::strptime(&text, format)
+                .map_or(Value::InvalidDate, |seconds| timestamp(seconds.into())),
+            _ => Value::InvalidDate,
+        },
+        Op::Truncate { max, hint, bytes } => {
+            let text = value.text();
+            let length = if *bytes {
+                text.len()
+            } else {
+                text.chars().count()
+            };
+            if length <= *max {
+                return Some(Value::Str(text));
+            }
+            let keep = max.saturating_sub(if *bytes {
+                hint.len()
+            } else {
+                hint.chars().count()
+            });
+            let mut output: String = if *bytes {
+                text.char_indices()
+                    .take_while(|(at, c)| at + c.len_utf8() <= keep)
+                    .map(|(_, c)| c)
+                    .collect()
+            } else {
+                text.chars().take(keep).collect()
+            };
+            output.push_str(hint);
+            Value::Str(output)
+        }
+        _ => return None,
+    })
+}
+
+/// Python's `slice(start, stop, step).indices(length)` positions.
+fn stepped(
+    start: Option<i64>,
+    stop: Option<i64>,
+    step: i64,
+    length: usize,
+) -> impl Iterator<Item = usize> {
+    let length = length as i64;
+    let clamp = |index: i64, low: i64, high: i64| {
+        let index = if index < 0 { index + length } else { index };
+        index.clamp(low, high)
+    };
+    let (start, stop) = if step > 0 {
+        (
+            start.map_or(0, |i| clamp(i, 0, length)),
+            stop.map_or(length, |i| clamp(i, 0, length)),
+        )
+    } else {
+        (
+            start.map_or(length - 1, |i| clamp(i, -1, length - 1)),
+            stop.map_or(-1, |i| clamp(i, -1, length - 1)),
+        )
+    };
+    let mut index = start;
+    std::iter::from_fn(move || {
+        let inside = if step > 0 { index < stop } else { index > stop };
+        if !inside {
+            return None;
+        }
+        let current = index as usize;
+        index += step;
+        Some(current)
+    })
 }
 
 fn capitalize(text: &str) -> String {
@@ -1139,6 +1266,7 @@ fn convert_source(value: Value, conversion: char) -> Result<Value> {
             convert(value, conversion)
         }
         's' | 'S' | 'r' | 'j' | 'd' | 'D' | 'T' => convert_identity(value, conversion),
+        'n' | 'q' | 'Q' | 'a' | 'L' | 'R' => convert(value, conversion),
         _ => Err(invalid()),
     }
 }
@@ -1315,9 +1443,114 @@ fn convert(value: Value, conversion: char) -> Result<Value> {
                 .collect::<Vec<_>>()
                 .join(" "),
         ),
+        // `len`
+        'n' => Value::Int(match &value {
+            Value::Str(value) => value.chars().count(),
+            Value::List(values) => values.len(),
+            Value::Map(values) => values.len(),
+            _ => return Err(error("template conversion !n requires a sized value")),
+        } as i128),
+        // `urllib.parse.quote` (safe `/`) and `unquote`
+        'q' => Value::Str(
+            text(&value)
+                .bytes()
+                .map(|b| {
+                    if b.is_ascii_alphanumeric() || b"_.-~/".contains(&b) {
+                        char::from(b).to_string()
+                    } else {
+                        format!("%{b:02X}")
+                    }
+                })
+                .collect(),
+        ),
+        'Q' => Value::Str(crate::sites::gdl::unquote(&text(&value))),
+        // `ascii`: `repr` with non-ASCII characters escaped
+        'a' => {
+            let mut output = String::new();
+            for c in repr(&value).chars() {
+                match c as u32 {
+                    0..=0x7f => output.push(c),
+                    code @ 0x80..=0xff => output.push_str(&format!("\\x{code:02x}")),
+                    code @ 0x100..=0xffff => output.push_str(&format!("\\u{code:04x}")),
+                    code => output.push_str(&format!("\\U{code:08x}")),
+                }
+            }
+            Value::Str(output)
+        }
+        // `util.code_to_language`
+        'L' => LANGUAGES
+            .iter()
+            .find(|(code, _)| *code == text(&value).to_lowercase())
+            .map_or(Value::None, |(_, name)| Value::Str((*name).into())),
+        // `text.extract_urls`
+        'R' => {
+            let text = text(&value);
+            let mut urls = Vec::new();
+            let mut rest = text.as_str();
+            while let Some(at) = rest.find("http") {
+                let candidate = &rest[at..];
+                let body = candidate
+                    .strip_prefix("https://")
+                    .or_else(|| candidate.strip_prefix("http://"));
+                match body {
+                    Some(body) => {
+                        let end = body
+                            .find(|c: char| c.is_whitespace() || "\"'<>\\".contains(c))
+                            .unwrap_or(body.len());
+                        let length = candidate.len() - body.len() + end;
+                        if end > 0 {
+                            urls.push(Value::Str(candidate[..length].to_owned()));
+                        }
+                        rest = &candidate[length.max(4)..];
+                    }
+                    None => rest = &candidate[4..],
+                }
+            }
+            Value::List(urls)
+        }
         c => return Err(error(format!("unknown template conversion: !{c}"))),
     })
 }
+
+/// Upstream `util.CODES` (ISO 639-1 code to language name).
+const LANGUAGES: &[(&str, &str)] = &[
+    ("ar", "Arabic"),
+    ("bg", "Bulgarian"),
+    ("bn", "Bengali"),
+    ("ca", "Catalan"),
+    ("cs", "Czech"),
+    ("da", "Danish"),
+    ("de", "German"),
+    ("el", "Greek"),
+    ("en", "English"),
+    ("es", "Spanish"),
+    ("fa", "Persian"),
+    ("fi", "Finnish"),
+    ("fr", "French"),
+    ("he", "Hebrew"),
+    ("hi", "Hindi"),
+    ("hu", "Hungarian"),
+    ("id", "Indonesian"),
+    ("it", "Italian"),
+    ("ja", "Japanese"),
+    ("ko", "Korean"),
+    ("ms", "Malay"),
+    ("nl", "Dutch"),
+    ("no", "Norwegian"),
+    ("pl", "Polish"),
+    ("pt", "Portuguese"),
+    ("ro", "Romanian"),
+    ("ru", "Russian"),
+    ("sk", "Slovak"),
+    ("sl", "Slovenian"),
+    ("sr", "Serbian"),
+    ("sv", "Swedish"),
+    ("th", "Thai"),
+    ("tr", "Turkish"),
+    ("uk", "Ukrainian"),
+    ("vi", "Vietnamese"),
+    ("zh", "Chinese"),
+];
 
 fn json(value: &Value) -> serde_json::Value {
     use serde_json::Value as Json;
@@ -1450,7 +1683,19 @@ fn parse_source(text: &str, known: &impl Fn(&str) -> bool) -> Result<Source> {
                     .map(Some)
                     .map_err(|_| error("invalid template slice"))
             };
+            let quoted = inner.len() >= 2
+                && (inner.starts_with('\'') && inner.ends_with('\'')
+                    || inner.starts_with('"') && inner.ends_with('"'));
+            let parts: Vec<&str> = inner.splitn(3, ':').collect();
             accessors.push(match inner.split_once(':') {
+                _ if quoted => Accessor::Key(inner[1..inner.len() - 1].into()),
+                _ if parts.len() == 3 && !parts[2].is_empty() => {
+                    let step = integer(parts[2])?
+                        .filter(|step| *step != 0)
+                        .ok_or_else(|| error("invalid template slice"))?;
+                    Accessor::Stepped(integer(parts[0])?, integer(parts[1])?, step)
+                }
+                _ if parts.len() == 3 => Accessor::Slice(integer(parts[0])?, integer(parts[1])?),
                 Some((start, stop)) if start.starts_with('b') => {
                     Accessor::ByteSlice(integer(&start[1..])?, integer(stop)?)
                 }
@@ -1486,7 +1731,7 @@ fn parse_ops(mut spec: &str) -> Result<(Vec<Op>, String)> {
         *spec = rest;
         argument.into()
     };
-    while let Some(kind) = spec.chars().next().filter(|c| "?LJRACSOI[".contains(*c)) {
+    while let Some(kind) = spec.chars().next().filter(|c| "?LJRACSOI[DMX".contains(*c)) {
         if ops.len() >= 16 {
             return Err(error("template field has too many specifiers"));
         }
@@ -1546,6 +1791,24 @@ fn parse_ops(mut spec: &str) -> Result<(Vec<Op>, String)> {
                 let (argument, rest) = spec.split_once('/').unwrap_or((spec, ""));
                 spec = rest;
                 Op::Offset(source_offset::Offset::parse(argument)?)
+            }
+            'M' => Op::Map(rest(&mut spec)),
+            'D' => Op::Strptime(rest(&mut spec)),
+            'X' => {
+                let limit = take(&mut spec)?;
+                let (bytes, limit) = match limit.strip_prefix('b') {
+                    Some(limit) => (true, limit.to_owned()),
+                    None => (false, limit),
+                };
+                Op::Truncate {
+                    max: limit
+                        .parse()
+                        .ok()
+                        .filter(|max| *max <= MAX_TEXT)
+                        .ok_or_else(|| error("invalid template length limit"))?,
+                    hint: take(&mut spec)?,
+                    bytes,
+                }
             }
             '[' => {
                 let (indices, rest) = spec
@@ -1640,7 +1903,7 @@ impl PythonSpec {
             result.precision = Some(number(&mut i)?.ok_or_else(invalid)?);
         }
         if let Some(&c) = chars.get(i) {
-            if !"sdxXobfFeE%".contains(c) {
+            if !"sdnxXobfFeEgG%".contains(c) {
                 return Err(invalid());
             }
             result.kind = Some(c);
@@ -1717,6 +1980,38 @@ fn format_float(value: f64, kind: char, precision: usize) -> String {
             }
         }
         '%' => format!("{:.*}%", precision, value.abs() * 100.0),
+        'g' | 'G' | 'n' => {
+            // Python's general format: scientific when the exponent is
+            // below -4 or at least the precision, trailing zeros removed.
+            let precision = precision.max(1);
+            let scientific = format_float(value, 'e', precision - 1);
+            let exponent: i32 = scientific
+                .split_once('e')
+                .and_then(|(_, exponent)| exponent.parse().ok())
+                .unwrap_or(0);
+            let strip = |text: &str| -> String {
+                if text.contains('.') {
+                    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+                } else {
+                    text.to_owned()
+                }
+            };
+            let text = if (-4..precision as i32).contains(&exponent) {
+                strip(&format_float(
+                    value,
+                    'f',
+                    (precision as i32 - 1 - exponent).max(0) as usize,
+                ))
+            } else {
+                let (mantissa, exponent) = scientific.split_once('e').unwrap_or((&scientific, ""));
+                format!("{}e{exponent}", strip(mantissa))
+            };
+            if kind == 'G' {
+                text.to_uppercase()
+            } else {
+                text
+            }
+        }
         _ => format!("{:.*}", precision, value.abs()),
     }
 }
@@ -1759,7 +2054,7 @@ fn format_value(value: &Value, spec: &str) -> Result<String> {
                 value => value.clone(),
             };
             let (negative, prefix, body) = match (&number, spec.kind) {
-                (Value::Int(value), None | Some('d' | 'x' | 'X' | 'o' | 'b')) => {
+                (Value::Int(value), None | Some('d' | 'n' | 'x' | 'X' | 'o' | 'b')) => {
                     if spec.precision.is_some() {
                         return Err(incompatible());
                     }
@@ -1788,9 +2083,11 @@ fn format_value(value: &Value, spec: &str) -> Result<String> {
                     };
                     let body = match spec.kind {
                         None if spec.precision.is_none() => crate::filter::float_repr(value.abs()),
-                        Some(kind @ ('f' | 'F' | 'e' | 'E' | '%')) => {
+                        Some(kind @ ('f' | 'F' | 'e' | 'E' | '%' | 'g' | 'G')) => {
                             format_float(value, kind, spec.precision.unwrap_or(6))
                         }
+                        // Float `n` without a locale is `g`.
+                        Some('n') => format_float(value, 'g', spec.precision.unwrap_or(6)),
                         _ => return Err(incompatible()),
                     };
                     let body = match spec.grouping {

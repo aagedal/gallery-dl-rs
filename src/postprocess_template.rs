@@ -390,6 +390,49 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn formatter_conversions_and_specifiers_match_upstream() {
+        // Expected values were produced by upstream `formatter.parse`.
+        let context = json!({"title": "Hello World", "id": 12345, "tags": ["a", "b", "c"],
+            "user": {"name": "Alice"}, "long": "abcdefghijklmnop", "jp": "日本語テキスト",
+            "dicts": [{"name": "x"}, {"name": "y"}], "code": "JA", "big": 123456789.0,
+            "small": 0.0000123, "float": 1.234567, "when": "2024-01-02 03:04:05",
+            "text": "see https://a.com/x?y=1 and http://b.org/<z>", "q": "a b/c?d=é",
+            "unicode": "Ünïcödé ñ"});
+        let context = context.as_object().unwrap();
+        for (template, expected) in [
+            ("{title!a}", "'Hello World'"),
+            ("{unicode!a}", "'\\xdcn\\xefc\\xf6d\\xe9 \\xf1'"),
+            ("{title!n}", "11"),
+            ("{tags!n}", "3"),
+            ("{q!q}", "a%20b/c%3Fd%3D%C3%A9"),
+            ("{q:CqQ/}", "a b/c?d=é"),
+            ("{code!L}", "Japanese"),
+            ("{text!R}", "['https://a.com/x?y=1', 'http://b.org/']"),
+            ("{user['name']}", "Alice"),
+            ("{title[::2]}", "HloWrd"),
+            ("{tags[::-1]}", "['c', 'b', 'a']"),
+            ("{long[1:10:3]}", "beh"),
+            ("{long:X10/…/}", "abcdefghi…"),
+            ("{jp:Xb10/~/}", "日本語~"),
+            ("{dicts:Mname/J,/}", "x,y"),
+            ("{when:D%Y-%m-%d %H:%M:%S/%d.%m}", "02.01"),
+            ("{title:Sr/J/}", "roollledWH "),
+            ("{float:g}", "1.23457"),
+            ("{big:g}", "1.23457e+08"),
+            ("{small:G}", "1.23E-05"),
+            ("{big:.2g}", "1.2e+08"),
+            ("{id:n}", "12345"),
+            ("{title:Cnu/}", "ERR"),
+        ] {
+            let result = Template::parse(template).and_then(|t| t.render(context));
+            match expected {
+                "ERR" => assert!(result.is_err(), "{template}"),
+                expected => assert_eq!(result.unwrap(), expected, "{template}"),
+            }
+        }
+    }
+
+    #[test]
     fn genuine_source_identity_matrix_preserves_types_and_field_error_semantics() {
         let fixture: Value = serde_json::from_str(include_str!(
             "../tests/fixtures/postprocessors/formatter_identity.json"
