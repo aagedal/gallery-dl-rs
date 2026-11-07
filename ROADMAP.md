@@ -622,6 +622,17 @@ Add native configuration and filename templates, then prioritize additional site
 Integrate the companion **yt-dlp-rs** project for video extraction and segmented
 downloads. Document compatibility differences as features land.
 
+**Implemented upstream keyword dictionaries (2026-11-07):** files of the
+native Pinterest, Tumblr, Reddit, Flickr, Kemono/Coomer, Wallhaven, Imgur,
+Weasyl, VSCO, ArtStation, Fur Affinity, Newgrounds, Mastodon and Bluesky
+extractors carry upstream's per-file keyword dictionaries
+(`PostMetadata.site_keywords`), so upstream filename/directory templates,
+filters and postprocessor keywords work unchanged, and default paths follow
+upstream's per-subcategory formats. Fur Affinity also parses the site's
+current (2025) markup, which upstream's parsers no longer match. Remaining:
+Twitter, Instagram, Pixiv, DeviantArt and Facebook still expose native
+keywords (plus selected upstream names such as `tweet_id`).
+
 **Implemented experimental native Imgur:** single images, albums and gallery
 posts via the public `post/v1` API, with shared retries, timeouts, network
 options and Retry-After cooldowns. The upstream boolean `mp4` option defaults
