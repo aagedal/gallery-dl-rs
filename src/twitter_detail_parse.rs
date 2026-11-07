@@ -131,9 +131,7 @@ fn unavailable(item: &Value) -> Result<bool> {
 }
 
 fn promoted(value: &Value) -> bool {
-    value
-        .get("promotedMetadata")
-        .is_some_and(|value| !value.is_null())
+    crate::twitter::skip_promoted(value)
 }
 
 pub(super) fn post_owner(value: &Value) -> Result<String> {

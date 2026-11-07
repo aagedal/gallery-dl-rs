@@ -767,6 +767,23 @@ pub fn parse_response(bytes: &[u8], requested_post_id: &str) -> Result<Vec<Media
 
 // Twitter dates use a fixed English month and UTC offset; httpdate does not
 // accept this layout, so normalize only the documented UTC form to IMF-fixdate.
+/// Upstream `ads`: keep promoted timeline entries (process-wide, like
+/// other per-run extractor settings).
+static ADS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_ads(include: bool) {
+    ADS.store(include, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether a timeline entry is a promoted tweet that should be skipped.
+pub(crate) fn skip_promoted(value: &Value) -> bool {
+    skip_promoted_with(value, ADS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+fn skip_promoted_with(value: &Value, ads: bool) -> bool {
+    !ads && value.get("promotedMetadata").is_some_and(|v| !v.is_null())
+}
+
 fn timestamp(date: &str) -> Option<i64> {
     let p: Vec<_> = date.split_ascii_whitespace().collect();
     if p.len() != 6 || p[4] != "+0000" {
@@ -1062,6 +1079,17 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn ads_option_keeps_promoted_entries() {
+        let entry = serde_json::json!({"promotedMetadata": {"advertiser": "x"}});
+        assert!(skip_promoted_with(&entry, false));
+        assert!(!skip_promoted_with(&entry, true));
+        assert!(!skip_promoted_with(
+            &serde_json::json!({"promotedMetadata": null}),
+            false
+        ));
     }
 
     #[test]

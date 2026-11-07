@@ -2157,6 +2157,13 @@ fn extract_input<'a>(
                                 backend.timeout,
                             )
                             .and_then(|native| {
+                                gallery_dl_rs::twitter::set_ads(
+                                    options
+                                        .site_options
+                                        .as_deref()
+                                        .and_then(|o| o.get("ads"))
+                                        .is_some_and(gallery_dl_rs::postprocess::truthy),
+                                );
                                 native
                                     .with_include(options.include.clone())
                                     .with_expansion(ExpansionOptions {

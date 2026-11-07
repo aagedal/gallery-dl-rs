@@ -463,7 +463,7 @@ pub(super) fn parse_instructions(
 }
 
 fn promoted(value: &Value) -> bool {
-    value.get("promotedMetadata").is_some_and(|v| !v.is_null())
+    crate::twitter::skip_promoted(value)
 }
 
 fn is_cursor(content: &Value) -> bool {
