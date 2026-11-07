@@ -1024,9 +1024,12 @@ photostreams and `flic.kr` short links via the REST API (overridable `api-key`).
 Favorites, galleries, groups, search and album lists followed on
 2026-10-28; `size-max` (pixels or a format code/label; listings request
 upstream's eight `url_*` formats within the limit, `getSizes` drops larger
-sizes) on 2026-10-31. Remaining: OAuth/private content,
-`contexts`/`exif`/`info`/`metadata` options (no keyword dictionary for
-Flickr files yet), `videos: false`, and album metadata on listed items.
+sizes) on 2026-10-31. Since 2026-11-07 files carry upstream's keyword
+dictionaries (`user`, `owner`, `album`/`gallery`/`group`/`search`, `date`,
+`tags`, `label`, ...) with upstream default paths per subcategory, `_d`
+download URLs and `video.getStreamInfo` streams; `info`, `exif`,
+`contexts`, `profile`, `videos` and `metadata` (listing extras) are
+supported. Remaining: OAuth/private content.
 
 **Implemented experimental native Reddit:** submissions, galleries, subreddit
 and user listings over public JSON; video-only v.redd.it MP4s. Since

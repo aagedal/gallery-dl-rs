@@ -2399,6 +2399,13 @@ fn extract_input<'a>(
                                             .as_deref()
                                             .and_then(|o| o.get("size-max")),
                                     ))
+                                    .with_meta(gallery_dl_rs::flickr::MetaOptions::from_options(
+                                        options.site_options.as_deref(),
+                                        options.metadata,
+                                        options.videos.map(|mode| {
+                                            mode != gallery_dl_rs::twitter::VideoMode::Skip
+                                        }),
+                                    ))
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)

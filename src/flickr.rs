@@ -7,6 +7,7 @@
 //! photostreams list photos with `url_*` extras and only call `getSizes` for
 //! videos. Media must be served over HTTPS from `*.staticflickr.com` or, for
 //! video streams, `*.flickr.com`.
+use crate::sites::{Route, SiteKeywords, gdl};
 use crate::{
     Result, error,
     event::{ExtractionEvent, KeywordPolicy, group_with_keywords},
@@ -20,7 +21,7 @@ use futures_util::{
     stream::{self, BoxStream},
 };
 use reqwest::{Client, StatusCode};
-use serde_json::Value;
+use serde_json::{Map, Value, json};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::Arc,
@@ -38,7 +39,154 @@ pub const DEFAULT_API_KEY: &str = "90c368449018a0cb880ea4889cbb8681";
 const MAX_RESPONSE: usize = 32 * 1024 * 1024;
 const PAGE_SIZE: usize = 500;
 const MAX_PAGES: u64 = 200;
-const EXTRAS: &str = "media,date_upload,owner_name,o_dims";
+/// Upstream `_pagination` extras before `metadata` and `url_*` formats.
+const EXTRAS: &str = "description,date_upload,tags,views,media,path_alias,owner_name,";
+/// Upstream `metadata: true` extras.
+const METADATA_EXTRAS: &str =
+    "license,date_taken,original_format,last_update,geo,machine_tags,o_dims";
+const FILENAME: &str = "{category}_{id}.{extension}";
+const DIRECTORY: &[&str] = &["{category}", "{user[username]}"];
+static IMAGE: Route = Route::new("image", FILENAME, DIRECTORY, "{id}");
+static ALBUM: Route = Route::new(
+    "album",
+    FILENAME,
+    &[
+        "{category}",
+        "{user[username]}",
+        "Albums",
+        "{album[id]} {album[title]}",
+    ],
+    "a_{album[id]}_{id}",
+);
+static GALLERY: Route = Route::new(
+    "gallery",
+    FILENAME,
+    &[
+        "{category}",
+        "{user[username]}",
+        "Galleries",
+        "{gallery[gallery_id]} {gallery[title]}",
+    ],
+    "g_{gallery[id]}_{id}",
+);
+static GROUP: Route = Route::new(
+    "group",
+    FILENAME,
+    &["{category}", "Groups", "{group[groupname]}"],
+    "G_{group[nsid]}_{id}",
+);
+static USER: Route = Route::new("user", FILENAME, DIRECTORY, "u_{user[nsid]}_{id}");
+static FAVORITE: Route = Route::new(
+    "favorite",
+    FILENAME,
+    &["{category}", "{user[username]}", "Favorites"],
+    "f_{user[nsid]}_{id}",
+);
+static SEARCH: Route = Route::new(
+    "search",
+    FILENAME,
+    &["{category}", "Search", "{search[text]}"],
+    "s_{search}_{id}",
+);
+/// Upstream `VIDEO_FORMATS` stream ranks.
+fn stream_rank(kind: &str) -> u8 {
+    match kind {
+        "orig" => 9,
+        "1080p" => 8,
+        "720p" => 7,
+        "360p" => 6,
+        "288p" => 5,
+        "700" => 4,
+        "300" => 3,
+        "100" => 2,
+        "appletv" => 1,
+        _ => 0,
+    }
+}
+/// Upstream `LICENSES`.
+fn license_name(id: &str) -> Option<&'static str> {
+    Some(match id {
+        "0" => "All Rights Reserved",
+        "1" => "Attribution-NonCommercial-ShareAlike License",
+        "2" => "Attribution-NonCommercial License",
+        "3" => "Attribution-NonCommercial-NoDerivs License",
+        "4" => "Attribution License",
+        "5" => "Attribution-ShareAlike License",
+        "6" => "Attribution-NoDerivs License",
+        "7" => "No known copyright restrictions",
+        "8" => "United States Government Work",
+        "9" => "Public Domain Dedication (CC0)",
+        "10" => "Public Domain Mark",
+        _ => return None,
+    })
+}
+
+/// Upstream per-photo metadata options.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MetaOptions {
+    /// `info`: merge `photos.getInfo` into listed photos.
+    pub info: bool,
+    /// `exif`: merge `photos.getExif` (`exif`, `camera`).
+    pub exif: bool,
+    /// `contexts`: merge `photos.getAllContexts` (`set`, `pool`).
+    pub contexts: bool,
+    /// `profile`: replace `user` with `people.getInfo`.
+    pub profile: bool,
+    /// `videos`: download video streams rather than their previews.
+    pub videos: bool,
+    /// `metadata`: additional listing extras.
+    pub extras: Option<String>,
+}
+
+impl Default for MetaOptions {
+    fn default() -> Self {
+        Self {
+            info: false,
+            exif: false,
+            contexts: false,
+            profile: false,
+            videos: true,
+            extras: None,
+        }
+    }
+}
+
+impl MetaOptions {
+    /// Read the upstream option names from Flickr's site options;
+    /// `metadata` and `videos` fall back to inherited typed settings.
+    pub fn from_options(
+        options: Option<&Map<String, Value>>,
+        metadata: Option<bool>,
+        videos: Option<bool>,
+    ) -> Self {
+        let get = |key: &str| options.and_then(|o| o.get(key));
+        let flag = |key: &str, default: bool| get(key).map_or(default, crate::postprocess::truthy);
+        let extras = match get("metadata") {
+            Some(Value::Array(items)) => Some(
+                items
+                    .iter()
+                    .map(|item| {
+                        item.as_str()
+                            .map_or_else(|| item.to_string(), str::to_owned)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
+            Some(Value::String(extras)) if !extras.is_empty() => Some(extras.clone()),
+            Some(value) if crate::postprocess::truthy(value) => Some(METADATA_EXTRAS.into()),
+            Some(_) => None,
+            None => metadata.unwrap_or(false).then(|| METADATA_EXTRAS.into()),
+        };
+        Self {
+            info: flag("info", false),
+            exif: flag("exif", false),
+            contexts: flag("contexts", false),
+            profile: flag("profile", false),
+            videos: flag("videos", videos.unwrap_or(true)),
+            extras,
+        }
+    }
+}
 /// Upstream `FORMATS`: size suffix, label and maximum dimension, largest
 /// first (`None` for originals).
 const FORMATS: [(&str, &str, Option<u64>); 16] = [
@@ -104,12 +252,24 @@ impl SizeLimit {
             .is_some_and(|max| width.unwrap_or(0) > max || height.unwrap_or(0) > max)
     }
 
+    #[cfg(test)]
     fn extras(&self) -> String {
+        self.extras_with(None)
+    }
+
+    /// Upstream `_pagination` extras, with `metadata` includes.
+    fn extras_with(&self, includes: Option<&str>) -> String {
         let mut extras = EXTRAS.to_owned();
-        for code in &self.formats {
-            extras.push_str(",url_");
-            extras.push_str(code);
+        if let Some(includes) = includes {
+            extras.push_str(includes);
+            extras.push(',');
         }
+        let formats: Vec<_> = self
+            .formats
+            .iter()
+            .map(|code| format!("url_{code}"))
+            .collect();
+        extras.push_str(&formats.join(","));
         extras
     }
 }
@@ -311,6 +471,8 @@ pub struct Size {
     pub width: Option<u64>,
     pub height: Option<u64>,
     pub video: bool,
+    /// Upstream `label`: the size or stream name.
+    pub label: String,
 }
 
 fn video_rank(label: &str) -> u8 {
@@ -372,6 +534,7 @@ pub fn parse_sizes_with(bytes: &[u8], video: bool, limit: &SizeLimit) -> Result<
                 width,
                 height,
                 video: is_video,
+                label,
             },
         ))
     });
@@ -401,6 +564,9 @@ fn check(bytes: &[u8]) -> Result<Value> {
 /// Per-photo metadata independent of the chosen size.
 #[derive(Clone, Debug, Default)]
 pub struct Photo {
+    /// Upstream keywords (the API photo object); empty for bare photos.
+    pub keywords: Map<String, Value>,
+    pub route: Option<&'static Route>,
     pub id: String,
     pub username: Option<String>,
     pub title: Option<String>,
@@ -419,6 +585,8 @@ pub fn parse_info(bytes: &[u8], id: &str) -> Result<Photo> {
     }
     let owner = photo.get("owner").unwrap_or(&Value::Null);
     Ok(Photo {
+        keywords: photo.as_object().cloned().unwrap_or_default(),
+        route: Some(&IMAGE),
         id: id.into(),
         username: field(owner, "username").or_else(|| field(owner, "path_alias")),
         title: photo.get("title").and_then(text),
@@ -470,15 +638,19 @@ pub fn parse_page_with(bytes: &[u8], fallback_user: &str, limit: &SizeLimit) -> 
                 let url = media_url(&field(item, &format!("url_{s}"))?, false)?;
                 let width = number(item, &format!("width_{s}"));
                 let height = number(item, &format!("height_{s}"));
-                (!limit.exceeds(width, height)).then_some(Size {
+                let label = FORMATS.iter().find(|(code, ..)| code == s)?.1;
+                (!limit.exceeds(width, height)).then(|| Size {
                     url,
                     width,
                     height,
                     video: false,
+                    label: label.into(),
                 })
             });
             Some(Entry {
                 photo: Photo {
+                    keywords: item.as_object().cloned().unwrap_or_default(),
+                    route: None,
                     id,
                     username: field(item, "ownername").or_else(|| Some(owner.clone())),
                     title: field(item, "title"),
@@ -508,9 +680,90 @@ pub fn parse_user(bytes: &[u8]) -> Result<(String, Option<String>)> {
     Ok((nsid, user.get("username").and_then(text)))
 }
 
+/// A `{"_content": ...}` wrapper's content, or the value itself.
+fn content(value: &Value) -> Value {
+    value
+        .get("_content")
+        .cloned()
+        .unwrap_or_else(|| value.clone())
+}
+
+fn flatten_content(object: &mut Map<String, Value>, key: &str) {
+    if let Some(value) = object.get_mut(key)
+        && value.is_object()
+    {
+        *value = value.get("_content").cloned().unwrap_or(Value::Null);
+    }
+}
+
+/// Upstream `_clean_info` of albums and galleries.
+fn clean_title(mut info: Value) -> Value {
+    if let Value::Object(object) = &mut info {
+        flatten_content(object, "title");
+        flatten_content(object, "description");
+    }
+    info
+}
+
+/// Upstream's `photos.getInfo` cleanup (`info` option and single photos).
+fn clean_info(photo: &mut Map<String, Value>) {
+    flatten_content(photo, "title");
+    flatten_content(photo, "description");
+    let comments = photo.get("comments").map(content);
+    photo.insert("comments".into(), gdl::int_of(comments.as_ref()).into());
+    if let Some(Value::Object(tags)) = photo.get("tags") {
+        let raw: Vec<Value> = tags
+            .get("tag")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|tag| tag.get("raw").cloned())
+            .collect();
+        photo.insert("tags".into(), raw.into());
+    }
+    let views = gdl::int_of(photo.get("views"));
+    photo.insert("views".into(), views.into());
+    let id = gdl::int_of(photo.get("id"));
+    photo.insert("id".into(), id.into());
+}
+
+fn date_value(timestamp: Option<i64>) -> Value {
+    crate::filter::source_date_text(timestamp).into()
+}
+
+fn warn(kind: &str, id: &str) {
+    eprintln!("[flickr][warning] Unable to retrieve '{kind}' data for {id}");
+}
+
+/// Upstream `_file_url`: photos use their `_d` (download) variant.
+fn file_url(url: &Url) -> Url {
+    let raw = url.as_str();
+    if raw.contains("/video/") || url.query().is_some() {
+        return url.clone();
+    }
+    match raw.rsplit_once('.') {
+        Some((path, ext)) if !ext.contains('/') => {
+            Url::parse(&format!("{path}_d.{ext}")).unwrap_or_else(|_| url.clone())
+        }
+        _ => url.clone(),
+    }
+}
+
 /// Build the media item for a photo and its chosen size.
 pub fn media(photo: &Photo, size: Size, index: usize) -> Media {
     let ext = extension(&size.url, if size.video { "mp4" } else { "jpg" });
+    let url = file_url(&size.url);
+    let site_keywords = photo.route.map(|route| {
+        let mut fields = photo.keywords.clone();
+        fields.insert("url".into(), size.url.as_str().into());
+        fields.insert("label".into(), size.label.clone().into());
+        fields.insert("width".into(), size.width.unwrap_or(0).into());
+        fields.insert("height".into(), size.height.unwrap_or(0).into());
+        let (filename, extension) = crate::sites::nameext(&url);
+        fields.insert("filename".into(), filename.into());
+        fields.insert("extension".into(), extension.into());
+        Arc::new(SiteKeywords { route, fields })
+    });
     Media {
         filename: format!("{}.{ext}", photo.id),
         job: MediaJob::DirectHttp,
@@ -528,9 +781,10 @@ pub fn media(photo: &Photo, size: Size, index: usize) -> Media {
             caption: photo.title.as_deref().map(Arc::from),
             timestamp: photo.timestamp,
             index,
+            site_keywords,
             ..PostMetadata::default()
         }),
-        url: size.url,
+        url,
         headers: BTreeMap::new(),
         handoff: BTreeMap::new(),
     }
@@ -550,6 +804,7 @@ pub struct Flickr {
     retries: u8,
     rate_limits: RateLimits,
     size_limit: SizeLimit,
+    meta: MetaOptions,
 }
 
 enum Listing {
@@ -572,6 +827,9 @@ enum Lookup {
 struct ListingState {
     listing: Option<Listing>,
     lookup: Lookup,
+    route: &'static Route,
+    /// Upstream `metadata()`: `user`, `album`, `gallery`, `group` or `search`.
+    data: Option<Map<String, Value>>,
     user: String,
     page: u64,
     index: usize,
@@ -593,7 +851,14 @@ impl Flickr {
             retries: 0,
             rate_limits: RateLimits::default(),
             size_limit: SizeLimit::default(),
+            meta: MetaOptions::default(),
         })
+    }
+
+    /// Upstream `info`, `exif`, `contexts`, `profile`, `videos` and `metadata`.
+    pub fn with_meta(mut self, meta: MetaOptions) -> Self {
+        self.meta = meta;
+        self
     }
 
     /// Upstream `size-max`.
@@ -701,51 +966,334 @@ impl Flickr {
         )
     }
 
+    async fn api(&self, method: &str, query: &[(&str, &str)]) -> Result<Value> {
+        check(&self.call(method, query).await?)
+    }
+
+    /// Upstream `FlickrImageExtractor.items`.
     async fn photo(&self, id: &str) -> Result<VecDeque<ExtractionEvent>> {
         let body = self
             .call("flickr.photos.getInfo", &[("photo_id", id)])
             .await?;
-        let photo = parse_info(&body, id)?;
-        let size = self.sizes(id, photo.video).await?;
+        let mut photo = parse_info(&body, id)?;
+        let keywords = &mut photo.keywords;
+        self.extract_metadata(keywords, false).await;
+        let size = if photo.video && self.meta.videos {
+            self.video(id, keywords.get("secret").and_then(text))
+                .await?
+        } else {
+            self.sizes(id, false).await?
+        };
+        let owner = keywords.get("owner").cloned().unwrap_or(Value::Null);
+        let user = match field(&owner, "nsid") {
+            Some(nsid) if self.meta.profile => self.people_info(&nsid).await?,
+            _ => owner,
+        };
+        keywords.insert("user".into(), user);
+        clean_info(keywords);
+        let uploaded = keywords.get("dateuploaded").and_then(text);
+        let uploaded = uploaded.and_then(|t| t.parse().ok());
+        keywords.insert("date".into(), date_value(uploaded));
+        if let Some(Value::Object(location)) = keywords.get_mut("location") {
+            for value in location.values_mut() {
+                if let Some(content) = value.get("_content") {
+                    *value = content.clone();
+                }
+            }
+        }
         Ok(self.finish(media(&photo, size, 1)))
     }
 
-    async fn next_page(&self, state: &mut ListingState) -> Result<()> {
-        let listing = match state.listing.take() {
-            Some(listing) => listing,
-            None if state.lookup == Lookup::Group => {
+    /// Upstream `_extract_metadata`: optional `info`, `exif` and `contexts`
+    /// API calls; failures only warn.
+    async fn extract_metadata(&self, photo: &mut Map<String, Value>, info: bool) {
+        let id = photo.get("id").and_then(text).unwrap_or_default();
+        let query = [("photo_id", id.as_str())];
+        if info && self.meta.info {
+            match self.api("flickr.photos.getInfo", &query).await {
+                Ok(Value::Object(mut body)) => {
+                    if let Some(Value::Object(data)) = body.remove("photo") {
+                        photo.extend(data);
+                        clean_info(photo);
+                    }
+                }
+                _ => warn("info", &id),
+            }
+        }
+        if self.meta.exif {
+            match self.api("flickr.photos.getExif", &query).await {
+                Ok(Value::Object(mut body)) => {
+                    if let Some(Value::Object(data)) = body.remove("photo") {
+                        photo.extend(data);
+                    }
+                }
+                _ => warn("exif", &id),
+            }
+        }
+        if self.meta.contexts {
+            match self.api("flickr.photos.getAllContexts", &query).await {
+                Ok(Value::Object(mut body)) => {
+                    body.remove("stat");
+                    photo.extend(body);
+                }
+                _ => warn("contexts", &id),
+            }
+        }
+        if let Some(license) = photo.get("license").and_then(text) {
+            let name = license_name(&license).map_or(Value::Null, Value::from);
+            photo.insert("license_name".into(), name);
+        }
+    }
+
+    /// Upstream `video_getStreamInfo`: the best-ranked stream.
+    async fn video(&self, id: &str, secret: Option<String>) -> Result<Size> {
+        let secret = match secret.filter(|secret| !secret.is_empty()) {
+            Some(secret) => secret,
+            None => self
+                .api("flickr.photos.getInfo", &[("photo_id", id)])
+                .await?
+                .pointer("/photo/secret")
+                .and_then(text)
+                .ok_or_else(|| error("Flickr video contains no secret"))?,
+        };
+        let body = self
+            .api(
+                "flickr.video.getStreamInfo",
+                &[("photo_id", id), ("secret", secret.as_str())],
+            )
+            .await?;
+        let mut best: Option<(u8, &Value)> = None;
+        for stream in body
+            .pointer("/streams/stream")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let rank = stream_rank(stream.get("type").and_then(Value::as_str).unwrap_or(""));
+            // Python's max() keeps the first of equal elements.
+            if best.is_none_or(|(best, _)| rank > best) {
+                best = Some((rank, stream));
+            }
+        }
+        let (_, stream) = best.ok_or_else(|| error("Flickr video contains no streams"))?;
+        let url = field(stream, "_content")
+            .and_then(|url| media_url(&url, true))
+            .ok_or_else(|| error("Flickr video contains no supported stream"))?;
+        Ok(Size {
+            url,
+            width: None,
+            height: None,
+            video: true,
+            label: field(stream, "type").unwrap_or_default(),
+        })
+    }
+
+    /// Upstream `people_getInfo`.
+    async fn people_info(&self, nsid: &str) -> Result<Value> {
+        let body = self
+            .api("flickr.people.getInfo", &[("user_id", nsid)])
+            .await?;
+        let Some(mut person) = body.get("person").cloned() else {
+            return Ok(body);
+        };
+        if let Value::Object(user) = &mut person {
+            for key in [
+                "description",
+                "username",
+                "realname",
+                "location",
+                "profileurl",
+                "photosurl",
+                "mobileurl",
+            ] {
+                flatten_content(user, key);
+            }
+            if let Some(Value::Object(photos)) = user.get_mut("photos") {
+                for key in ["count", "firstdate", "firstdatetaken"] {
+                    flatten_content(photos, key);
+                }
+            }
+        }
+        Ok(person)
+    }
+
+    /// Upstream `urls_lookupUser` (plus `people_getInfo` with `profile`).
+    async fn lookup_user(&self, name: &str) -> Result<Map<String, Value>> {
+        let url = format!("https://www.flickr.com/photos/{name}");
+        let body = self
+            .call("flickr.urls.lookupUser", &[("url", &url)])
+            .await?;
+        let (nsid, username) = parse_user(&body)?;
+        let mut user = Map::new();
+        user.insert("nsid".into(), nsid.clone().into());
+        user.insert("username".into(), username.map_or(Value::Null, Value::from));
+        user.insert("path_alias".into(), name.into());
+        if self.meta.profile
+            && let Value::Object(info) = self.people_info(&nsid).await?
+        {
+            user.extend(info);
+        }
+        Ok(user)
+    }
+
+    /// Upstream `metadata()` of listing extractors and their first listing.
+    async fn listing_metadata(&self, state: &mut ListingState) -> Result<Listing> {
+        let mut data = Map::new();
+        let listing = match (state.listing.take(), state.lookup) {
+            (Some(Listing::Search(params)), _) => {
+                let search: Map<String, Value> = params
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone().into()))
+                    .collect();
+                data.insert("search".into(), search.into());
+                Listing::Search(params)
+            }
+            (None, Lookup::Group) => {
                 let url = format!("https://www.flickr.com/groups/{}", state.user);
-                let body = check(
-                    &self
-                        .call("flickr.urls.lookupGroup", &[("url", &url)])
-                        .await?,
-                )?;
+                let body = self
+                    .api("flickr.urls.lookupGroup", &[("url", &url)])
+                    .await?;
                 let nsid = body
                     .pointer("/group/id")
                     .and_then(text)
                     .filter(|id| valid_user(id))
                     .ok_or_else(|| error("Flickr group not found"))?;
+                data.insert(
+                    "group".into(),
+                    json!({
+                        "nsid": nsid,
+                        "path_alias": state.user,
+                        "groupname": body.pointer("/group/groupname").map(content),
+                    }),
+                );
                 Listing::Group(nsid)
             }
+            (listing, lookup) => {
+                let user = self.lookup_user(&state.user).await?;
+                let nsid = user.get("nsid").and_then(text).unwrap_or_default();
+                if let Some(Value::String(name)) = user.get("username") {
+                    state.user = name.clone();
+                }
+                let listing = match listing {
+                    Some(Listing::Album(id)) => {
+                        let album = self
+                            .api(
+                                "flickr.photosets.getInfo",
+                                &[("photoset_id", id.as_str()), ("user_id", nsid.as_str())],
+                            )
+                            .await
+                            .ok()
+                            .and_then(|mut body| body.get_mut("photoset").map(Value::take))
+                            .map(clean_title);
+                        if album.is_none() {
+                            eprintln!("[flickr][warning] {id}: Unable to retrieve album metadata");
+                        }
+                        data.insert("album".into(), album.unwrap_or_else(|| json!({})));
+                        Listing::Album(id)
+                    }
+                    Some(Listing::Gallery(id)) => {
+                        let gallery = self
+                            .api("flickr.galleries.getInfo", &[("gallery_id", id.as_str())])
+                            .await?
+                            .get_mut("gallery")
+                            .map(Value::take)
+                            .map(clean_title)
+                            .unwrap_or_else(|| json!({}));
+                        data.insert("gallery".into(), gallery);
+                        Listing::Gallery(id)
+                    }
+                    _ if lookup == Lookup::UserFavorites => Listing::Favorites(nsid),
+                    _ => Listing::User(nsid),
+                };
+                data.insert("user".into(), user.into());
+                listing
+            }
+        };
+        state.data = Some(data);
+        Ok(listing)
+    }
+
+    /// Upstream `_extract_format` plus `photo.update(data)`.
+    async fn listed(
+        &self,
+        entry: Entry,
+        data: &Map<String, Value>,
+        route: &'static Route,
+    ) -> Result<(Photo, Size)> {
+        let Entry { mut photo, size } = entry;
+        let keywords = &mut photo.keywords;
+        let description = keywords.get("description").map(content);
+        let description = description.as_ref().and_then(Value::as_str).unwrap_or("");
+        keywords.insert("description".into(), description.trim().into());
+        let views = gdl::int_of(keywords.get("views"));
+        keywords.insert("views".into(), views.into());
+        keywords.insert("date".into(), date_value(photo.timestamp));
+        let tags: Vec<Value> = keywords
+            .get("tags")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .split_whitespace()
+            .map(Value::from)
+            .collect();
+        keywords.insert("tags".into(), tags.into());
+        self.extract_metadata(keywords, true).await;
+        let id = gdl::int_of(keywords.get("id"));
+        keywords.insert("id".into(), id.into());
+        match keywords.get("owner") {
             None => {
-                let url = format!("https://www.flickr.com/photos/{}/", state.user);
-                let body = self
-                    .call("flickr.urls.lookupUser", &[("url", &url)])
-                    .await?;
-                let (nsid, username) = parse_user(&body)?;
-                if let Some(username) = username {
-                    state.user = username;
+                let user = data.get("user").cloned().unwrap_or(Value::Null);
+                keywords.insert("owner".into(), user);
+            }
+            Some(Value::String(nsid)) if !self.meta.info => {
+                let owner = json!({
+                    "nsid": nsid,
+                    "username": keywords.get("ownername"),
+                    "path_alias": keywords.get("pathalias"),
+                });
+                keywords.insert("owner".into(), owner);
+            }
+            Some(_) => {}
+        }
+        keywords.remove("pathalias");
+        keywords.remove("ownername");
+        if photo.username.is_none() {
+            photo.username = keywords
+                .get("owner")
+                .and_then(|owner| owner.get("username"))
+                .and_then(text);
+        }
+        let size = if photo.video && self.meta.videos {
+            self.video(&photo.id, keywords.get("secret").and_then(text))
+                .await?
+        } else {
+            match size {
+                Some(size) => {
+                    keywords.retain(|key, _| {
+                        !["url_", "width_", "height_"]
+                            .iter()
+                            .any(|prefix| key.starts_with(prefix))
+                    });
+                    size
                 }
-                if state.lookup == Lookup::UserFavorites {
-                    Listing::Favorites(nsid)
-                } else {
-                    Listing::User(nsid)
-                }
+                None => self.sizes(&photo.id, false).await?,
+            }
+        };
+        keywords.extend(data.clone());
+        photo.route = Some(route);
+        Ok((photo, size))
+    }
+
+    async fn next_page(&self, state: &mut ListingState) -> Result<()> {
+        let listing = match state.listing.take() {
+            Some(listing) if state.data.is_some() => listing,
+            listing => {
+                state.listing = listing;
+                self.listing_metadata(state).await?
             }
         };
         let page = (state.page + 1).to_string();
         let per_page = PAGE_SIZE.to_string();
-        let extras = self.size_limit.extras();
+        let extras = self.size_limit.extras_with(self.meta.extras.as_deref());
         let mut query = vec![
             ("extras", extras.as_str()),
             ("per_page", per_page.as_str()),
@@ -784,14 +1332,18 @@ impl Flickr {
         state.page += 1;
         state.done =
             parsed.entries.is_empty() || parsed.page >= parsed.pages || state.page >= MAX_PAGES;
+        let data = state.data.clone().unwrap_or_default();
         for entry in parsed.entries {
-            let size = match entry.size {
-                Some(size) if !entry.photo.video => size,
-                // Videos (and photos without listed sizes) need getSizes.
-                _ => self.sizes(&entry.photo.id, entry.photo.video).await?,
+            let id = entry.photo.id.clone();
+            let (photo, size) = match self.listed(entry, &data, state.route).await {
+                Ok(listed) => listed,
+                Err(e) => {
+                    eprintln!("[flickr][warning] Skipping photo {id} ({e})");
+                    continue;
+                }
             };
             state.index += 1;
-            let events = self.finish(media(&entry.photo, size, state.index));
+            let events = self.finish(media(&photo, size, state.index));
             state.pending.extend(events);
         }
         state.listing = Some(listing);
@@ -805,61 +1357,69 @@ impl Flickr {
     /// Upstream `FlickrAlbumExtractor` without an album ID: queue every
     /// album of the user (`photosets.getList`).
     fn albums(&self, user: String) -> BoxStream<'_, Result<ExtractionEvent>> {
-        stream::try_unfold((None::<String>, 1u64, false), move |(nsid, page, done)| {
-            let user = user.clone();
-            async move {
-                if done || page > MAX_PAGES {
-                    return Ok(None);
-                }
-                let nsid = match nsid {
-                    Some(nsid) => nsid,
-                    None => {
-                        let url = format!("https://www.flickr.com/photos/{user}/");
-                        let body = self
-                            .call("flickr.urls.lookupUser", &[("url", &url)])
-                            .await?;
-                        parse_user(&body)?.0
+        stream::try_unfold(
+            (None::<Map<String, Value>>, 1u64, false),
+            move |(data, page, done)| {
+                let user = user.clone();
+                async move {
+                    if done || page > MAX_PAGES {
+                        return Ok(None);
                     }
-                };
-                let number = page.to_string();
-                let body = check(
-                    &self
-                        .call(
-                            "flickr.photosets.getList",
-                            &[("user_id", nsid.as_str()), ("page", number.as_str())],
-                        )
-                        .await?,
-                )?;
-                let sets = body
-                    .get("photosets")
-                    .ok_or_else(|| error("Flickr response contains no albums"))?;
-                let pages = number_of(sets, "pages").unwrap_or(1);
-                let children: Vec<_> = sets
-                    .get("photoset")
-                    .and_then(Value::as_array)
-                    .cloned()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter_map(|album| {
-                        let id = field(&album, "id").filter(|id| valid_id(id))?;
-                        let url = Url::parse(&format!(
-                            "https://www.flickr.com/photos/{user}/albums/{id}"
-                        ))
-                        .ok()?;
-                        let data = album.as_object().cloned().unwrap_or_default();
-                        Some(crate::event::child_job(
-                            crate::event::ChildMetadata::from_raw("flickr", "album", &data)
-                                .with_url(url.as_str()),
-                            move || self.events(&url),
-                        ))
-                    })
-                    .collect();
-                Ok::<_, crate::Error>(Some((
-                    stream::iter(children).flatten().boxed(),
-                    (Some(nsid), page + 1, page >= pages),
-                )))
-            }
-        })
+                    let data = match data {
+                        Some(data) => data,
+                        None => {
+                            let mut data = Map::new();
+                            data.insert("user".into(), self.lookup_user(&user).await?.into());
+                            data
+                        }
+                    };
+                    let nsid = data
+                        .get("user")
+                        .and_then(|user| user.get("nsid"))
+                        .and_then(text)
+                        .unwrap_or_default();
+                    let number = page.to_string();
+                    let body = check(
+                        &self
+                            .call(
+                                "flickr.photosets.getList",
+                                &[("user_id", nsid.as_str()), ("page", number.as_str())],
+                            )
+                            .await?,
+                    )?;
+                    let sets = body
+                        .get("photosets")
+                        .ok_or_else(|| error("Flickr response contains no albums"))?;
+                    let pages = number_of(sets, "pages").unwrap_or(1);
+                    let children: Vec<_> = sets
+                        .get("photoset")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter_map(|album| {
+                            let id = field(&album, "id").filter(|id| valid_id(id))?;
+                            let url = Url::parse(&format!(
+                                "https://www.flickr.com/photos/{user}/albums/{id}"
+                            ))
+                            .ok()?;
+                            let mut album =
+                                clean_title(album).as_object().cloned().unwrap_or_default();
+                            album.extend(data.clone());
+                            Some(crate::event::child_job(
+                                crate::event::ChildMetadata::from_raw("flickr", "album", &album)
+                                    .with_url(url.as_str()),
+                                move || self.events(&url),
+                            ))
+                        })
+                        .collect();
+                    Ok::<_, crate::Error>(Some((
+                        stream::iter(children).flatten().boxed(),
+                        (Some(data), page + 1, page >= pages),
+                    )))
+                }
+            },
+        )
         .map(|result| match result {
             Ok(events) => events,
             Err(e) => stream::once(async move { Err(e) }).boxed(),
@@ -884,23 +1444,28 @@ impl Flickr {
                     .flatten()
                     .boxed();
             }
-            Target::Album { user, id } => ((Some(Listing::Album(id)), Lookup::UserPhotos), user),
-            Target::User { user } => ((None, Lookup::UserPhotos), user),
-            Target::Favorites { user } => ((None, Lookup::UserFavorites), user),
-            Target::Gallery { user, id } => {
-                ((Some(Listing::Gallery(id)), Lookup::UserPhotos), user)
+            Target::Album { user, id } => {
+                ((Some(Listing::Album(id)), Lookup::UserPhotos, &ALBUM), user)
             }
-            Target::Group { name } => ((None, Lookup::Group), name),
+            Target::User { user } => ((None, Lookup::UserPhotos, &USER), user),
+            Target::Favorites { user } => ((None, Lookup::UserFavorites, &FAVORITE), user),
+            Target::Gallery { user, id } => (
+                (Some(Listing::Gallery(id)), Lookup::UserPhotos, &GALLERY),
+                user,
+            ),
+            Target::Group { name } => ((None, Lookup::Group, &GROUP), name),
             Target::Search { params } => (
-                (Some(Listing::Search(params)), Lookup::UserPhotos),
+                (Some(Listing::Search(params)), Lookup::UserPhotos, &SEARCH),
                 "search".into(),
             ),
             Target::Albums { user } => return self.albums(user),
         };
-        let (listing, lookup) = listing;
+        let (listing, lookup, route) = listing;
         let state = ListingState {
             listing,
             lookup,
+            route,
+            data: None,
             user,
             page: 0,
             index: 0,
@@ -1075,6 +1640,7 @@ mod tests {
                 title: Some("Hi".into()),
                 timestamp: Some(1700000000),
                 video: false,
+                ..Photo::default()
             },
             photo,
             1,
@@ -1352,7 +1918,24 @@ mod tests {
         let ExtractionEvent::Media(media) = events[1].as_ref().unwrap() else {
             panic!("missing media")
         };
-        assert_eq!(media.url.as_str(), ORIGINAL);
+        // Upstream `_file_url` downloads the `_d` variant.
+        assert_eq!(
+            media.url.as_str(),
+            "https://live.staticflickr.com/65535/123_abc_o_d.png"
+        );
+        let keywords = &media
+            .metadata
+            .as_ref()
+            .unwrap()
+            .site_keywords
+            .as_ref()
+            .unwrap();
+        assert_eq!(keywords.route.subcategory, "image");
+        assert_eq!(keywords.fields["title"], "T");
+        assert_eq!(keywords.fields["id"], 123);
+        assert_eq!(keywords.fields["user"], json!({"username": "alice"}));
+        assert_eq!(keywords.fields["label"], "Original");
+        assert_eq!(keywords.fields["filename"], "123_abc_o_d");
         let requests = server.join().unwrap();
         assert!(requests[1].starts_with(
             "GET /services/rest/?method=flickr.photos.getInfo&api_key=secret&format=json&nojsoncallback=1&photo_id=123 "
@@ -1370,7 +1953,11 @@ mod tests {
             ok(json!({"stat": "ok", "user": {"id": "1@N00", "username": {"_content": "alice"}}})),
             ok(json!({"stat": "ok", "photos": {"page": 1, "pages": 2,
                 "photo": [photo("1"), {"id": "2", "media": "video"}]}})),
-            ok(sizes_body()),
+            ok(json!({"stat": "ok", "photo": {"id": "2", "secret": "s3"}})),
+            ok(json!({"stat": "ok", "streams": {"stream": [
+                {"type": "700", "_content": "https://live.staticflickr.com/video/2/700.mp4"},
+                {"type": "orig", "_content": "https://live.staticflickr.com/video/2/orig.mp4"},
+                {"type": "orig", "_content": "https://live.staticflickr.com/video/2/other.mp4"}]}})),
             ok(json!({"stat": "ok", "photos": {"page": 2, "pages": 2, "photo": [photo("3")]}})),
         ]);
         let media: Vec<_> = flickr(root)
@@ -1397,7 +1984,14 @@ mod tests {
         assert!(requests[1].contains("method=flickr.people.getPhotos"));
         assert!(requests[1].contains("&user_id=1%40N00&extras="));
         assert!(requests[1].contains("&per_page=500&page=1 "));
-        assert!(requests[3].contains("&page=2 "));
+        assert!(requests[2].contains("method=flickr.photos.getInfo"));
+        assert!(requests[3].contains("method=flickr.video.getStreamInfo"));
+        assert!(requests[3].contains("&secret=s3"));
+        assert_eq!(
+            media[1].url.as_str(),
+            "https://live.staticflickr.com/video/2/orig.mp4"
+        );
+        assert!(requests[4].contains("&page=2 "));
     }
 
     #[tokio::test]
@@ -1417,7 +2011,75 @@ mod tests {
         assert!(error.contains("api-key"));
         assert!(!error.contains("secret-key") && !error.contains("127.0.0.1"));
         let requests = server.join().unwrap();
-        assert!(requests[0].contains("method=flickr.photosets.getPhotos&"));
-        assert!(requests[0].contains("&photoset_id=5&"));
+        // Like upstream, album metadata starts with the owner lookup.
+        assert!(requests[0].contains("method=flickr.urls.lookupUser&"));
+    }
+
+    #[tokio::test]
+    async fn album_listing_exposes_upstream_keywords_and_metadata_options() {
+        let (root, server) = serve(vec![
+            ok(json!({"stat": "ok", "user": {"id": "1@N00", "username": {"_content": "alice"}}})),
+            ok(json!({"stat": "ok", "photoset": {"id": "5",
+                "title": {"_content": "Trip"}, "description": {"_content": "D"}}})),
+            ok(
+                json!({"stat": "ok", "photoset": {"page": 1, "pages": 1, "photo": [
+                {"id": "7", "secret": "s", "title": "Pic", "license": "4",
+                 "description": {"_content": " text \n"}, "dateupload": "1700000000",
+                 "tags": "a b", "views": "12", "media": "photo", "pathalias": "al",
+                 "ownername": "alice",
+                 "url_o": "https://live.staticflickr.com/7_o.jpg", "width_o": "40",
+                 "height_o": 30}]}}),
+            ),
+            ok(json!({"stat": "ok", "photo": {"id": "7", "camera": "Cam",
+                "exif": [{"tag": "Make"}]}})),
+            ok(json!({"stat": "ok", "set": [{"id": "5"}], "pool": []})),
+        ]);
+        let meta = MetaOptions::from_options(
+            json!({"exif": true, "contexts": 1, "metadata": ["license", "geo"]}).as_object(),
+            None,
+            None,
+        );
+        let media: Vec<_> = flickr(root)
+            .with_meta(meta)
+            .stream(&Url::parse("https://www.flickr.com/photos/al/albums/5").unwrap())
+            .collect()
+            .await;
+        let media = media.into_iter().next().unwrap().unwrap();
+        let keywords = media
+            .metadata
+            .as_ref()
+            .unwrap()
+            .site_keywords
+            .clone()
+            .unwrap();
+        let fields = &keywords.fields;
+        assert_eq!(keywords.route.subcategory, "album");
+        assert_eq!(keywords.route.archive, "a_{album[id]}_{id}");
+        assert_eq!(fields["id"], 7);
+        assert_eq!(fields["description"], "text");
+        assert_eq!(fields["tags"], json!(["a", "b"]));
+        assert_eq!(fields["views"], 12);
+        assert_eq!(fields["date"], "2023-11-14 22:13:20");
+        assert_eq!(fields["camera"], "Cam");
+        assert_eq!(fields["set"], json!([{"id": "5"}]));
+        assert_eq!(fields["license_name"], "Attribution License");
+        assert_eq!(
+            fields["owner"],
+            json!({"nsid": "1@N00", "username": "alice", "path_alias": "al"})
+        );
+        assert_eq!(fields["album"]["title"], "Trip");
+        assert_eq!(fields["user"]["nsid"], "1@N00");
+        assert_eq!(
+            (fields["width"].clone(), fields["label"].clone()),
+            (json!(40), json!("Original"))
+        );
+        assert!(!fields.contains_key("url_o") && !fields.contains_key("pathalias"));
+        let requests = server.join().unwrap();
+        assert!(requests[1].contains("method=flickr.photosets.getInfo"));
+        assert!(requests[2].contains(
+            "extras=description%2Cdate_upload%2Ctags%2Cviews%2Cmedia%2Cpath_alias%2Cowner_name%2Clicense%2Cgeo%2Curl_o"
+        ));
+        assert!(requests[3].contains("method=flickr.photos.getExif"));
+        assert!(requests[4].contains("method=flickr.photos.getAllContexts"));
     }
 }
