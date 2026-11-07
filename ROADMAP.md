@@ -1618,7 +1618,14 @@ function) run in an external `python3` (`$GALLERY_DL_PYTHON`), like the
 added the `!a`, `!n`, `!q`, `!Q`, `!L` and `!R` conversions, the `D`
 (strptime), `M` (map) and `X` (truncate with hint) specifiers, sorting of
 strings, quoted keys, `start:stop:step` field slices and Python's
-`g`/`G`/`n` number formats (2026-11-07).
+`g`/`G`/`n` number formats (2026-11-07). Filter expressions gained
+upstream's documented globals (`datetime(...)`, `datetime.now()`,
+`timedelta(...)` with keyword arguments and date arithmetic, `re.search`/
+`match`/`fullmatch`/`findall`/`sub`/`split`, `print`, `parse_int`), common
+builtins (`sum`, `sorted(reverse=)`, `reversed`, `list`, `tuple`, `range`,
+`enumerate`, `zip`, `divmod`, `pow`, `hex`/`oct`/`bin`, `chr`, `ord`) and
+string/list/dict methods; comprehensions, `%`/`format`/f-string
+formatting, `isinstance` and sets remain unsupported.
 
 **Implemented extraction options, 2026-11-07:** `path-convert`,
 `file-unique`/`image-unique`, `child-unique`/`chapter-unique` and

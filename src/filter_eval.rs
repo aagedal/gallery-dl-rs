@@ -188,12 +188,25 @@ impl Evaluator<'_> {
             }
             Expr::Call(name, arguments) => {
                 self.allocate_sequence(arguments.len())?;
-                let arguments = arguments
-                    .iter()
-                    .map(|v| self.eval(v))
-                    .collect::<Result<Vec<_>>>()?;
-                self.call(name, &arguments)?
+                let mut positional = Vec::new();
+                let mut keywords = Vec::new();
+                for argument in arguments {
+                    match argument {
+                        Expr::Keyword(key, value) => {
+                            keywords.push((key.as_str(), self.eval(value)?))
+                        }
+                        value if keywords.is_empty() => positional.push(self.eval(value)?),
+                        _ => return Err(invalid()),
+                    }
+                }
+                if keywords.is_empty() {
+                    self.call(name, &positional)?
+                } else {
+                    self.call_keywords(name, &positional, &keywords)?
+                }
             }
+            // Keyword arguments only appear inside calls.
+            Expr::Keyword(..) => return Err(invalid()),
             Expr::Method(value, method, arguments) => {
                 let value = self.eval(value)?;
                 self.allocate_sequence(arguments.len())?;
@@ -424,6 +437,29 @@ impl Evaluator<'_> {
         })
     }
     fn binary(&mut self, left: &Value, op: BinaryOp, right: &Value) -> Result<Value> {
+        // Datetimes are seconds; `timedelta` values are seconds as well.
+        match (left, op, right) {
+            (Value::SourceDate(Some(date)), BinaryOp::Add | BinaryOp::Sub, delta)
+                if numeric(delta) =>
+            {
+                let delta = float(delta)?;
+                let delta = if matches!(op, BinaryOp::Sub) {
+                    -delta
+                } else {
+                    delta
+                };
+                return Ok(Value::SourceDate(Some(*date + delta.floor() as i64)));
+            }
+            (delta, BinaryOp::Add, Value::SourceDate(Some(date))) if numeric(delta) => {
+                return Ok(Value::SourceDate(Some(
+                    *date + float(delta)?.floor() as i64,
+                )));
+            }
+            (Value::SourceDate(Some(a)), BinaryOp::Sub, Value::SourceDate(Some(b))) => {
+                return Ok(Value::Float((*a - *b) as f64));
+            }
+            _ => {}
+        }
         if matches!(op, BinaryOp::Add) {
             match (left, right) {
                 (Value::String(a), Value::String(b)) => {
@@ -690,7 +726,363 @@ impl Evaluator<'_> {
                 }
                 Ok(best)
             }
+            ("sum", [values]) | ("sum", [values, _]) => {
+                let mut total = args.get(1).cloned().unwrap_or(Value::Int(0));
+                for value in self.sequence(values)? {
+                    self.step()?;
+                    total = self.binary(&total, BinaryOp::Add, &value)?;
+                }
+                Ok(total)
+            }
+            ("sorted", [values]) => self.sorted(values, false),
+            ("reversed", [values]) => {
+                let mut values = self.sequence(values)?;
+                values.reverse();
+                Ok(Value::List(values.into()))
+            }
+            ("list", []) => Ok(Value::List(Arc::from([]))),
+            ("tuple", []) => Ok(Value::Tuple(Arc::from([]))),
+            ("list", [values]) => Ok(Value::List(self.sequence(values)?.into())),
+            ("tuple", [values]) => Ok(Value::Tuple(self.sequence(values)?.into())),
+            ("range", bounds) if (1..=3).contains(&bounds.len()) => {
+                let numbers = bounds.iter().map(integer).collect::<Result<Vec<_>>>()?;
+                let (start, stop, step) = match numbers[..] {
+                    [stop] => (0, stop, 1),
+                    [start, stop] => (start, stop, 1),
+                    [start, stop, step] => (start, stop, step),
+                    _ => unreachable!(),
+                };
+                if step == 0 {
+                    return Err(invalid());
+                }
+                let mut values = Vec::new();
+                let mut current = start;
+                while (step > 0 && current < stop) || (step < 0 && current > stop) {
+                    if values.len() >= ITEMS {
+                        return Err(invalid());
+                    }
+                    self.step()?;
+                    values.push(Value::Int(current));
+                    current = current.checked_add(step).ok_or_else(invalid)?;
+                }
+                self.allocate_sequence(values.len())?;
+                Ok(Value::List(values.into()))
+            }
+            ("enumerate", [values]) | ("enumerate", [values, _]) => {
+                let start = args.get(1).map(integer).transpose()?.unwrap_or(0);
+                let values = self.sequence(values)?;
+                self.allocate_sequence(values.len() * 3)?;
+                Ok(Value::List(
+                    values
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, value)| {
+                            Value::Tuple(Arc::from([Value::Int(start + index as i128), value]))
+                        })
+                        .collect(),
+                ))
+            }
+            ("zip", sequences) if !sequences.is_empty() => {
+                let sequences = sequences
+                    .iter()
+                    .map(|values| self.sequence(values))
+                    .collect::<Result<Vec<_>>>()?;
+                let length = sequences.iter().map(Vec::len).min().unwrap_or(0);
+                self.allocate_sequence(length * (sequences.len() + 1))?;
+                Ok(Value::List(
+                    (0..length)
+                        .map(|index| {
+                            Value::Tuple(sequences.iter().map(|s| s[index].clone()).collect())
+                        })
+                        .collect(),
+                ))
+            }
+            ("divmod", [a, b]) => Ok(Value::Tuple(Arc::from([
+                self.binary(a, BinaryOp::FloorDiv, b)?,
+                self.binary(a, BinaryOp::Mod, b)?,
+            ]))),
+            ("pow", [a, b]) => self.binary(a, BinaryOp::Pow, b),
+            ("hex" | "oct" | "bin", [value]) => {
+                let value = integer(value)?;
+                let magnitude = value.unsigned_abs();
+                let digits = match name {
+                    "hex" => format!("0x{magnitude:x}"),
+                    "oct" => format!("0o{magnitude:o}"),
+                    _ => format!("0b{magnitude:b}"),
+                };
+                self.copy_string(&format!("{}{digits}", if value < 0 { "-" } else { "" }))
+            }
+            ("chr", [value]) => u32::try_from(integer(value)?)
+                .ok()
+                .and_then(char::from_u32)
+                .ok_or_else(invalid)
+                .and_then(|c| self.copy_string(&c.to_string())),
+            ("ord", [value]) => {
+                let mut chars = string(value)?.chars();
+                match (chars.next(), chars.next()) {
+                    (Some(c), None) => Ok(Value::Int(u32::from(c).into())),
+                    _ => Err(invalid()),
+                }
+            }
+            ("print", values) => {
+                let mut line = Vec::new();
+                for value in values {
+                    line.push(match value {
+                        Value::String(text) => text.to_string(),
+                        value => self.display(value, false, 0)?,
+                    });
+                }
+                println!("{}", line.join(" "));
+                Ok(Value::None)
+            }
+            ("parse_int", [value]) | ("parse_int", [value, _]) => {
+                let default = args.get(1).cloned().unwrap_or(Value::Int(0));
+                Ok(match value {
+                    Value::Int(_) => value.clone(),
+                    Value::String(text) => text.trim().parse::<i128>().map_or(default, Value::Int),
+                    _ => default,
+                })
+            }
+            ("datetime", parts) if (3..=7).contains(&parts.len()) => {
+                let parts = parts.iter().map(integer).collect::<Result<Vec<_>>>()?;
+                let part = |index: usize| parts.get(index).copied().unwrap_or(0);
+                let date = time::Date::from_calendar_date(
+                    i32::try_from(part(0)).map_err(|_| invalid())?,
+                    time::Month::try_from(u8::try_from(part(1)).map_err(|_| invalid())?)
+                        .map_err(|_| invalid())?,
+                    u8::try_from(part(2)).map_err(|_| invalid())?,
+                )
+                .map_err(|_| invalid())?;
+                let time = time::Time::from_hms(
+                    u8::try_from(part(3)).map_err(|_| invalid())?,
+                    u8::try_from(part(4)).map_err(|_| invalid())?,
+                    u8::try_from(part(5)).map_err(|_| invalid())?,
+                )
+                .map_err(|_| invalid())?;
+                Ok(Value::SourceDate(Some(
+                    time::PrimitiveDateTime::new(date, time)
+                        .assume_utc()
+                        .unix_timestamp(),
+                )))
+            }
+            ("datetime.now" | "datetime.utcnow", []) => Ok(Value::SourceDate(Some(
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            ))),
+            ("datetime.fromtimestamp", [value]) => {
+                Ok(Value::SourceDate(Some(float(value)?.floor() as i64)))
+            }
+            ("timedelta", parts) if parts.len() <= 3 => {
+                let mut seconds = 0.0;
+                for (part, scale) in parts.iter().zip([86400.0, 1.0, 1e-6]) {
+                    seconds += float(part)? * scale;
+                }
+                Ok(Value::Float(seconds))
+            }
+            (
+                "re.search" | "re.match" | "re.fullmatch" | "re.findall" | "re.split",
+                [pattern, text],
+            ) => self.regex(name, string(pattern)?, string(text)?, None),
+            ("re.sub", [pattern, replacement, text]) => self.regex(
+                name,
+                string(pattern)?,
+                string(text)?,
+                Some(string(replacement)?),
+            ),
             _ => Err(invalid()),
+        }
+    }
+    fn sorted(&mut self, values: &Value, reverse: bool) -> Result<Value> {
+        let mut values = self.sequence(values)?;
+        let mut failure = None;
+        values.sort_by(|a, b| match self.order(a, b) {
+            Ok(order) => order,
+            Err(error) => {
+                failure.get_or_insert(error);
+                Ordering::Equal
+            }
+        });
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        if reverse {
+            values.reverse();
+        }
+        Ok(Value::List(values.into()))
+    }
+    /// Calls with keyword arguments: `sorted(reverse=)`, `timedelta(...)`,
+    /// `round(ndigits=)`.
+    fn call_keywords(
+        &mut self,
+        name: &str,
+        args: &[Value],
+        keywords: &[(&str, Value)],
+    ) -> Result<Value> {
+        match (name, args) {
+            ("sorted", [values]) => match keywords {
+                [("reverse", reverse)] => self.sorted(values, truthy(reverse)),
+                _ => Err(invalid()),
+            },
+            ("round", [value]) => match keywords {
+                [("ndigits", Value::None)] => self.round(value, None),
+                [("ndigits", digits)] => self.round(value, Some(integer(digits)?)),
+                _ => Err(invalid()),
+            },
+            ("timedelta", positional) if positional.len() <= 3 => {
+                let mut seconds = match self.call("timedelta", positional)? {
+                    Value::Float(seconds) => seconds,
+                    _ => unreachable!(),
+                };
+                for (key, value) in keywords {
+                    seconds += float(value)?
+                        * match *key {
+                            "weeks" => 604800.0,
+                            "days" => 86400.0,
+                            "hours" => 3600.0,
+                            "minutes" => 60.0,
+                            "seconds" => 1.0,
+                            "milliseconds" => 1e-3,
+                            "microseconds" => 1e-6,
+                            _ => return Err(invalid()),
+                        };
+                }
+                Ok(Value::Float(seconds))
+            }
+            _ => Err(invalid()),
+        }
+    }
+    /// Upstream's `re` functions; a match is the tuple of its groups (truthy,
+    /// and `m[N]` selects group N like a `re.Match`).
+    fn regex(
+        &mut self,
+        function: &str,
+        pattern: &str,
+        text: &str,
+        replacement: Option<&str>,
+    ) -> Result<Value> {
+        self.work(pattern.len().saturating_add(text.len()))?;
+        let regex = regex::RegexBuilder::new(pattern)
+            .size_limit(1 << 20)
+            .build()
+            .map_err(|_| invalid())?;
+        let groups = |captures: regex::Captures<'_>| -> Vec<Value> {
+            captures
+                .iter()
+                .map(|group| {
+                    group.map_or(Value::None, |group| {
+                        Value::String(Arc::from(group.as_str()))
+                    })
+                })
+                .collect()
+        };
+        match function {
+            "re.search" | "re.match" | "re.fullmatch" => {
+                let found = regex.captures(text).filter(|captures| {
+                    let whole = captures.get(0).expect("group 0");
+                    match function {
+                        "re.match" => whole.start() == 0,
+                        "re.fullmatch" => whole.start() == 0 && whole.end() == text.len(),
+                        _ => true,
+                    }
+                });
+                // `match`/`fullmatch` anchor at the start: retry anchored when
+                // the leftmost match starts later.
+                let found = match (found, function) {
+                    (None, "re.match" | "re.fullmatch") => {
+                        let anchored = if function == "re.match" {
+                            format!("^(?:{pattern})")
+                        } else {
+                            format!("^(?:{pattern})$")
+                        };
+                        regex::RegexBuilder::new(&anchored)
+                            .size_limit(1 << 20)
+                            .build()
+                            .map_err(|_| invalid())?
+                            .captures(text)
+                            .map(groups)
+                    }
+                    (found, _) => found.map(groups),
+                };
+                Ok(found.map_or(Value::None, |groups| {
+                    self.allocate_sequence(groups.len()).ok();
+                    Value::Tuple(groups.into())
+                }))
+            }
+            "re.findall" => {
+                let mut values = Vec::new();
+                for captures in regex.captures_iter(text) {
+                    if values.len() >= ITEMS {
+                        return Err(invalid());
+                    }
+                    self.step()?;
+                    let mut groups = groups(captures);
+                    values.push(match groups.len() {
+                        1 => groups.remove(0),
+                        2 => groups.remove(1),
+                        _ => Value::Tuple(groups[1..].iter().cloned().collect()),
+                    });
+                }
+                self.allocate_sequence(values.len())?;
+                Ok(Value::List(values.into()))
+            }
+            "re.split" => {
+                let mut values = Vec::new();
+                for part in regex.split(text) {
+                    if values.len() >= ITEMS {
+                        return Err(invalid());
+                    }
+                    values.push(self.copy_string(part)?);
+                }
+                Ok(Value::List(values.into()))
+            }
+            _ => {
+                // Python `\1`/`\g<name>` references become `${1}`/`${name}`.
+                let replacement = replacement.unwrap_or_default();
+                let mut converted = String::new();
+                let mut chars = replacement.chars().peekable();
+                while let Some(c) = chars.next() {
+                    match c {
+                        '$' => converted.push_str("$$"),
+                        '\\' => match chars.peek().copied() {
+                            Some(d) if d.is_ascii_digit() => {
+                                let mut number = String::new();
+                                while let Some(d) =
+                                    chars.peek().copied().filter(char::is_ascii_digit)
+                                {
+                                    number.push(d);
+                                    chars.next();
+                                }
+                                converted.push_str(&format!("${{{number}}}"));
+                            }
+                            Some('g') => {
+                                chars.next();
+                                if chars.next() != Some('<') {
+                                    return Err(invalid());
+                                }
+                                let name: String =
+                                    chars.by_ref().take_while(|c| *c != '>').collect();
+                                converted.push_str(&format!("${{{name}}}"));
+                            }
+                            Some('n') => {
+                                chars.next();
+                                converted.push('\n');
+                            }
+                            Some('t') => {
+                                chars.next();
+                                converted.push('\t');
+                            }
+                            Some('\\') => {
+                                chars.next();
+                                converted.push('\\');
+                            }
+                            _ => converted.push('\\'),
+                        },
+                        c => converted.push(c),
+                    }
+                }
+                let output = regex.replace_all(text, converted.as_str()).into_owned();
+                self.allocate(output.len())?;
+                bounded_string(output)
+            }
         }
     }
     fn round(&mut self, value: &Value, digits: Option<i128>) -> Result<Value> {
@@ -871,8 +1263,45 @@ impl Evaluator<'_> {
     }
     fn method(&mut self, value: &Value, name: &str, args: &[Value]) -> Result<Value> {
         self.touch(value)?;
+        match (value, name, args) {
+            (Value::SourceDate(Some(date)), "timestamp", []) => {
+                return Ok(Value::Float(*date as f64));
+            }
+            // `timedelta` values are seconds.
+            (Value::Float(_) | Value::Int(_), "total_seconds", []) => {
+                return Ok(Value::Float(float(value)?));
+            }
+            _ => {}
+        }
         if let Value::Map(values) = value {
             return match (name, args) {
+                ("keys", []) => {
+                    self.allocate_sequence(values.len())?;
+                    Ok(Value::List(
+                        values
+                            .keys()
+                            .map(|key| Value::String(Arc::from(key.as_str())))
+                            .collect(),
+                    ))
+                }
+                ("values", []) => {
+                    self.allocate_sequence(values.len())?;
+                    Ok(Value::List(values.values().cloned().collect()))
+                }
+                ("items", []) => {
+                    self.allocate_sequence(values.len() * 3)?;
+                    Ok(Value::List(
+                        values
+                            .iter()
+                            .map(|(key, value)| {
+                                Value::Tuple(Arc::from([
+                                    Value::String(Arc::from(key.as_str())),
+                                    value.clone(),
+                                ]))
+                            })
+                            .collect(),
+                    ))
+                }
                 ("get", [key]) => Ok(values.get(string(key)?).cloned().unwrap_or(Value::None)),
                 ("get", [key, default]) => Ok(values
                     .get(string(key)?)
@@ -882,6 +1311,14 @@ impl Evaluator<'_> {
             };
         }
         if let Value::List(values) | Value::Tuple(values) = value {
+            if let ("index", [needle]) = (name, args) {
+                for (index, value) in values.iter().enumerate() {
+                    if self.equal(value, needle)? {
+                        return Ok(Value::Int(index as i128));
+                    }
+                }
+                return Err(invalid());
+            }
             if let ("count", [needle]) = (name, args) {
                 let mut count = 0;
                 for value in values.iter() {
@@ -894,6 +1331,163 @@ impl Evaluator<'_> {
             return Err(invalid());
         }
         let text = string(value)?;
+        let predicate = |test: fn(char) -> bool, cased: bool| {
+            Value::Bool(
+                !text.is_empty()
+                    && text
+                        .chars()
+                        .all(|c| test(c) || (cased && !c.is_alphabetic()))
+                    && (!cased || text.chars().any(char::is_alphabetic)),
+            )
+        };
+        let width = |value: &Value| -> Result<usize> {
+            usize::try_from(integer(value)?.max(0))
+                .ok()
+                .filter(|width| *width <= BYTES)
+                .ok_or_else(invalid)
+        };
+        let fill = |value: Option<&Value>| -> Result<char> {
+            match value {
+                None => Ok(' '),
+                Some(value) => {
+                    let mut chars = string(value)?.chars();
+                    match (chars.next(), chars.next()) {
+                        (Some(c), None) => Ok(c),
+                        _ => Err(invalid()),
+                    }
+                }
+            }
+        };
+        match (name, args) {
+            ("isdigit" | "isdecimal" | "isnumeric", []) => {
+                return Ok(predicate(|c| c.is_numeric(), false));
+            }
+            ("isalpha", []) => return Ok(predicate(char::is_alphabetic, false)),
+            ("isalnum", []) => return Ok(predicate(char::is_alphanumeric, false)),
+            ("isspace", []) => return Ok(predicate(python_space, false)),
+            ("islower", []) => return Ok(predicate(|c| !c.is_uppercase(), true)),
+            ("isupper", []) => return Ok(predicate(|c| !c.is_lowercase(), true)),
+            ("title" | "capitalize" | "swapcase", []) => {
+                if text.len() > BYTES / 3 {
+                    return Err(invalid());
+                }
+                self.allocate(text.len() * 3)?;
+                let mut output = String::new();
+                let mut previous_cased = false;
+                for (index, c) in text.chars().enumerate() {
+                    match name {
+                        "title" if previous_cased => output.extend(c.to_lowercase()),
+                        "title" => output.extend(c.to_uppercase()),
+                        "capitalize" if index == 0 => output.extend(c.to_uppercase()),
+                        "capitalize" => output.extend(c.to_lowercase()),
+                        _ if c.is_uppercase() => output.extend(c.to_lowercase()),
+                        _ => output.extend(c.to_uppercase()),
+                    }
+                    previous_cased = c.is_alphabetic();
+                }
+                return bounded_string(output);
+            }
+            ("zfill", [size]) => {
+                let size = width(size)?;
+                let length = text.chars().count();
+                if length >= size {
+                    return self.copy_string(text);
+                }
+                let (sign, digits) = match text.chars().next() {
+                    Some(c @ ('+' | '-')) => (c.to_string(), &text[1..]),
+                    _ => (String::new(), text),
+                };
+                self.allocate(size)?;
+                return bounded_string(format!("{sign}{}{digits}", "0".repeat(size - length)));
+            }
+            ("center" | "ljust" | "rjust", [size, rest @ ..]) if rest.len() <= 1 => {
+                let size = width(size)?;
+                let fill = fill(rest.first())?;
+                let length = text.chars().count();
+                if length >= size {
+                    return self.copy_string(text);
+                }
+                self.allocate(size * 4)?;
+                let total = size - length;
+                let (left, right) = match name {
+                    "ljust" => (0, total),
+                    "rjust" => (total, 0),
+                    // CPython puts the odd fill character on the left when
+                    // both the padding and the width are odd.
+                    _ => {
+                        let left = total / 2 + (total & size & 1);
+                        (left, total - left)
+                    }
+                };
+                let pad = |count: usize| fill.to_string().repeat(count);
+                return bounded_string(format!("{}{text}{}", pad(left), pad(right)));
+            }
+            ("partition" | "rpartition", [separator]) => {
+                let separator = string(separator)?;
+                if separator.is_empty() {
+                    return Err(invalid());
+                }
+                let found = if name == "partition" {
+                    text.split_once(separator)
+                } else {
+                    text.rsplit_once(separator)
+                };
+                let parts = match found {
+                    Some((head, tail)) => [head, separator, tail],
+                    None if name == "partition" => [text, "", ""],
+                    None => ["", "", text],
+                };
+                self.allocate(text.len() + separator.len())?;
+                return Ok(Value::Tuple(
+                    parts
+                        .iter()
+                        .map(|part| Value::String(Arc::from(*part)))
+                        .collect(),
+                ));
+            }
+            ("rsplit", [separator, count]) if !matches!(separator, Value::None) => {
+                let separator = string(separator)?;
+                let count = integer(count)?;
+                if separator.is_empty() {
+                    return Err(invalid());
+                }
+                let parts: Vec<&str> = if count < 0 {
+                    text.split(separator).collect()
+                } else {
+                    let mut parts: Vec<&str> = text
+                        .rsplitn(
+                            usize::try_from(count)
+                                .unwrap_or(usize::MAX)
+                                .saturating_add(1),
+                            separator,
+                        )
+                        .collect();
+                    parts.reverse();
+                    parts
+                };
+                if parts.len() > ITEMS {
+                    return Err(invalid());
+                }
+                self.allocate_sequence(parts.len())?;
+                let mut values = Vec::new();
+                for part in parts {
+                    values.push(self.copy_string(part)?);
+                }
+                return Ok(Value::List(values.into()));
+            }
+            ("rsplit", rest) if rest.len() <= 1 => {
+                return self.method(value, "split", rest);
+            }
+            ("removeprefix", [prefix]) => {
+                let prefix = string(prefix)?;
+                return self.copy_string(text.strip_prefix(prefix).unwrap_or(text));
+            }
+            ("removesuffix", [suffix]) => {
+                let suffix = string(suffix)?;
+                return self.copy_string(text.strip_suffix(suffix).unwrap_or(text));
+            }
+            _ => {}
+        }
         match (name, args) {
             ("lower" | "upper", []) => {
                 // Unicode case conversion can expand a scalar up to threefold.
@@ -1435,6 +2029,78 @@ mod tests {
         let expression = super::super::parser::parse(source).unwrap();
         evaluate(&expression, &BTreeMap::new()).unwrap()
     }
+    #[test]
+    fn upstream_globals_builtins_and_methods_follow_python() {
+        let text = |source: &str| match run(source) {
+            Value::String(value) => value.to_string(),
+            other => panic!("{source}: {other:?}"),
+        };
+        let int = |source: &str| match run(source) {
+            Value::Int(value) => value,
+            other => panic!("{source}: {other:?}"),
+        };
+        // Documented upstream filters.
+        assert_eq!(
+            run("datetime(2025, 6, 1) >= datetime(2025, 5, 1)"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            run("datetime(2025, 5, 1) + timedelta(days=1) == datetime(2025, 5, 2)"),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            run("(datetime(2025, 5, 2) - datetime(2025, 5, 1)) == timedelta(hours=24)"),
+            Value::Bool(true)
+        );
+        assert!(truthy(&run("re.search(r'foo(bar)+', 'x foobarbar y')")));
+        assert_eq!(
+            run("re.search(r'foo(bar)+', 'x foobarbar y')[1]"),
+            run("'bar'")
+        );
+        assert_eq!(run("re.match(r'x', 'yx')"), Value::None);
+        assert!(truthy(&run("re.match(r'y', 'yx')")));
+        assert_eq!(run("re.fullmatch(r'a|ab', 'ab')[0]"), run("'ab'"));
+        assert_eq!(text("re.sub(r'(b)a', r'\\1-', 'xbay')"), "xb-y");
+        assert_eq!(run("re.findall(r'b(a)', 'baba')"), run("['a', 'a']"));
+        assert_eq!(run("print('x')"), Value::None);
+        // Builtins.
+        assert_eq!(int("sum([1, 2, 3])"), 6);
+        assert_eq!(
+            run("sorted(['b', 'c', 'a'], reverse=True)"),
+            run("['c', 'b', 'a']")
+        );
+        assert_eq!(run("list(reversed((1, 2)))"), run("[2, 1]"));
+        assert_eq!(run("list(range(1, 7, 2))"), run("[1, 3, 5]"));
+        assert_eq!(run("list(enumerate(['a']))"), run("[(0, 'a')]"));
+        assert_eq!(run("list(zip([1, 2], 'ab'))"), run("[(1, 'a'), (2, 'b')]"));
+        assert_eq!(run("divmod(-7, 2)"), run("(-4, 1)"));
+        assert_eq!(int("pow(2, 10)"), 1024);
+        assert_eq!(text("hex(-255)"), "-0xff");
+        assert_eq!(text("chr(65)"), "A");
+        assert_eq!(int("ord('é')"), 233);
+        assert_eq!(int("parse_int('12')"), 12);
+        // Methods.
+        assert_eq!(text("'hello wORLD'.title()"), "Hello World");
+        assert_eq!(text("'hello World'.capitalize()"), "Hello world");
+        assert_eq!(text("'Hello'.swapcase()"), "hELLO");
+        assert_eq!(
+            run("'123'.isdigit() and not 'a1'.isdigit()"),
+            Value::Bool(true)
+        );
+        assert_eq!(run("'abc'.islower() and 'A1'.isupper()"), Value::Bool(true));
+        assert_eq!(text("'-5'.zfill(4)"), "-005");
+        assert_eq!(text("'Hello World'.center(15, '*')"), "**Hello World**");
+        assert_eq!(text("'ab'.center(5)"), "  ab ");
+        assert_eq!(text("'a'.rjust(3, '0')"), "00a");
+        assert_eq!(run("'a b c'.partition(' ')"), run("('a', ' ', 'b c')"));
+        assert_eq!(run("'a b c'.rpartition('x')"), run("('', '', 'a b c')"));
+        assert_eq!(run("'a b c'.rsplit(' ', 1)"), run("['a b', 'c']"));
+        assert_eq!(text("'file.jpg'.removesuffix('.jpg')"), "file");
+        assert_eq!(run("{'a': 1}.keys()"), run("['a']"));
+        assert_eq!(run("{'a': 1}.items()"), run("[('a', 1)]"));
+        assert_eq!(int("['a', 'b'].index('b')"), 1);
+    }
+
     #[test]
     fn short_circuit_and_chained_comparison_are_lazy_and_return_operands() {
         assert_eq!(run("False and missing"), Value::Bool(false));

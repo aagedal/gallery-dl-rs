@@ -71,6 +71,8 @@ pub(super) enum Expr {
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
     Compare(Box<Expr>, Vec<(CompareOp, Expr)>),
     Call(String, Vec<Expr>),
+    /// `name=value` keyword argument of a call.
+    Keyword(String, Box<Expr>),
     Method(Box<Expr>, String, Vec<Expr>),
     Conditional {
         test: Box<Expr>,
@@ -376,7 +378,7 @@ fn validate_tree(expr: &Expr, depth: usize, budget: &mut usize) -> Result<()> {
             next(left)?;
             next(right)?;
         }
-        Expr::Unary(_, value) => next(value)?,
+        Expr::Unary(_, value) | Expr::Keyword(_, value) => next(value)?,
         Expr::Slice(value, bounds) => {
             next(value)?;
             for bound in bounds.iter() {
