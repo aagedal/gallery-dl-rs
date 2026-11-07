@@ -1636,7 +1636,8 @@ native behavior yet: DeviantArt `auto-watch`/`auto-unwatch` (account
 actions) and `comments-avatars` avatar queueing (comments themselves are
 supported); Instagram `user-strategy` (native lookups use
 `web_profile_info`), `user-cache` (memory only) and story-sticker audio
-(post `audio`, `warn-images` and `warn-videos` are supported); Pixiv `work.related`; Twitter
+(post `audio`, `warn-images` and `warn-videos` are supported; Pixiv
+`work.related` is too); Twitter
 `metadata-user` and `twitpic` (`retries-api`, `ads` and `locked` are supported); `ytdl.deprecations` (yt-dlp
 diagnostics are never shown). Most need an account to verify.
 

@@ -915,6 +915,7 @@ pub struct Pixiv {
     pixivision_root: Url,
     sketch_root: Url,
     max_posts: Option<usize>,
+    related: bool,
     tags: TagMode,
     cursor: Option<BookmarkCursor>,
     metadata: bool,
@@ -944,7 +945,13 @@ pub struct Pixiv {
 #[derive(Clone)]
 enum Feed {
     Works,
-    Bookmarks { tag: Option<String>, private: bool },
+    Bookmarks {
+        tag: Option<String>,
+        private: bool,
+    },
+    /// Upstream `related`: works related to an illustration (the listing's
+    /// `user` holds the illustration ID).
+    Related,
 }
 
 impl Feed {
@@ -952,6 +959,7 @@ impl Feed {
         match self {
             Self::Works => "v1/user/illusts",
             Self::Bookmarks { .. } => "v1/user/bookmarks/illust",
+            Self::Related => "v2/illust/related",
         }
     }
 }
@@ -1009,6 +1017,7 @@ impl Pixiv {
             sketch_root: Url::parse("https://sketch.pixiv.net/").expect("static URL"),
             pixivision_root: Url::parse("https://www.pixivision.net/").expect("static URL"),
             max_posts: None,
+            related: false,
             tags: TagMode::default(),
             cursor: None,
             metadata: false,
@@ -1121,6 +1130,12 @@ impl Pixiv {
     /// Override the public article origin for bounded local fixtures.
     pub fn with_pixivision_root(mut self, root: Url) -> Self {
         self.pixivision_root = root;
+        self
+    }
+
+    /// Upstream `work.related`: follow an artwork with its related works.
+    pub fn with_related(mut self, related: bool) -> Self {
+        self.related = related;
         self
     }
 
@@ -1343,9 +1358,14 @@ impl Pixiv {
 
     fn first_page(&self, user: &str, feed: &Feed) -> Url {
         let mut url = self.api_root.join(feed.endpoint()).expect("static path");
-        url.query_pairs_mut().append_pair("user_id", user);
+        let key = if matches!(feed, Feed::Related) {
+            "illust_id"
+        } else {
+            "user_id"
+        };
+        url.query_pairs_mut().append_pair(key, user);
         match feed {
-            Feed::Works => {}
+            Feed::Works | Feed::Related => {}
             Feed::Bookmarks { tag, private } => {
                 url.query_pairs_mut()
                     .append_pair("restrict", if *private { "private" } else { "public" });
@@ -1673,7 +1693,10 @@ impl Pixiv {
                 .boxed();
             }
             Target::Illust(id) => {
-                return stream::once(async move {
+                let related = self
+                    .related
+                    .then(|| self.listing(Some(id.clone()), vec![Feed::Related], None));
+                let single = stream::once(async move {
                     let mut endpoint = self.api_root.join("v1/illust/detail").expect("static");
                     endpoint.query_pairs_mut().append_pair("illust_id", &id);
                     let mut body = json(&self.get(&endpoint).await?)?;
@@ -1722,10 +1745,24 @@ impl Pixiv {
                 })
                 .flatten()
                 .boxed();
+                return match related {
+                    Some(related) => single.chain(related).boxed(),
+                    None => single,
+                };
             }
             Target::User { id, .. } => (Some(id), vec![Feed::Works]),
             Target::Bookmarks { id, tag, private } => (id, vec![Feed::Bookmarks { tag, private }]),
         };
+        self.listing(user, kinds, tag)
+    }
+
+    /// Lazily page work feeds, emitting each work's events.
+    fn listing(
+        &self,
+        user: Option<String>,
+        kinds: Vec<Feed>,
+        tag: Option<String>,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
         let state = ListingState {
             bookmarks: kinds
                 .iter()
@@ -2688,6 +2725,38 @@ mod tests {
 
     pub(super) fn bookmark_owner_reply(id: u64) -> Vec<u8> {
         response("200 OK",json!({"user":{"id":id,"name":"Bookmark Owner","account":"bookmark-owner","email":"PRIVATE_EMAIL","access_token":"PRIVATE_PROFILE_TOKEN"}}).to_string().as_bytes())
+    }
+
+    #[tokio::test]
+    async fn related_works_follow_the_requested_artwork() {
+        let detail = json!({"illust": illust(42, 1)}).to_string();
+        let related =
+            json!({"illusts": [illust(7, 1), illust(8, 1)], "next_url": null}).to_string();
+        let (root, server) = serve(vec![
+            token("first"),
+            response("200 OK", detail.as_bytes()),
+            response("200 OK", related.as_bytes()),
+        ]);
+        let media: Vec<_> = pixiv(root)
+            .with_related(true)
+            .stream(&Url::parse("https://www.pixiv.net/en/artworks/42").unwrap())
+            .collect()
+            .await;
+        let ids: Vec<_> = media
+            .iter()
+            .map(|m| {
+                m.as_ref()
+                    .unwrap()
+                    .metadata
+                    .as_ref()
+                    .unwrap()
+                    .post_id
+                    .clone()
+            })
+            .collect();
+        assert_eq!(ids, ["42", "7", "8"]);
+        let requests = server.join().unwrap();
+        assert!(requests[2].starts_with("GET /v2/illust/related?illust_id=42 "));
     }
 
     #[tokio::test]

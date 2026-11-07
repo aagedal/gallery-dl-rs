@@ -2790,6 +2790,7 @@ fn extract_input<'a>(
                                                 .with_tags(artwork_options.tags.unwrap_or_default())
                                                 .with_cursor(artwork_options.cursor.clone())
                                                 .with_refresh_token(pixiv_refresh_token(artwork_options).as_deref())
+.with_related(pixiv_related(artwork_options))
                                                 .with_retries(artwork_options.retries.unwrap())
                                                 .with_request_timeout(
                                                     artwork_options.timeout.unwrap(),
@@ -2873,6 +2874,7 @@ fn extract_input<'a>(
                                             .with_tags(options.tags.unwrap_or_default())
                                             .with_cursor(options.cursor.clone())
                                             .with_refresh_token(pixiv_refresh_token(options).as_deref())
+.with_related(pixiv_related(options))
                                             .with_retries(options.retries.unwrap())
                                             .with_request_timeout(options.timeout.unwrap())
                                             .with_network(&configured.network)
@@ -3543,6 +3545,15 @@ fn cached_token(
         Some(token) if token != "cache" => Some(token.to_owned()),
         _ => gallery_dl_rs::cache::get(&gallery_dl_rs::cache::key(module, function, argument)),
     }
+}
+
+/// Upstream `work.related` (also read from the category scope).
+fn pixiv_related(options: &gallery_dl_rs::config::Options) -> bool {
+    let site = options.site_options.as_deref();
+    site.and_then(|o| o.get("work"))
+        .and_then(|work| work.get("related"))
+        .or_else(|| site.and_then(|o| o.get("related")))
+        .is_some_and(gallery_dl_rs::postprocess::truthy)
 }
 
 /// Pixiv's `refresh-token`, else the one `oauth:pixiv` cached for the
