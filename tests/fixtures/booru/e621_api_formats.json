@@ -1,0 +1,625 @@
+{
+ "current": [
+  {
+   "id": 2976753,
+   "created_at": "2021-10-15T20:26:25.188-04:00",
+   "updated_at": "2026-11-21T00:59:18.152-05:00",
+   "change_seq": 82363823,
+   "files": {
+    "meta": {
+     "md5": "f3590a911a687c67c74fb4665a9635d3",
+     "ext": "webm",
+     "size": 216387,
+     "duration": 3.953,
+     "has_sample": true
+    },
+    "original": {
+     "width": 640,
+     "height": 640,
+     "url": "https://static1.e926.net/data/f3/59/f3590a911a687c67c74fb4665a9635d3.webm"
+    },
+    "preview": {
+     "width": 256,
+     "height": 256,
+     "jpg": "https://static1.e926.net/data/preview/f3/59/f3590a911a687c67c74fb4665a9635d3.jpg",
+     "webp": "https://static1.e926.net/data/preview/f3/59/f3590a911a687c67c74fb4665a9635d3.webp"
+    },
+    "sample": {
+     "width": 850,
+     "height": 850,
+     "jpg": "https://static1.e926.net/data/sample/f3/59/f3590a911a687c67c74fb4665a9635d3.jpg",
+     "webp": "https://static1.e926.net/data/sample/f3/59/f3590a911a687c67c74fb4665a9635d3.webp"
+    },
+    "video": {
+     "has": true,
+     "original": {
+      "fps": 30.0,
+      "codec": "vp9",
+      "size": 216387,
+      "width": 640,
+      "height": 640,
+      "url": "https://static1.e926.net/data/f3/59/f3590a911a687c67c74fb4665a9635d3.webm"
+     },
+     "variants": {
+      "mp4": {
+       "codec": "avc1.4D401E",
+       "fps": 30.0,
+       "size": 224107,
+       "width": 640,
+       "height": 640,
+       "url": "https://static1.e926.net/data/sample/f3/59/f3590a911a687c67c74fb4665a9635d3_alt.mp4"
+      }
+     },
+     "samples": {
+      "480p": {
+       "fps": 30.0,
+       "size": 161004,
+       "codec": "avc1.4D401E",
+       "width": 480,
+       "height": 480,
+       "url": "https://static1.e926.net/data/sample/f3/59/f3590a911a687c67c74fb4665a9635d3_480p.mp4"
+      }
+     }
+    }
+   },
+   "uploader_id": 363322,
+   "uploader_name": "MattTheDoormat",
+   "approver_id": 38571,
+   "stats": {
+    "score": {
+     "up": 6893,
+     "down": -292,
+     "total": 6601
+    },
+    "fav_count": 4920,
+    "is_favorited": false,
+    "vote": 0,
+    "comment_count": 147,
+    "hotness": 3787.0232791509457
+   },
+   "flags": {
+    "pending": false,
+    "flagged": false,
+    "note_locked": false,
+    "status_locked": false,
+    "rating_locked": true,
+    "deleted": false
+   },
+   "has": {
+    "parent": false,
+    "children": false,
+    "active_children": false,
+    "notes": false,
+    "sample": true
+   },
+   "relationships": {
+    "parent_id": null,
+    "children": []
+   },
+   "pools": [],
+   "rating": "s",
+   "locked_tags": [],
+   "sources": [
+    "https://x.com/ArtistNcs/status/1449079218919378951"
+   ],
+   "description": "A snack",
+   "tags": {
+    "general": [
+     "ambiguous_gender",
+     "ambiguous_prey",
+     "anthro",
+     "anthro_prey",
+     "chewing",
+     "clothed",
+     "clothed/nude",
+     "clothing",
+     "countershading",
+     "death",
+     "duo",
+     "eating",
+     "extreme_size_difference",
+     "fangs",
+     "grabbed",
+     "holding_character",
+     "human_on_anthro",
+     "human_pred",
+     "humor",
+     "interspecies",
+     "male",
+     "male/ambiguous",
+     "male_pred",
+     "micro",
+     "micro_in_hand",
+     "multicolored_body",
+     "multicolored_scales",
+     "nude",
+     "open_mouth",
+     "oral_vore",
+     "orange_body",
+     "orange_scales",
+     "purple_body",
+     "purple_scales",
+     "real",
+     "scales",
+     "shitpost",
+     "simple_background",
+     "simple_eyes",
+     "size_difference",
+     "snake_hood",
+     "teeth",
+     "toony",
+     "two_tone_body",
+     "two_tone_scales",
+     "vore",
+     "what",
+     "youtuber"
+    ],
+    "artist": [
+     "ncs",
+     "sound_warning"
+    ],
+    "contributor": [],
+    "copyright": [
+     "jerma985",
+     "real_world"
+    ],
+    "character": [
+     "jeremy_harrington",
+     "keeshee"
+    ],
+    "species": [
+     "cobra",
+     "human",
+     "lamarian",
+     "mammal",
+     "reptile",
+     "scalie",
+     "snake"
+    ],
+    "invalid": [],
+    "meta": [
+     "1:1",
+     "2021",
+     "2d_animation",
+     "animated",
+     "lol_comments",
+     "meme",
+     "misleading_thumbnail",
+     "short_playtime",
+     "signature",
+     "sound",
+     "video"
+    ],
+    "lore": [
+     "female_(lore)"
+    ]
+   }
+  },
+  {
+   "id": 227975,
+   "created_at": "2012-07-11T01:06:09.001-04:00",
+   "updated_at": "2025-12-28T19:14:49.139-05:00",
+   "change_seq": 57923923,
+   "files": {
+    "meta": {
+     "md5": "6f0585225418cdd110e8374f5cf4d058",
+     "ext": "jpg",
+     "size": 35843,
+     "duration": null,
+     "has_sample": false
+    },
+    "original": {
+     "width": 438,
+     "height": 594,
+     "url": "https://static1.e926.net/data/6f/05/6f0585225418cdd110e8374f5cf4d058.jpg"
+    },
+    "preview": {
+     "width": 256,
+     "height": 347,
+     "jpg": "https://static1.e926.net/data/preview/6f/05/6f0585225418cdd110e8374f5cf4d058.jpg",
+     "webp": "https://static1.e926.net/data/preview/6f/05/6f0585225418cdd110e8374f5cf4d058.webp"
+    },
+    "sample": {
+     "width": 438,
+     "height": 594,
+     "jpg": "https://static1.e926.net/data/6f/05/6f0585225418cdd110e8374f5cf4d058.jpg",
+     "webp": "https://static1.e926.net/data/6f/05/6f0585225418cdd110e8374f5cf4d058.jpg"
+    }
+   },
+   "uploader_id": 9770,
+   "uploader_name": "NSFW",
+   "approver_id": 6241,
+   "stats": {
+    "score": {
+     "up": 34,
+     "down": -1,
+     "total": 35
+    },
+    "fav_count": 68,
+    "is_favorited": false,
+    "vote": 0,
+    "comment_count": 6,
+    "hotness": 3107.9865888811282
+   },
+   "flags": {
+    "pending": false,
+    "flagged": false,
+    "note_locked": false,
+    "status_locked": false,
+    "rating_locked": false,
+    "deleted": false
+   },
+   "has": {
+    "parent": false,
+    "children": false,
+    "active_children": false,
+    "notes": false,
+    "sample": false
+   },
+   "relationships": {
+    "parent_id": null,
+    "children": []
+   },
+   "pools": [],
+   "rating": "s",
+   "locked_tags": [],
+   "sources": [
+    "https://anry.ru/"
+   ],
+   "description": "",
+   "tags": {
+    "general": [
+     "3_toes",
+     "big_ears",
+     "big_head",
+     "black_nose",
+     "blue_eyes",
+     "brown_eyes",
+     "claws",
+     "duo",
+     "eyelashes",
+     "feet",
+     "female",
+     "feral",
+     "front_view",
+     "fur",
+     "glowing",
+     "grey_background",
+     "heart_symbol",
+     "looking_aside",
+     "looking_at_another",
+     "male",
+     "neck_bow",
+     "nude",
+     "reflection",
+     "simple_background",
+     "sitting",
+     "snow",
+     "tail",
+     "toes",
+     "white_body",
+     "white_fur"
+    ],
+    "artist": [
+     "anry"
+    ],
+    "contributor": [],
+    "copyright": [],
+    "character": [],
+    "species": [
+     "canid",
+     "canine",
+     "fennec_fox",
+     "fox",
+     "mammal",
+     "true_fox"
+    ],
+    "invalid": [],
+    "meta": [],
+    "lore": []
+   }
+  }
+ ],
+ "legacy": {
+  "posts": [
+   {
+    "id": 2976753,
+    "created_at": "2021-10-15T20:26:25.188-04:00",
+    "updated_at": "2026-11-21T00:59:18.152-05:00",
+    "file": {
+     "width": 640,
+     "height": 640,
+     "ext": "webm",
+     "size": 216387,
+     "md5": "f3590a911a687c67c74fb4665a9635d3",
+     "url": "https://static1.e926.net/data/f3/59/f3590a911a687c67c74fb4665a9635d3.webm"
+    },
+    "preview": {
+     "width": 256,
+     "height": 256,
+     "url": "https://static1.e926.net/data/preview/f3/59/f3590a911a687c67c74fb4665a9635d3.jpg",
+     "alt": "https://static1.e926.net/data/preview/f3/59/f3590a911a687c67c74fb4665a9635d3.webp"
+    },
+    "sample": {
+     "has": true,
+     "width": 850,
+     "height": 850,
+     "url": "https://static1.e926.net/data/sample/f3/59/f3590a911a687c67c74fb4665a9635d3.jpg",
+     "alt": "https://static1.e926.net/data/sample/f3/59/f3590a911a687c67c74fb4665a9635d3.webp",
+     "alternates": {
+      "has": true,
+      "original": {
+       "fps": 30.0,
+       "codec": "vp9",
+       "size": 216387,
+       "width": 640,
+       "height": 640,
+       "url": "https://static1.e926.net/data/f3/59/f3590a911a687c67c74fb4665a9635d3.webm"
+      },
+      "variants": {
+       "mp4": {
+        "codec": "avc1.4D401E",
+        "fps": 30.0,
+        "size": 224107,
+        "width": 640,
+        "height": 640,
+        "url": "https://static1.e926.net/data/sample/f3/59/f3590a911a687c67c74fb4665a9635d3_alt.mp4"
+       }
+      },
+      "samples": {
+       "480p": {
+        "fps": 30.0,
+        "size": 161004,
+        "codec": "avc1.4D401E",
+        "width": 480,
+        "height": 480,
+        "url": "https://static1.e926.net/data/sample/f3/59/f3590a911a687c67c74fb4665a9635d3_480p.mp4"
+       }
+      }
+     }
+    },
+    "score": {
+     "up": 6893,
+     "down": -292,
+     "total": 6601
+    },
+    "tags": {
+     "general": [
+      "ambiguous_gender",
+      "ambiguous_prey",
+      "anthro",
+      "anthro_prey",
+      "chewing",
+      "clothed",
+      "clothed/nude",
+      "clothing",
+      "countershading",
+      "death",
+      "duo",
+      "eating",
+      "extreme_size_difference",
+      "fangs",
+      "grabbed",
+      "holding_character",
+      "human_on_anthro",
+      "human_pred",
+      "humor",
+      "interspecies",
+      "male",
+      "male/ambiguous",
+      "male_pred",
+      "micro",
+      "micro_in_hand",
+      "multicolored_body",
+      "multicolored_scales",
+      "nude",
+      "open_mouth",
+      "oral_vore",
+      "orange_body",
+      "orange_scales",
+      "purple_body",
+      "purple_scales",
+      "real",
+      "scales",
+      "shitpost",
+      "simple_background",
+      "simple_eyes",
+      "size_difference",
+      "snake_hood",
+      "teeth",
+      "toony",
+      "two_tone_body",
+      "two_tone_scales",
+      "vore",
+      "what",
+      "youtuber"
+     ],
+     "artist": [
+      "ncs",
+      "sound_warning"
+     ],
+     "contributor": [],
+     "copyright": [
+      "jerma985",
+      "real_world"
+     ],
+     "character": [
+      "jeremy_harrington",
+      "keeshee"
+     ],
+     "species": [
+      "cobra",
+      "human",
+      "lamarian",
+      "mammal",
+      "reptile",
+      "scalie",
+      "snake"
+     ],
+     "invalid": [],
+     "meta": [
+      "1:1",
+      "2021",
+      "2d_animation",
+      "animated",
+      "lol_comments",
+      "meme",
+      "misleading_thumbnail",
+      "short_playtime",
+      "signature",
+      "sound",
+      "video"
+     ],
+     "lore": [
+      "female_(lore)"
+     ]
+    },
+    "locked_tags": [],
+    "change_seq": 82363823,
+    "flags": {
+     "pending": false,
+     "flagged": false,
+     "note_locked": false,
+     "status_locked": false,
+     "rating_locked": true,
+     "deleted": false
+    },
+    "rating": "s",
+    "fav_count": 4920,
+    "sources": [
+     "https://x.com/ArtistNcs/status/1449079218919378951"
+    ],
+    "pools": [],
+    "relationships": {
+     "parent_id": null,
+     "has_children": false,
+     "has_active_children": false,
+     "children": []
+    },
+    "approver_id": 38571,
+    "uploader_id": 363322,
+    "uploader_name": "MattTheDoormat",
+    "description": "A snack",
+    "comment_count": 147,
+    "is_favorited": false,
+    "vote": 0,
+    "has_notes": false,
+    "duration": 3.953
+   },
+   {
+    "id": 227975,
+    "created_at": "2012-07-11T01:06:09.001-04:00",
+    "updated_at": "2025-12-28T19:14:49.139-05:00",
+    "file": {
+     "width": 438,
+     "height": 594,
+     "ext": "jpg",
+     "size": 35843,
+     "md5": "6f0585225418cdd110e8374f5cf4d058",
+     "url": "https://static1.e926.net/data/6f/05/6f0585225418cdd110e8374f5cf4d058.jpg"
+    },
+    "preview": {
+     "width": 256,
+     "height": 347,
+     "url": "https://static1.e926.net/data/preview/6f/05/6f0585225418cdd110e8374f5cf4d058.jpg",
+     "alt": "https://static1.e926.net/data/preview/6f/05/6f0585225418cdd110e8374f5cf4d058.webp"
+    },
+    "sample": {
+     "has": false,
+     "width": 438,
+     "height": 594,
+     "url": null,
+     "alt": null,
+     "alternates": {}
+    },
+    "score": {
+     "up": 34,
+     "down": -1,
+     "total": 35
+    },
+    "tags": {
+     "general": [
+      "3_toes",
+      "big_ears",
+      "big_head",
+      "black_nose",
+      "blue_eyes",
+      "brown_eyes",
+      "claws",
+      "duo",
+      "eyelashes",
+      "feet",
+      "female",
+      "feral",
+      "front_view",
+      "fur",
+      "glowing",
+      "grey_background",
+      "heart_symbol",
+      "looking_aside",
+      "looking_at_another",
+      "male",
+      "neck_bow",
+      "nude",
+      "reflection",
+      "simple_background",
+      "sitting",
+      "snow",
+      "tail",
+      "toes",
+      "white_body",
+      "white_fur"
+     ],
+     "artist": [
+      "anry"
+     ],
+     "contributor": [],
+     "copyright": [],
+     "character": [],
+     "species": [
+      "canid",
+      "canine",
+      "fennec_fox",
+      "fox",
+      "mammal",
+      "true_fox"
+     ],
+     "invalid": [],
+     "meta": [],
+     "lore": []
+    },
+    "locked_tags": [],
+    "change_seq": 57923923,
+    "flags": {
+     "pending": false,
+     "flagged": false,
+     "note_locked": false,
+     "status_locked": false,
+     "rating_locked": false,
+     "deleted": false
+    },
+    "rating": "s",
+    "fav_count": 68,
+    "sources": [
+     "https://anry.ru/"
+    ],
+    "pools": [],
+    "relationships": {
+     "parent_id": null,
+     "has_children": false,
+     "has_active_children": false,
+     "children": []
+    },
+    "approver_id": 6241,
+    "uploader_id": 9770,
+    "uploader_name": "NSFW",
+    "description": "",
+    "comment_count": 6,
+    "is_favorited": false,
+    "vote": 0,
+    "has_notes": false,
+    "duration": null
+   }
+  ]
+ }
+}

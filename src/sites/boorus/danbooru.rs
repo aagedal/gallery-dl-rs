@@ -209,17 +209,31 @@ fn target(instance: &Instance, url: &Url) -> Option<(String, Kind)> {
 }
 
 /// One API request with the gallery-dl agent and optional Basic auth.
-async fn api(http: &Http, url: &str, params: &[(String, String)]) -> crate::Result<Value> {
+async fn api(
+    http: &Http,
+    e621: bool,
+    url: &str,
+    params: &[(String, String)],
+) -> crate::Result<Value> {
     let mut url = http.api(url)?;
     if !params.is_empty() {
         url.query_pairs_mut().extend_pairs(params);
+    }
+    let posts = e621 && crate::booru::e621_post_endpoint(url.path());
+    if posts {
+        url.query_pairs_mut().append_pair("mode", "extended");
     }
     let auth = auth_info(http).map(|(user, key)| basic_auth(&user, &key));
     let mut headers = vec![("User-Agent", USER_AGENT)];
     if let Some(auth) = &auth {
         headers.push(("Authorization", auth.as_str()));
     }
-    http.json_with(&url, &headers).await
+    let data = http.json_with(&url, &headers).await?;
+    Ok(if posts {
+        crate::booru::e621_legacy_body(data)
+    } else {
+        data
+    })
 }
 
 fn set(params: &mut Vec<(String, String)>, key: &str, value: String) {
@@ -232,6 +246,7 @@ fn set(params: &mut Vec<(String, String)>, key: &str, value: String) {
 /// `_pagination`: page numbers, or `a<id>`/`b<id>` cursors with `prefix`.
 fn pagination<'a, F>(
     http: &'a Http,
+    e621: bool,
     url: String,
     mut params: Vec<(String, String)>,
     prefix: Option<&'static str>,
@@ -256,7 +271,7 @@ where
             if !first {
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
-            let mut data = api(http, &url, &params).await?;
+            let mut data = api(http, e621, &url, &params).await?;
             if data.is_object() {
                 data = data["posts"].take();
             }
@@ -375,11 +390,12 @@ fn render_posts(
 /// `_collection_metadata`: the pool/favgroup with its post order.
 async fn collection(
     http: &Http,
+    e621: bool,
     root: &str,
     path: &str,
     id: &str,
 ) -> crate::Result<(Value, Vec<String>)> {
-    let mut data = api(http, &format!("{root}/{path}s/{id}.json"), &[]).await?;
+    let mut data = api(http, e621, &format!("{root}/{path}s/{id}.json"), &[]).await?;
     let ids = data["post_ids"]
         .as_array()
         .map(|ids| ids.iter().map(scalar).collect())
@@ -440,7 +456,7 @@ fn extract<'a>(
     let list =
         move |route: &'static Route, url: String, params, prefix, extra: Map<String, Value>| {
             let root = list_root.clone();
-            pagination(http, url, params, prefix, per_page, move |posts| {
+            pagination(http, e621, url, params, prefix, per_page, move |posts| {
                 render_posts(site, http, route, &root, e621, posts, &extra)
             })
         };
@@ -474,7 +490,7 @@ fn extract<'a>(
             } else {
                 vec![("tags".into(), tags.clone())]
             };
-            let data = api(http, &format!("{root}/posts/random.json"), &params).await?;
+            let data = api(http, e621, &format!("{root}/posts/random.json"), &params).await?;
             let posts = if data.is_object() {
                 vec![data]
             } else {
@@ -493,7 +509,7 @@ fn extract<'a>(
                 (&POOL, "pool", "pool")
             };
             crate::sites::once(async move {
-                let (meta, ids) = collection(http, &root, path, &id).await?;
+                let (meta, ids) = collection(http, e621, &root, path, &id).await?;
                 let mut extra = Map::new();
                 extra.insert(key.into(), meta);
                 let numbered = move |posts: Vec<Value>| -> Vec<Value> {
@@ -515,7 +531,7 @@ fn extract<'a>(
                         ("limit".into(), "320".into()),
                     ];
                     loop {
-                        let data = api(http, &format!("{root}/posts.json"), &params).await?;
+                        let data = api(http, e621, &format!("{root}/posts.json"), &params).await?;
                         let page = data["posts"].as_array().cloned().unwrap_or_default();
                         let Some(last) = page.last().map(|p| scalar(&p["id"])) else {
                             break;
@@ -561,7 +577,7 @@ fn extract<'a>(
                 set(&mut params, "limit", "200".into());
                 for page in 1..=1000 {
                     set(&mut params, "page", page.to_string());
-                    let data = api(http, &format!("{root}/posts.json"), &params).await?;
+                    let data = api(http, e621, &format!("{root}/posts.json"), &params).await?;
                     let batch = data.as_array().cloned().unwrap_or_default();
                     let done = batch.len() < 180;
                     all.extend(batch);
@@ -582,7 +598,7 @@ fn extract<'a>(
             })
         }
         Kind::Post(id) => crate::sites::once(async move {
-            let mut post = api(http, &format!("{root}/posts/{id}.json"), &[]).await?;
+            let mut post = api(http, e621, &format!("{root}/posts/{id}.json"), &[]).await?;
             if e621 {
                 post = post["post"].take();
             }
@@ -597,7 +613,7 @@ fn extract<'a>(
             )))
         }),
         Kind::MediaAsset(id) => crate::sites::once(async move {
-            let mut asset = api(http, &format!("{root}/media_assets/{id}.json"), &[]).await?;
+            let mut asset = api(http, e621, &format!("{root}/media_assets/{id}.json"), &[]).await?;
             let url = asset["variants"]
                 .as_array()
                 .and_then(|v| v.last())
@@ -653,7 +669,7 @@ fn extract<'a>(
             )
         }
         Kind::Artist(id) => crate::sites::once(async move {
-            let artist = api(http, &format!("{root}/artists/{id}.json"), &[]).await?;
+            let artist = api(http, e621, &format!("{root}/artists/{id}.json"), &[]).await?;
             Ok(queue_artists(http, site, &ARTIST, &root, vec![artist]))
         }),
         Kind::ArtistSearch(query) => {
@@ -671,7 +687,7 @@ fn extract<'a>(
                 let params = params.clone();
                 async move {
                     let Some(page) = state else { return Ok(None) };
-                    let data = api(http, &format!("{root}/artists.json"), &params).await?;
+                    let data = api(http, e621, &format!("{root}/artists.json"), &params).await?;
                     let artists = data.as_array().cloned().unwrap_or_default();
                     let next = (artists.len() >= 20).then_some(page + 1);
                     Ok(Some((

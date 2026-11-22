@@ -136,6 +136,8 @@ pub(super) fn assert_requests(case: &Value, root: &Url, requests: Vec<String>) {
         );
         let pairs = actual
             .query_pairs()
+            // e621 tag categories need `mode=extended`, which upstream never sent.
+            .filter(|(key, value)| (key.as_ref(), value.as_ref()) != ("mode", "extended"))
             .map(|(k, v)| (k.into_owned(), v.into_owned()))
             .collect::<Vec<_>>();
         let wanted = call["wire_params"]
