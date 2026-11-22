@@ -186,6 +186,20 @@ fn level_number(level: &str) -> u32 {
 }
 
 /// Upstream job status bits of failed operations.
+/// `--no-input` (or `input: false`): never prompt on the terminal.
+static NO_INPUT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_no_input(disabled: bool) {
+    NO_INPUT.store(disabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether extractors may prompt, like upstream's `_check_input_allowed`:
+/// standard input is a terminal and input was not disabled.
+pub fn input_allowed() -> bool {
+    use std::io::IsTerminal;
+    !NO_INPUT.load(std::sync::atomic::Ordering::Relaxed) && std::io::stdin().is_terminal()
+}
+
 static STATUS: AtomicI32 = AtomicI32::new(0);
 
 /// Upstream exception codes: 4 extraction/HTTP errors, 8 challenges,

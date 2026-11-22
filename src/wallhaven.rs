@@ -92,6 +92,23 @@ pub fn target(url: &Url) -> Result<Target> {
             [id] if valid_id(id) => Ok(Target::Wallpaper { id: id.into() }),
             _ => Err(unsupported()),
         },
+        // Upstream also reads the wallpaper of a file URL
+        // (`w.wallhaven.cc/full/xx/wallhaven-ID.ext`).
+        "w.wallhaven.cc" => match parts[..] {
+            [kind, dir, file]
+                if kind.bytes().all(|b| b.is_ascii_lowercase())
+                    && dir.len() == 2
+                    && dir.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') =>
+            {
+                let id = file
+                    .strip_prefix("wallhaven-")
+                    .map(|rest| rest.split('.').next().unwrap_or(rest))
+                    .filter(|id| valid_id(id))
+                    .ok_or_else(unsupported)?;
+                Ok(Target::Wallpaper { id: id.into() })
+            }
+            _ => Err(unsupported()),
+        },
         "wallhaven.cc" | "www.wallhaven.cc" => match parts[..] {
             ["w", id] if valid_id(id) => Ok(Target::Wallpaper { id: id.into() }),
             ["search"] => Ok(Target::Search {
@@ -790,11 +807,17 @@ mod tests {
                 id: "74".into()
             }
         );
+        assert_eq!(
+            t("https://w.wallhaven.cc/full/94/wallhaven-94x38z.jpg").unwrap(),
+            Target::Wallpaper {
+                id: "94x38z".into()
+            }
+        );
         for raw in [
             "https://wallhaven.cc/",
             "https://wallhaven.cc/w/",
             "https://wallhaven.cc/user/a/favorites/x",
-            "https://w.wallhaven.cc/full/94/wallhaven-94x38z.jpg",
+            "https://w.wallhaven.cc/full/94/other-94x38z.jpg",
             "https://wallhaven.cc.evil.example/w/94x38z",
             "https://wallhaven.cc:444/w/94x38z",
         ] {

@@ -134,7 +134,7 @@ impl Server {
                     let deadline = Instant::now() + Duration::from_secs(2);
                     while Instant::now() < deadline && !stopping.load(Ordering::SeqCst) {
                         let persisted = watched_root.lock().unwrap().as_ref().is_some_and(|root| {
-                            std::fs::read_dir(root.join("direct/.gallery-dl-rs")).is_ok_and(
+                            std::fs::read_dir(root.join("directlink/.gallery-dl-rs")).is_ok_and(
                                 |entries| {
                                     entries.filter_map(std::result::Result::ok).any(|entry| {
                                         entry.path().extension().is_some_and(|ext| ext == "part")
@@ -215,7 +215,7 @@ fn assert_full(request: &str) {
     assert_eq!(header(request, "If-Range"), None);
 }
 fn parts(root: &Path) -> Vec<PathBuf> {
-    std::fs::read_dir(root.join("direct/.gallery-dl-rs"))
+    std::fs::read_dir(root.join("directlink/.gallery-dl-rs"))
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "part"))
@@ -534,7 +534,7 @@ async fn cancellation_retains_checkpoint_and_concurrent_downloads_cannot_share_i
         tokio::spawn(async move { download::download(&client(), &task_root, &task_item, 0).await });
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
-            if let Ok(entries) = std::fs::read_dir(root.path().join("direct/.gallery-dl-rs"))
+            if let Ok(entries) = std::fs::read_dir(root.path().join("directlink/.gallery-dl-rs"))
                 && entries.filter_map(std::result::Result::ok).any(|entry| {
                     entry.path().extension().is_some_and(|ext| ext == "part")
                         && std::fs::metadata(entry.path())
@@ -617,7 +617,7 @@ async fn resumed_custom_filename_records_archive_only_after_publication() {
         ArchiveOutcome::Completed(Outcome::Downloaded(path.clone()))
     );
     assert_eq!(std::fs::read(&path).unwrap(), complete());
-    assert!(path.parent().unwrap().ends_with("nested/direct"));
+    assert!(path.parent().unwrap().ends_with("nested/directlink"));
     assert!(path.with_file_name("custom.dat.json").is_file());
     assert!(archive.contains(&key).await.unwrap());
     assert_eq!(
@@ -737,7 +737,7 @@ async fn cli_resume_opt_in_persists_between_processes() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    assert!(std::fs::read(root.path().join("direct/custom.jpg")).unwrap() == complete());
+    assert!(std::fs::read(root.path().join("directlink/custom.jpg")).unwrap() == complete());
     assert_range(&server.requests()[1], HALF, "\"v1\"");
 }
 
@@ -784,7 +784,7 @@ async fn size_limits_use_full_resumed_total_and_clear_rejected_checkpoints() {
                 ))
                 .exists()
         );
-        for entry in std::fs::read_dir(root.path().join("direct/.gallery-dl-rs")).unwrap() {
+        for entry in std::fs::read_dir(root.path().join("directlink/.gallery-dl-rs")).unwrap() {
             let entry = entry.unwrap();
             assert!(!entry.path().extension().is_some_and(|ext| ext == "json"));
             if entry.path().extension().is_some_and(|ext| ext == "part") {

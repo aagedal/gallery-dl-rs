@@ -271,8 +271,8 @@ struct Args {
     /// Append FORMAT during EVENT to FILE instead of downloading files
     #[arg(long, num_args = 2, value_names = ["[EVENT:]FORMAT", "FILE"])]
     print_to_file: Vec<String>,
-    /// Accepted for compatibility: gallery-dl-rs keeps no cache file
-    #[arg(long, value_name = "PATH", hide = true)]
+    /// Use PATH as the cache database (upstream `cache.file`)
+    #[arg(long, value_name = "PATH")]
     cache_file: Option<PathBuf>,
     /// Show cache file information
     #[arg(long)]
@@ -370,8 +370,8 @@ struct Args {
     /// Accepted for compatibility: output is never colored
     #[arg(long, hide = true)]
     no_colors: bool,
-    /// Accepted for compatibility: gallery-dl-rs never prompts for input
-    #[arg(long, hide = true)]
+    /// Do not prompt for input (e.g. Twitter `locked: wait`)
+    #[arg(long)]
     no_input: bool,
     /// Additional native setting KEY=VALUE (VALUE is JSON or text), e.g.
     /// extractor.4chan.retries=3; `extractor.*` keys also reach the
@@ -393,10 +393,10 @@ struct Args {
     /// Append input URLs that returned an error to FILE
     #[arg(short = 'e', long, value_name = "FILE")]
     error_file: Option<PathBuf>,
-    /// Print supported extractor categories and their subcategories
-    #[arg(long)]
-    list_extractors: bool,
-    /// Print supported extractor categories
+    /// Print a list of extractor classes with description, (sub)category and example URL
+    #[arg(long, num_args = 0.., value_name = "CATEGORIES")]
+    list_extractors: Option<Vec<String>>,
+    /// Print a list of available extractor modules
     #[arg(long)]
     list_modules: bool,
     /// Seconds to wait before starting extraction for each input (SECONDS or MIN-MAX)
@@ -581,6 +581,8 @@ async fn config_command(args: &Args) -> Result<()> {
 fn routed_site(url: &url::Url, extractor: Extractor) -> Option<&'static str> {
     extract::social_site(url).filter(|site| {
         let file = extract::direct(url).is_some();
+        // Pixeldrain filesystem paths name files but are pages.
+        let file = file && !(*site == "pixeldrain" && url.path().starts_with("/d/"));
         !(*site == "imgur"
             && matches!(extractor, Extractor::Compatibility)
             && url.host_str() == Some("i.imgur.com")
@@ -589,16 +591,22 @@ fn routed_site(url: &url::Url, extractor: Extractor) -> Option<&'static str> {
             || (gallery_dl_rs::booru::Site::from_category(site).is_some()
                 || matches!(
                     *site,
-                    "mastodon"
-                        | "kemono"
-                        | "coomer"
-                        | "pixeldrain"
-                        | "catbox"
-                        | "imgbox"
-                        | "postimg"
+                    "mastodon" | "kemono" | "coomer" | "pixeldrain" | "catbox" | "postimg"
                 ))
                 && file)
     })
+}
+
+/// The upstream class of an input for dedicated extractors whose files
+/// otherwise share one class.
+fn dedicated_class(url: &url::Url) -> Option<&'static str> {
+    match extract::social_site(url)? {
+        "bluesky" => gallery_dl_rs::bluesky::subcategory(url),
+        "twitter" => gallery_dl_rs::twitter::subcategory(url),
+        "kemono" | "coomer" => gallery_dl_rs::kemono::subcategory(url),
+        "instagram" => gallery_dl_rs::instagram::subcategory(url),
+        _ => None,
+    }
 }
 
 fn settings_category(url: &url::Url, extractor: Extractor) -> &'static str {
@@ -645,11 +653,22 @@ fn settings_key(url: &url::Url, extractor: Extractor) -> &'static str {
 fn media_settings_key<'a>(
     media: &'a extract::Media,
     extractor: Extractor,
-    settings: &BTreeMap<&str, Settings>,
+    settings: &BTreeMap<&'static str, Settings>,
 ) -> &'a str {
     if !settings.contains_key(media.category.as_str()) {
         // Generic compatibility output from other gallery-dl extractors.
         return "direct";
+    }
+    // A configured `CATEGORY.SUBCATEGORY` scope for the file's upstream class.
+    if let Some(route) = media
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.site_keywords.as_ref())
+        .map(|keywords| keywords.route)
+        && let Some((key, _)) =
+            settings.get_key_value(format!("{}:{}", media.category, route.subcategory).as_str())
+    {
+        return key;
     }
     media_settings_key_known(media, extractor)
 }
@@ -767,8 +786,16 @@ async fn async_main(args: Args) {
 }
 
 async fn run(args: Args) -> Result<()> {
-    if args.list_extractors || args.list_modules {
-        list_extractors(args.list_extractors);
+    gallery_dl_rs::actions::set_no_input(args.no_input);
+    if args.list_modules {
+        // `lines` also drops carriage returns of CRLF checkouts.
+        for module in include_str!("upstream_modules.txt").lines() {
+            println!("{module}");
+        }
+        return Ok(());
+    }
+    if let Some(categories) = &args.list_extractors {
+        list_extractors(categories);
         return Ok(());
     }
     if let Some(list) = &args.whitelist {
@@ -790,8 +817,8 @@ async fn run(args: Args) -> Result<()> {
         || args.cache_clear.is_some()
         || args.cache_vacuum
     {
-        println!("gallery-dl-rs keeps no cache file; login sessions are not stored between runs");
-        return Ok(());
+        resolved_settings(&args, &[]).await?;
+        return cache_command(&args);
     }
     if args.config_status || args.config_create || args.config_open {
         return config_command(&args).await;
@@ -893,15 +920,18 @@ async fn run(args: Args) -> Result<()> {
                 .or_else(|| value.get("path").and_then(serde_json::Value::as_str))?;
             Some(gallery_dl_rs::postprocess::expand_path(raw))
         };
+        // Like upstream, files that cannot be opened only produce a warning.
         if args.write_log.is_none()
             && let Some(file) = path("logfile")
+            && let Err(e) = gallery_dl_rs::logfile::start(&file)
         {
-            gallery_dl_rs::logfile::start(&file)?;
+            eprintln!("[gallery-dl][warning] logfile: {e}");
         }
         if args.write_unsupported.is_none()
             && let Some(file) = path("unsupportedfile")
+            && let Err(e) = gallery_dl_rs::unsupported::set_file(&file)
         {
-            gallery_dl_rs::unsupported::set_file(&file)?;
+            eprintln!("[gallery-dl][warning] unsupportedfile: {e}");
         }
         if args.error_file.is_none() {
             args.error_file = path("errorfile");
@@ -1487,6 +1517,14 @@ async fn run(args: Args) -> Result<()> {
                     .filter_map(|code| code.as_u64()?.try_into().ok())
                     .collect(),
             )
+            .with_headers(
+                downloader_option("headers")
+                    .and_then(|v| v.as_object().cloned())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|(name, value)| Some((name, value.as_str()?.to_owned())))
+                    .collect(),
+            )
             .with_part_directory(
                 downloader_option("part-directory")
                     .as_ref()
@@ -1579,6 +1617,18 @@ async fn run(args: Args) -> Result<()> {
                     limits: settings.limits,
                     write_metadata: args.write_metadata,
                     directory: settings.directory.as_ref(),
+                    archive_prefix: settings
+                        .options
+                        .site_options
+                        .as_deref()
+                        .and_then(|o| o.get("archive-prefix"))
+                        .and_then(serde_json::Value::as_str),
+                    archive_format: settings
+                        .options
+                        .site_options
+                        .as_deref()
+                        .and_then(|o| o.get("archive-format"))
+                        .and_then(serde_json::Value::as_str),
                 };
                 // Upstream `parent-skip`: a child job's skips count toward
                 // its parent's limit instead of its own.
@@ -1927,53 +1977,68 @@ fn python_text(value: &serde_json::Value) -> String {
 }
 
 /// `--list-extractors` / `--list-modules`.
-fn list_extractors(detailed: bool) {
-    let dedicated = [
-        "instagram",
-        "twitter",
-        "facebook",
-        "imgur",
-        "bluesky",
-        "reddit",
-        "danbooru",
-        "e621",
-        "gelbooru",
-        "safebooru",
-        "mastodon.social",
-        "pawoo",
-        "baraag",
-        "kemono",
-        "coomer",
-        "pixeldrain",
-        "catbox",
-        "imgbox",
-        "postimg",
-        "tumblr",
-        "pixiv",
-        "pixiv-novel",
-        "deviantart",
-        "flickr",
-        "wallhaven",
-        "artstation",
-        "pinterest",
-        "newgrounds",
-        "furaffinity",
-        "weasyl",
-        "vsco",
-    ];
-    let mut lines: Vec<String> = dedicated.iter().map(|c| (*c).to_owned()).collect();
-    for site in gallery_dl_rs::sites::sites() {
-        if detailed {
-            let routes: Vec<_> = site.routes.iter().map(|route| route.subcategory).collect();
-            lines.push(format!("{}: {}", site.category, routes.join(", ")));
-        } else {
-            lines.push(site.category.to_owned());
+/// Upstream `--list-extractors [CATEGORIES]`: every extractor class with its
+/// description, (sub)category and example URL, optionally filtered by
+/// `CATEGORY`, `CATEGORY:SUBCATEGORY` or `:SUBCATEGORY` items.
+fn list_extractors(filter: &[String]) {
+    let unescape = |value: &str| {
+        let mut out = String::with_capacity(value.len());
+        let mut chars = value.chars();
+        while let Some(c) = chars.next() {
+            match (c, c == '\\').1.then(|| chars.next()).flatten() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some(other) => out.push(other),
+                None => out.push(c),
+            }
+        }
+        out
+    };
+    let mut categories = Vec::new();
+    let mut subcategories = Vec::new();
+    let mut pairs = Vec::new();
+    for item in filter {
+        let (category, subcategory) = item.split_once(':').unwrap_or((item, ""));
+        match (
+            category.is_empty() || category == "*",
+            subcategory.is_empty() || subcategory == "*",
+        ) {
+            (false, false) => pairs.push((category, subcategory)),
+            (false, true) => categories.push(category),
+            (true, false) => subcategories.push(subcategory),
+            (true, true) => {}
         }
     }
-    lines.sort();
-    for line in lines {
-        println!("{line}");
+    let filtered = !(categories.is_empty() && subcategories.is_empty() && pairs.is_empty());
+    let mut out = String::new();
+    for line in include_str!("upstream_extractors.tsv").lines() {
+        if line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        let [name, doc, category, subcategory, example, base] = fields[..] else {
+            continue;
+        };
+        let matches = |c: &str| c == category || c == base;
+        if filtered
+            && !categories.iter().any(|c| matches(c))
+            && !subcategories.contains(&subcategory)
+            && !pairs.iter().any(|(c, s)| *s == subcategory && matches(c))
+        {
+            continue;
+        }
+        let doc = unescape(doc);
+        out.push_str(&format!(
+            "{name}{}\nCategory: {category} - Subcategory: {subcategory}\nExample : {}\n\n",
+            if doc.is_empty() {
+                String::new()
+            } else {
+                format!("\n{doc}")
+            },
+            unescape(example)
+        ));
     }
+    print!("{out}");
 }
 
 #[derive(Default)]
@@ -2035,6 +2100,15 @@ impl Extractors {
     async fn cookie_jar(&self, settings: &Settings, site: &str) -> Result<CookieJar> {
         if let Some(browser) = &settings.browser {
             return browser.load(site).await;
+        }
+        if let Some(pairs) = &settings.options.inline_cookies {
+            // Netscape lines for the site's domain and its subdomains.
+            let domain = site.trim_start_matches('.');
+            let lines: String = pairs
+                .iter()
+                .map(|(name, value)| format!(".{domain}\tTRUE\t/\tTRUE\t0\t{name}\t{value}\n"))
+                .collect();
+            return CookieJar::parse(&lines);
         }
         match &settings.options.cookies {
             Some(path) => CookieJar::parse(&tokio::fs::read_to_string(path).await?),
@@ -2131,6 +2205,12 @@ fn extract_input<'a>(
                             gallery_dl_rs::instagram::set_warn_images(
                                 options.site_options.as_deref().and_then(|o| o.get("warn-images")),
                             );
+                            gallery_dl_rs::instagram::set_audio(
+                                options.site_options.as_deref().and_then(|o| o.get("audio")),
+                            );
+                            gallery_dl_rs::instagram::set_warn_videos(
+                                options.site_options.as_deref().and_then(|o| o.get("warn-videos")),
+                            );
                             Instagram::from_cookie_jar(
                                 extractors.cookie_jar(configured, "instagram.com").await?,
                                 backend.timeout,
@@ -2176,6 +2256,9 @@ fn extract_input<'a>(
                                             .and_then(serde_json::Value::as_i64)
                                             .unwrap_or(9),
                                     )
+                                    .with_locked(
+                                        options.site_options.as_deref().and_then(|o| o.get("locked")),
+                                    )
                                     .with_include(options.include.clone())
                                     .with_expansion(ExpansionOptions {
                                         retweets: options.retweets.unwrap_or_default(),
@@ -2195,6 +2278,11 @@ fn extract_input<'a>(
                                         videos: options.videos.unwrap_or_default(),
                                         previews: options.previews.unwrap_or(false),
                                         unavailable: options.unavailable.unwrap_or(false),
+                                        twitpic: options
+                                            .site_options
+                                            .as_deref()
+                                            .and_then(|o| o.get("twitpic"))
+                                            .is_some_and(gallery_dl_rs::postprocess::truthy),
                                     })
                                     .with_thread_options(ThreadOptions {
                                         expand: options.expand.unwrap_or(false),
@@ -2238,6 +2326,13 @@ fn extract_input<'a>(
                             )
                             .and_then(|native| {
                                 native
+                                    .with_author_followups(
+                                        options
+                                            .site_options
+                                            .as_deref()
+                                            .and_then(|o| o.get("author-followups"))
+                                            .is_some_and(gallery_dl_rs::postprocess::truthy),
+                                    )
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -2322,7 +2417,18 @@ fn extract_input<'a>(
                                     .with_cookies(jar)
                                     .with_credentials(
                                         options.client_id.as_deref(),
-                                        options.refresh_token.as_deref(),
+                                        cached_token(
+                                            options.refresh_token.as_deref(),
+                                            "reddit",
+                                            "_refresh_token_cache",
+                                            &format!(
+                                                "#{}",
+                                                options.client_id.as_deref().unwrap_or(
+                                                    gallery_dl_rs::reddit::DEFAULT_CLIENT_ID
+                                                )
+                                            ),
+                                        )
+                                        .as_deref(),
                                     )
                                     .with_options(options.site_options.as_deref())?
                                     .with_retries(options.retries.unwrap())
@@ -2351,10 +2457,16 @@ fn extract_input<'a>(
                     let (host, token) = match builtin {
                         Some(index) => (
                             gallery_dl_rs::mastodon::INSTANCES[index],
-                            options.access_token.as_deref(),
+                            cached_token(
+                                options.access_token.as_deref(),
+                                "mastodon",
+                                "_access_token_cache",
+                                gallery_dl_rs::mastodon::INSTANCES[index],
+                            ),
                         ),
                         None => (gallery_dl_rs::mastodon::INSTANCES[0], None),
                     };
+                    let token = token.as_deref();
                     let native = extractors.mastodon[slot]
                         .get_or_init(|| async {
                             gallery_dl_rs::mastodon::Mastodon::new(backend.timeout).and_then(
@@ -2445,7 +2557,9 @@ fn extract_input<'a>(
                                     .with_selection(options.tumblr_selection())
                                     .with_options(options.site_options.as_deref())?
                                     .with_api_key(options.api_key.as_deref())
-                                    .with_access_token(options.access_token.as_deref())
+                                    .with_access_token(
+                                        options.access_token.as_deref().filter(|t| *t != "cache"),
+                                    )
                                     .with_retries(options.retries.unwrap())
                                     .with_request_timeout(options.timeout.unwrap())
                                     .with_network(&configured.network)
@@ -2696,7 +2810,7 @@ fn extract_input<'a>(
                                             options.client_id.as_deref(),
                                             options.client_secret.as_deref(),
                                         )
-                                        .with_refresh_token(options.refresh_token.as_deref())
+                                        .with_refresh_token_cache(options.refresh_token.as_deref())
                                         .with_content_options(
                                             gallery_dl_rs::deviantart::ContentOptions::from_options_with(
                                                 options.site_options.as_deref(),
@@ -2754,9 +2868,8 @@ fn extract_input<'a>(
                                                 .with_max_posts(artwork_options.max_posts)
                                                 .with_tags(artwork_options.tags.unwrap_or_default())
                                                 .with_cursor(artwork_options.cursor.clone())
-                                                .with_refresh_token(
-                                                    artwork_options.refresh_token.as_deref(),
-                                                )
+                                                .with_refresh_token(pixiv_refresh_token(artwork_options).as_deref())
+.with_related(pixiv_related(artwork_options))
                                                 .with_retries(artwork_options.retries.unwrap())
                                                 .with_request_timeout(
                                                     artwork_options.timeout.unwrap(),
@@ -2803,7 +2916,7 @@ fn extract_input<'a>(
                                     .with_max_posts(novel_options.max_posts)
                                     .with_tags(novel_options.tags.unwrap_or_default())
                                     .with_cursor(novel_options.cursor.clone())
-                                    .with_refresh_token(novel_options.refresh_token.as_deref())
+                                    .with_refresh_token(pixiv_refresh_token(novel_options).as_deref())
                                     .with_retries(novel_options.retries.unwrap())
                                     .with_request_timeout(novel_options.timeout.unwrap())
                                     .with_network(&novel_settings.network)
@@ -2839,7 +2952,8 @@ fn extract_input<'a>(
                                             .with_max_posts(options.max_posts)
                                             .with_tags(options.tags.unwrap_or_default())
                                             .with_cursor(options.cursor.clone())
-                                            .with_refresh_token(options.refresh_token.as_deref())
+                                            .with_refresh_token(pixiv_refresh_token(options).as_deref())
+.with_related(pixiv_related(options))
                                             .with_retries(options.retries.unwrap())
                                             .with_request_timeout(options.timeout.unwrap())
                                             .with_network(&configured.network)
@@ -3152,6 +3266,121 @@ fn extract_input<'a>(
                 })
                 .boxed(),
             None => input,
+        };
+        // Upstream Fur Affinity `external`: queue links of each description
+        // after its post.
+        let input = if matches!(extractor, Extractor::Native)
+            && extract::social_site(&url) == Some("furaffinity")
+            && settings
+                .get(settings_key(&url, extractor))
+                .and_then(|s| s.options.site_options.as_deref())
+                .and_then(|o| o.get("external"))
+                .is_some_and(gallery_dl_rs::postprocess::truthy)
+        {
+            let queue = child_queue(extractors, backend, extractor, settings);
+            let description = Arc::new(std::sync::Mutex::new(None::<String>));
+            input
+                .flat_map(move |event| {
+                    let mut children = Vec::new();
+                    match &event {
+                        Ok(ExtractionEvent::Media(media)) => {
+                            let text = media
+                                .metadata
+                                .as_ref()
+                                .and_then(|m| m.site_keywords.as_ref())
+                                .and_then(|k| k.fields.get("_description"))
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_owned);
+                            *description.lock().unwrap_or_else(|e| e.into_inner()) = text;
+                        }
+                        Ok(ExtractionEvent::EndPost) => {
+                            let text = description
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .take()
+                                .unwrap_or_default();
+                            for part in text.split("href=\"http").skip(1) {
+                                let Some(end) = part.find('"') else { continue };
+                                let link = format!("http{}", &part[..end]);
+                                let Ok(mut link) = url::Url::parse(&link) else { continue };
+                                // Current markup wraps outbound links.
+                                if link.path().starts_with("/externalurl")
+                                    && let Some(target) = link
+                                        .query_pairs()
+                                        .find(|(key, _)| key == "q")
+                                        .and_then(|(_, value)| url::Url::parse(&value).ok())
+                                {
+                                    link = target;
+                                }
+                                let raw = link.to_string();
+                                let Some(events) = queue(link) else {
+                                    // Like registry sites: recorded, then skipped.
+                                    gallery_dl_rs::unsupported::record(&raw);
+                                    continue;
+                                };
+                                {
+                                    children.push(event::child_job(
+                                        event::ChildMetadata::from_raw(
+                                            "furaffinity",
+                                            "post",
+                                            &serde_json::Map::new(),
+                                        )
+                                        .with_url(&raw),
+                                        move || events,
+                                    ));
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    stream::iter([event])
+                        .chain(stream::iter(children).flatten())
+                        .boxed()
+                })
+                .boxed()
+        } else {
+            input
+        };
+        // Files of single-format dedicated extractors carry their job's
+        // upstream class (`subcategory`); child jobs use their own URL's.
+        let input = if matches!(extractor, Extractor::Native) && dedicated_class(&url).is_some() {
+            let root = dedicated_class(&url);
+            input
+                .scan(vec![root], move |classes, event| {
+                    if let Ok(event) = &event {
+                        match event {
+                            ExtractionEvent::BeginChild(scope) => classes.push(
+                                scope
+                                    .metadata
+                                    .url()
+                                    .and_then(|url| url::Url::parse(url).ok())
+                                    .and_then(|url| dedicated_class(&url)),
+                            ),
+                            ExtractionEvent::EndChild(_) if classes.len() > 1 => {
+                                classes.pop();
+                            }
+                            _ => {}
+                        }
+                    }
+                    let class = classes.last().copied().flatten();
+                    let event = event.map(|mut event| {
+                        if let Some(class) = class
+                            && let ExtractionEvent::Media(media) = &mut event
+                            && let Some(keywords) = media
+                                .metadata
+                                .as_mut()
+                                .and_then(|metadata| metadata.site_keywords.as_mut())
+                        {
+                            let route = gallery_dl_rs::sites::class_route(keywords.route, class);
+                            Arc::make_mut(keywords).route = route;
+                        }
+                        event
+                    });
+                    std::future::ready(Some(event))
+                })
+                .boxed()
+        } else {
+            input
         };
         let input = if routed_site(&url, extractor) == Some("mastodon") {
             let category = settings_category(&url, extractor);
@@ -3498,6 +3727,94 @@ fn ugoira_postprocessor(format: &str) -> Result<serde_json::Value> {
     Ok(pp)
 }
 
+/// A configured token, or upstream's cached one (written by `oauth:`
+/// helpers) when the setting is absent or `"cache"`.
+fn cached_token(
+    configured: Option<&str>,
+    module: &str,
+    function: &str,
+    argument: &str,
+) -> Option<String> {
+    match configured {
+        Some(token) if token != "cache" => Some(token.to_owned()),
+        _ => gallery_dl_rs::cache::get(&gallery_dl_rs::cache::key(module, function, argument)),
+    }
+}
+
+/// Upstream `work.related` (also read from the category scope).
+fn pixiv_related(options: &gallery_dl_rs::config::Options) -> bool {
+    let site = options.site_options.as_deref();
+    site.and_then(|o| o.get("work"))
+        .and_then(|work| work.get("related"))
+        .or_else(|| site.and_then(|o| o.get("related")))
+        .is_some_and(gallery_dl_rs::postprocess::truthy)
+}
+
+/// Pixiv's `refresh-token`, else the one `oauth:pixiv` cached for the
+/// configured `username` (upstream keys it `None` without one).
+fn pixiv_refresh_token(options: &gallery_dl_rs::config::Options) -> Option<String> {
+    cached_token(
+        options.refresh_token.as_deref(),
+        "pixiv",
+        "_refresh_token_cache",
+        options.username.as_deref().unwrap_or("None"),
+    )
+}
+
+/// Upstream `--cache-status`, `--cache-show`, `--cache-clear` and
+/// `--cache-vacuum` on the shared `cache.sqlite3`.
+fn cache_command(args: &Args) -> Result<()> {
+    use gallery_dl_rs::cache;
+    if args.cache_status {
+        let cache::Status { path, size, counts } = cache::status()?;
+        let width = counts
+            .iter()
+            .map(|(name, _)| name.len())
+            .max()
+            .unwrap_or(0)
+            .min(24);
+        let digits = counts
+            .iter()
+            .find(|(name, _)| name == "Total")
+            .map_or(1, |(_, count)| count.to_string().len());
+        println!(
+            "File:\n  {}\nSize:\n  {}\nEntries:",
+            path.display(),
+            gallery_dl_rs::download::format_value(size)
+        );
+        for (name, count) in counts {
+            println!("  {name:<width$}: {count:>digits$}");
+        }
+    } else if let Some(module) = &args.cache_show {
+        for (key, value, expires) in cache::show(module)? {
+            let expires = if expires != 0 {
+                format!(" ({expires})")
+            } else {
+                String::new()
+            };
+            println!("{key}{expires}:\n  {value}\n");
+        }
+    } else if let Some(module) = &args.cache_clear {
+        let count = cache::clear(module)?;
+        let path = cache::path().unwrap_or_default();
+        eprintln!(
+            "[cache][info] Deleted {count} entr{} from '{}'",
+            if count == 1 { "y" } else { "ies" },
+            path.display()
+        );
+    } else if args.cache_vacuum {
+        eprintln!("[cache][info] Running 'VACUUM'");
+        let saved = cache::vacuum()?;
+        if saved > 0 {
+            eprintln!(
+                "[cache][info] Reduced database size by {} bytes",
+                gallery_dl_rs::download::format_value(saved)
+            );
+        }
+    }
+    Ok(())
+}
+
 async fn resolved_settings(
     args: &Args,
     extra: &[String],
@@ -3649,11 +3966,28 @@ async fn resolved_settings(
         ("sleep-429", &args.sleep_429),
     ] {
         if let Some(value) = value {
-            gallery_dl_rs::sleep::SleepRange::parse(value)?;
+            if key == "sleep-request" {
+                gallery_dl_rs::sleep::SleepRange::parse(value)?;
+            } else {
+                gallery_dl_rs::sleep::RetrySleep::from_value(&value.as_str().into())?;
+            }
             Arc::make_mut(site_options.get_or_insert_with(Default::default))
                 .insert(key.into(), value.clone().into());
         }
     }
+    // Upstream `cache.file` (`--cache-file` takes precedence).
+    gallery_dl_rs::cache::set_path(
+        args.cache_file
+            .as_deref()
+            .and_then(std::path::Path::to_str)
+            .or_else(|| {
+                config
+                    .sections()
+                    .get("cache")
+                    .and_then(|cache| cache.get("file"))
+                    .and_then(serde_json::Value::as_str)
+            }),
+    );
     let _ = GLOBAL_OPTIONS.set({
         let mut globals = config.globals().clone();
         for section in ["downloader", "output"] {
@@ -3824,6 +4158,7 @@ async fn resolved_settings(
         },
         directory_conditions: None,
         cookies: args.cookies.clone(),
+        inline_cookies: None,
         browser_cookies: None,
         retweets: None,
         quoted: None,
@@ -3908,7 +4243,7 @@ async fn resolved_settings(
         site_options: None,
     };
     let mut settings = BTreeMap::new();
-    for category in [
+    for (category, scope) in [
         "instagram",
         "twitter",
         "facebook",
@@ -3951,17 +4286,30 @@ async fn resolved_settings(
     ]
     .into_iter()
     .chain(gallery_dl_rs::sites::categories())
-    {
+    .map(|category| (category, None))
+    .chain(
+        // Other configured `CATEGORY.SUBCATEGORY` scopes, selected per file.
+        config
+            .classes()
+            .filter(|(category, _)| !matches!(*category, "danbooru" | "e621"))
+            .map(|(category, subcategory)| {
+                let key: &'static str =
+                    Box::leak(format!("{category}:{subcategory}").into_boxed_str());
+                (key, Some((category.to_owned(), subcategory.to_owned())))
+            })
+            .collect::<Vec<_>>(),
+    ) {
         let class = category
             .split_once('.')
             .filter(|(base, _)| matches!(*base, "danbooru" | "e621"));
-        let resolved = match class {
-            Some((base, class)) => config.resolve_class(base, class)?,
-            None => config.resolve(category)?,
+        let resolved = match (class, &scope) {
+            (_, Some((base, class))) => config.resolve_class(base, class)?,
+            (Some((base, class)), None) => config.resolve_class(base, class)?,
+            (None, None) => config.resolve(category)?,
         };
         let mut options = defaults.overlay(&resolved).overlay(&overrides);
         if let Some(archive) = &options.archive {
-            let base = category.split('.').next().unwrap_or(category);
+            let base = category.split(['.', ':']).next().unwrap_or(category);
             options.archive = Some(gallery_dl_rs::config::render_archive(archive, base));
         }
         let has_username = options.username.as_ref().is_some_and(|u| !u.is_empty())
@@ -3972,8 +4320,10 @@ async fn resolved_settings(
                 .is_some_and(|u| u.as_str().is_some_and(|u| !u.is_empty()));
         if !has_username
             && let Some(text) = &netrc
-            && let Some((login, password)) =
-                gallery_dl_rs::netrc::lookup(text, category.split('.').next().unwrap_or(category))
+            && let Some((login, password)) = gallery_dl_rs::netrc::lookup(
+                text,
+                category.split(['.', ':']).next().unwrap_or(category),
+            )
         {
             let (username, password, site) = credentials(Some(login), Some(password));
             options = options.overlay(&ConfigOptions {

@@ -202,6 +202,35 @@ pub fn valid_cid(cid: &str) -> bool {
 }
 
 /// Classify a Bluesky URL. Unsupported views are rejected explicitly.
+/// The upstream extractor class of a Bluesky URL.
+pub fn subcategory(url: &Url) -> Option<&'static str> {
+    Some(match target(url).ok()? {
+        Target::Post { .. } => "post",
+        Target::Feed { feed, .. } => match feed {
+            Feed::Media => "media",
+            Feed::Posts => "posts",
+            Feed::Replies => "replies",
+            Feed::Video => "video",
+            Feed::ActorLikes => "likes",
+            Feed::Custom(_) => "feed",
+            Feed::List(_) => "list",
+            Feed::Search { query, .. } if query.starts_with('#') => "hashtag",
+            Feed::Search { .. } => "search",
+            Feed::Bookmarks => "bookmark",
+        },
+        Target::Profile { view, .. } => match view {
+            ProfileView::Info => "info",
+            ProfileView::Avatar => "avatar",
+            ProfileView::Background => "background",
+            ProfileView::Likes => "likes",
+        },
+        Target::Following { .. } => "following",
+        Target::Search { query, .. } if query.starts_with('#') => "hashtag",
+        Target::Search { .. } => "search",
+        Target::Bookmarks => "bookmark",
+    })
+}
+
 pub fn target(url: &Url) -> Result<Target> {
     let unsupported = || {
         error(

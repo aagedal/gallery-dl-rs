@@ -343,3 +343,45 @@ async fn handoff_post_forms_and_expected_statuses_match_upstream() {
     assert!(matches!(outcome, Outcome::Downloaded(_)), "{outcome:?}");
     assert!(handle.join().unwrap().starts_with("GET /file.jpg "));
 }
+
+#[tokio::test]
+async fn configured_headers_override_file_headers() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/image.jpg", listener.local_addr().unwrap());
+    let handle = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut bytes = [0; 4096];
+        let mut request = Vec::new();
+        while !request.ends_with(b"\r\n\r\n") {
+            let read = socket.read(&mut bytes).unwrap();
+            assert!(read > 0);
+            request.extend_from_slice(&bytes[..read]);
+        }
+        let _ = socket.write_all(RESPONSE);
+        String::from_utf8(request).unwrap().to_ascii_lowercase()
+    });
+    let root = tempfile::tempdir().unwrap();
+    let mut media = item(&url, None);
+    media
+        .headers
+        .insert("Referer".into(), "https://file.example/".into());
+    let client = download::client(Duration::from_secs(5))
+        .unwrap()
+        .with_headers(vec![
+            ("Referer".into(), "https://configured.example/".into()),
+            ("X-Extra".into(), "1".into()),
+        ]);
+    download::download(&client, root.path(), &media, 0)
+        .await
+        .unwrap();
+    let request = handle.join().unwrap();
+    assert!(
+        request.contains("referer: https://configured.example/\r\n"),
+        "{request}"
+    );
+    assert!(!request.contains("file.example"));
+    assert!(request.contains("x-extra: 1\r\n"));
+}

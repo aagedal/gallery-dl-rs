@@ -593,3 +593,45 @@ fn grid_pages_parse_their_cursor() {
         .is_none()
     );
 }
+
+#[tokio::test]
+async fn author_followups_are_fetched_before_the_next_album_photo() {
+    let comment = |photo: &str| {
+        format!(
+            r#"{{"node":{{"id":"c{photo}","author":{{"is_author_original_poster":true}},"attachment":{{"__typename":"Photo","id":"{photo}"}}}},"cursor":null}}"#
+        )
+    };
+    let with_comments = |photo: Value, comments: &[String]| Response {
+        status: 200,
+        body: format!(r#"{{"data":{photo},"comments":[{}]}}"#, comments.join(",")).into_bytes(),
+        delay: Duration::ZERO,
+    };
+    let server = Server::new(vec![
+        with_comments(photo("1", Some("2")), &[comment("9"), comment("1")]),
+        with_comments(photo("9", None), &[comment("9")]),
+        Response::json(photo("2", None)),
+    ]);
+    let facebook = extractor(Duration::from_secs(3))
+        .await
+        .with_author_followups(true);
+    let items = facebook
+        .album_stream(input(Some("1")), server.base.clone())
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap();
+    let ids: Vec<_> = items
+        .iter()
+        .map(|item| item.metadata.as_ref().unwrap().post_id.clone())
+        .collect();
+    assert_eq!(ids, ["1", "9", "2"]);
+    let requests = server.requests.lock().unwrap();
+    assert!(requests[1].starts_with("GET /photo/?fbid=9&set=a.10 "));
+    assert!(requests[2].starts_with("GET /photo/?fbid=2&set=a.10 "));
+}
+
+#[test]
+fn followup_ids_require_the_original_poster() {
+    let page = br#"{"node":{"id":"a","is_author_original_poster":false,{"__typename":"Photo","id":"5"}},"cursor":null}
+        {"node":{"id":"b","is_author_original_poster":true,{"__typename":"Photo","id":"6"}},"cursor":null}"#;
+    assert_eq!(followup_ids(page), ["6"]);
+}

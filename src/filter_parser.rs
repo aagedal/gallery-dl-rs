@@ -46,6 +46,9 @@ enum Token {
     Comma,
     Colon,
     Dot,
+    /// `=` of a keyword argument.
+    Assign,
+    For,
     End,
 }
 fn syntax() -> crate::Error {
@@ -139,10 +142,11 @@ impl Lexer<'_> {
                 }
                 b'=' => {
                     self.index += 1;
-                    if !self.take(b'=') {
-                        return Err(syntax());
+                    if self.take(b'=') {
+                        Token::Eq
+                    } else {
+                        Token::Assign
                     }
-                    Token::Eq
                 }
                 b'!' => {
                     self.index += 1;
@@ -240,9 +244,10 @@ impl Lexer<'_> {
             "is" => Token::Is,
             "if" => Token::If,
             "else" => Token::Else,
-            "lambda" | "for" | "async" | "await" | "yield" | "import" | "from" | "def"
-            | "class" | "del" | "global" | "nonlocal" | "pass" | "raise" | "try" | "except"
-            | "while" | "with" | "as" | "assert" | "return" => return Err(syntax()),
+            "for" => Token::For,
+            "lambda" | "async" | "await" | "yield" | "import" | "from" | "def" | "class"
+            | "del" | "global" | "nonlocal" | "pass" | "raise" | "try" | "except" | "while"
+            | "with" | "as" | "assert" | "return" => return Err(syntax()),
             name if name.starts_with('_')
                 && !matches!(
                     name,
@@ -720,7 +725,14 @@ impl Parser {
                 if !safe_call(&name) {
                     return Err(syntax());
                 }
-                let arguments = self.arguments(Token::RParen)?;
+                let arguments = self.call_arguments()?;
+                if !matches!(name.as_str(), "sorted" | "round" | "timedelta")
+                    && arguments
+                        .iter()
+                        .any(|argument| matches!(argument.expr, Expr::Keyword(..)))
+                {
+                    return Err(syntax());
+                }
                 let depth = 1 + arguments
                     .iter()
                     .map(|argument| argument.depth)
@@ -741,6 +753,29 @@ impl Parser {
                     return Err(syntax());
                 };
                 self.index += 1;
+                // Module functions (`re.search`, `datetime.now`) are calls.
+                if let Expr::Name(module) = &value.expr
+                    && let Some(function) = module_function(module, &name)
+                {
+                    self.expect(&Token::LParen)?;
+                    let arguments = self.call_arguments()?;
+                    let depth = 1 + arguments
+                        .iter()
+                        .map(|argument| argument.depth)
+                        .max()
+                        .unwrap_or(0);
+                    value = self.node(
+                        Expr::Call(
+                            function.into(),
+                            arguments
+                                .into_iter()
+                                .map(|argument| argument.expr)
+                                .collect(),
+                        ),
+                        depth,
+                    )?;
+                    continue;
+                }
                 if !safe_method(&name) {
                     return Err(syntax());
                 }
@@ -769,6 +804,77 @@ impl Parser {
             }
         }
         Ok(value)
+    }
+    /// Call arguments, including `name=value` keyword arguments.
+    fn call_arguments(&mut self) -> Result<Vec<Node>> {
+        let mut values = Vec::new();
+        loop {
+            if self.take(&Token::RParen) {
+                return Ok(values);
+            }
+            let keyword = match (self.peek(), self.tokens.get(self.index + 1)) {
+                (Token::Name(name), Some(Token::Assign)) => Some(name.clone()),
+                _ => None,
+            };
+            if let Some(name) = keyword {
+                self.index += 2;
+                let value = self.expression()?;
+                let depth = value.depth + 1;
+                values.push(self.node(Expr::Keyword(name, Box::new(value.expr)), depth)?);
+            } else {
+                let value = self.expression()?;
+                // `f(x for x in xs)`: a generator as the only argument.
+                if values.is_empty() && self.peek() == &Token::For {
+                    values.push(self.comprehension(None, value, Token::RParen)?);
+                    return Ok(values);
+                }
+                values.push(value);
+            }
+            if self.take(&Token::RParen) {
+                return Ok(values);
+            }
+            self.expect(&Token::Comma)?;
+        }
+    }
+    /// `element for target in iterable [if condition]... close`, after the
+    /// element (and the key of a dictionary comprehension).
+    fn comprehension(&mut self, key: Option<Node>, element: Node, close: Token) -> Result<Node> {
+        self.expect(&Token::For)?;
+        let mut targets = Vec::new();
+        loop {
+            let Token::Name(name) = self.peek().clone() else {
+                return Err(syntax());
+            };
+            self.index += 1;
+            targets.push(name);
+            if !self.take(&Token::Comma) {
+                break;
+            }
+        }
+        self.expect(&Token::In)?;
+        let iterable = self.or()?;
+        let mut conditions = Vec::new();
+        while self.take(&Token::If) {
+            conditions.push(self.or()?);
+        }
+        self.expect(&close)?;
+        let depth = 1 + conditions
+            .iter()
+            .map(|condition| condition.depth)
+            .chain([element.depth, iterable.depth])
+            .chain(key.as_ref().map(|key| key.depth))
+            .max()
+            .unwrap_or(0);
+        self.node(
+            Expr::Comprehension {
+                key: key.map(|key| Box::new(key.expr)),
+                element: Box::new(element.expr),
+                targets,
+                iterable: Box::new(iterable.expr),
+                conditions: conditions.into_iter().map(|c| c.expr).collect(),
+            },
+            depth,
+        )
     }
     fn arguments(&mut self, close: Token) -> Result<Vec<Node>> {
         let mut values = Vec::new();
@@ -804,6 +910,14 @@ impl Parser {
             }
             Token::Name(name) => self.node(Expr::Name(name), 1),
             Token::LBracket => {
+                if self.peek() != &Token::RBracket {
+                    let checkpoint = (self.index, self.nodes);
+                    let first = self.expression()?;
+                    if self.peek() == &Token::For {
+                        return self.comprehension(None, first, Token::RBracket);
+                    }
+                    (self.index, self.nodes) = checkpoint;
+                }
                 let values = self.arguments(Token::RBracket)?;
                 self.list(values)
             }
@@ -812,6 +926,9 @@ impl Parser {
                     return self.tuple(Vec::new());
                 }
                 let first = self.expression()?;
+                if self.peek() == &Token::For {
+                    return self.comprehension(None, first, Token::RParen);
+                }
                 if self.take(&Token::RParen) {
                     return Ok(first);
                 }
@@ -823,6 +940,28 @@ impl Parser {
                 self.tuple(values)
             }
             Token::LBrace => {
+                // `{key: value for ...}` with an expression key.
+                if !matches!(self.peek(), Token::String(_) | Token::RBrace) {
+                    let key = self.expression()?;
+                    self.expect(&Token::Colon)?;
+                    let value = self.expression()?;
+                    if self.peek() != &Token::For {
+                        return Err(syntax());
+                    }
+                    return self.comprehension(Some(key), value, Token::RBrace);
+                }
+                if let (Token::String(_), Some(Token::Colon)) =
+                    (self.peek(), self.tokens.get(self.index + 1))
+                {
+                    let checkpoint = (self.index, self.nodes);
+                    let key = self.atom()?;
+                    self.expect(&Token::Colon)?;
+                    let value = self.expression()?;
+                    if self.peek() == &Token::For {
+                        return self.comprehension(Some(key), value, Token::RBrace);
+                    }
+                    (self.index, self.nodes) = checkpoint;
+                }
                 let mut values = Vec::new();
                 let mut depth = 0;
                 if !self.take(&Token::RBrace) {
@@ -874,10 +1013,51 @@ fn integer_token(digits: &str, radix: u32) -> Result<Token> {
             .map_err(|_| syntax())
     }
 }
+/// Supported functions of upstream's filter globals (`re`, `datetime`).
+fn module_function(module: &str, name: &str) -> Option<&'static str> {
+    Some(match (module, name) {
+        ("re", "search") => "re.search",
+        ("re", "match") => "re.match",
+        ("re", "fullmatch") => "re.fullmatch",
+        ("re", "findall") => "re.findall",
+        ("re", "sub") => "re.sub",
+        ("re", "split") => "re.split",
+        ("datetime", "now") => "datetime.now",
+        ("datetime", "utcnow") => "datetime.utcnow",
+        ("datetime", "fromtimestamp") => "datetime.fromtimestamp",
+        _ => return None,
+    })
+}
+
 fn safe_method(name: &str) -> bool {
     matches!(
         name,
-        "get"
+        "title"
+            | "capitalize"
+            | "swapcase"
+            | "isdigit"
+            | "isdecimal"
+            | "isnumeric"
+            | "isalpha"
+            | "isalnum"
+            | "isspace"
+            | "islower"
+            | "isupper"
+            | "zfill"
+            | "center"
+            | "ljust"
+            | "rjust"
+            | "partition"
+            | "rpartition"
+            | "rsplit"
+            | "removeprefix"
+            | "removesuffix"
+            | "keys"
+            | "values"
+            | "items"
+            | "total_seconds"
+            | "timestamp"
+            | "get"
             | "lower"
             | "upper"
             | "startswith"
@@ -897,7 +1077,26 @@ fn safe_method(name: &str) -> bool {
 fn safe_call(name: &str) -> bool {
     matches!(
         name,
-        "len"
+        "sum"
+            | "sorted"
+            | "reversed"
+            | "list"
+            | "tuple"
+            | "range"
+            | "enumerate"
+            | "zip"
+            | "divmod"
+            | "pow"
+            | "hex"
+            | "oct"
+            | "bin"
+            | "chr"
+            | "ord"
+            | "print"
+            | "datetime"
+            | "timedelta"
+            | "parse_int"
+            | "len"
             | "bool"
             | "str"
             | "int"
@@ -1097,20 +1296,15 @@ mod tests {
             "{'key':}",
             "f'private{value}'",
             "lambda x: x",
-            "[x for x in xs]",
-            "{x: x for x in xs}",
+            "[x for x.y in xs]",
+            "{x: x for x in xs if}",
             "__import__('private')",
             "open('private')",
             "getattr(x, 'private')",
             "obj.__class__",
             "obj.private",
             "obj.private()",
-            "{'a':1}.keys()",
-            "{'a':1}.values()",
-            "{'a':1}.items()",
-            "re.search('private', caption)",
             "'ß'.casefold()",
-            "'²'.isdigit()",
             "len(value=1)",
             "1e999",
             "1__0",

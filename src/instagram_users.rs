@@ -209,8 +209,14 @@ impl Instagram {
         stream::iter(views)
             .flat_map(move |view| {
                 let user = user.clone();
+                // Upstream's child URLs for each view.
+                let url = match view.as_str() {
+                    "stories" => format!("https://www.instagram.com/stories/{}/", user.key()),
+                    view => format!("https://www.instagram.com/{}/{view}/", user.key()),
+                };
                 event::child_job(
-                    ChildMetadata::from_raw("instagram", "user", &serde_json::Map::new()),
+                    ChildMetadata::from_raw("instagram", "user", &serde_json::Map::new())
+                        .with_url(&url),
                     move || self.dispatch_view(user, &view),
                 )
             })

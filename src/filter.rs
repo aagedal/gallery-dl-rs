@@ -71,6 +71,17 @@ pub(super) enum Expr {
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
     Compare(Box<Expr>, Vec<(CompareOp, Expr)>),
     Call(String, Vec<Expr>),
+    /// `name=value` keyword argument of a call.
+    Keyword(String, Box<Expr>),
+    /// `[element for targets in iterable if conditions]`; a `key` makes it a
+    /// dictionary comprehension. Generators evaluate to lists.
+    Comprehension {
+        key: Option<Box<Expr>>,
+        element: Box<Expr>,
+        targets: Vec<String>,
+        iterable: Box<Expr>,
+        conditions: Vec<Expr>,
+    },
     Method(Box<Expr>, String, Vec<Expr>),
     Conditional {
         test: Box<Expr>,
@@ -376,7 +387,23 @@ fn validate_tree(expr: &Expr, depth: usize, budget: &mut usize) -> Result<()> {
             next(left)?;
             next(right)?;
         }
-        Expr::Unary(_, value) => next(value)?,
+        Expr::Unary(_, value) | Expr::Keyword(_, value) => next(value)?,
+        Expr::Comprehension {
+            key,
+            element,
+            iterable,
+            conditions,
+            ..
+        } => {
+            if let Some(key) = key {
+                next(key)?;
+            }
+            next(element)?;
+            next(iterable)?;
+            for condition in conditions {
+                next(condition)?;
+            }
+        }
         Expr::Slice(value, bounds) => {
             next(value)?;
             for bound in bounds.iter() {
@@ -774,6 +801,12 @@ fn context_parts(
     post: Option<&crate::extract::PostMetadata>,
     media: Option<&Media>,
 ) -> BTreeMap<String, Value> {
+    // Native direct links are upstream's `directlink` category.
+    let category = if category == "direct" {
+        "directlink"
+    } else {
+        category
+    };
     let mut values = BTreeMap::from([("category".into(), text(category))]);
     if let Some(media) = media {
         let (stem, extension) = media
@@ -1604,6 +1637,12 @@ fn context_parts(
                     json_value(value)
                 };
                 values.insert(key.clone(), value);
+            }
+            // Upstream's extractor class of the file.
+            if !keywords.route.subcategory.is_empty() {
+                values
+                    .entry("subcategory".into())
+                    .or_insert_with(|| text(keywords.route.subcategory));
             }
         }
     }

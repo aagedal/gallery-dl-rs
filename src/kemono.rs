@@ -194,6 +194,21 @@ pub fn valid_hash(hash: &str) -> bool {
     (1..=128).contains(&hash.len()) && hash.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
+/// The upstream extractor class of a Kemono/Coomer URL; user and post
+/// jobs use the service name, like upstream.
+pub fn subcategory(url: &Url) -> Option<&'static str> {
+    Some(match target(url).ok()? {
+        Target::Artists { .. } => "artists",
+        Target::Favorites { .. } => "favorite",
+        Target::Posts { .. } => "posts",
+        Target::Discord { channel: None, .. } => "discord-server",
+        Target::Discord { .. } => "discord",
+        Target::Post { service, .. }
+        | Target::Revisions { service, .. }
+        | Target::User { service, .. } => crate::sites::intern(service),
+    })
+}
+
 pub fn target(url: &Url) -> Result<Target> {
     let unsupported = || {
         error(

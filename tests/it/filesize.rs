@@ -359,7 +359,7 @@ async fn scoped_configuration_and_explicit_zero_override_size_limits() {
     let mut command = binary(root.path());
     command.arg("--native-config").arg(&cfg).arg(&server.url);
     success(&output(&mut command).await);
-    let path = root.path().join("output/direct/saved.jpg");
+    let path = root.path().join("output/directlink/saved.jpg");
     assert!(!path.exists());
     let mut command = binary(root.path());
     command
@@ -391,7 +391,7 @@ async fn global_size_setting_takes_precedence_over_category() {
     command.arg("--native-config").arg(cfg).arg(&server.url);
     success(&output(&mut command).await);
     assert_eq!(
-        std::fs::read(root.path().join("output/direct/saved.jpg")).unwrap(),
+        std::fs::read(root.path().join("output/directlink/saved.jpg")).unwrap(),
         b"abc"
     );
     assert_eq!(server.requests(), 1);

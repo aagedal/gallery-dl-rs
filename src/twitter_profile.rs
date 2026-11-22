@@ -277,6 +277,20 @@ impl Twitter {
         .boxed()
     }
 
+    /// A twitpic.com page's image; failures are skipped like upstream.
+    async fn twitpic_image(&self, page: &Url) -> Option<Url> {
+        let response = self
+            .client
+            .get(page.clone())
+            .timeout(self.request_timeout)
+            .send()
+            .await
+            .ok()
+            .filter(|response| response.status().is_success())?;
+        let body = crate::transport::read_capped(response, 4 << 20).await?;
+        media::twitpic_image(&String::from_utf8_lossy(&body))
+    }
+
     async fn expand_next_known(
         &self,
         engine: &mut expansion::Engine,
@@ -288,6 +302,11 @@ impl Twitter {
             match engine.next()? {
                 expansion::Action::Done => return Ok(None),
                 expansion::Action::Post(mut post) => {
+                    for page in std::mem::take(&mut post.twitpic) {
+                        if let Some(image) = self.twitpic_image(&page).await {
+                            post.push_twitpic(image);
+                        }
+                    }
                     for item in &mut post.media {
                         self.network.apply_media(item);
                     }

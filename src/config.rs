@@ -50,6 +50,7 @@ const NATIVE_SITE_OPTIONS: &[(&str, &[&str])] = &[
     ("pinterest", &["sections", "stories", "videos", "domain"]),
     ("flickr", &["metadata", "videos"]),
     ("danbooru", &["metadata"]),
+    ("e621", &["metadata"]),
     (
         "tumblr",
         &[
@@ -212,6 +213,9 @@ pub struct Options {
     /// Ordered `(filter, components)` pairs from an object-valued `directory`.
     pub directory_conditions: Option<Vec<(String, Vec<String>)>>,
     pub cookies: Option<PathBuf>,
+    /// Upstream `cookies` given as a `{"name": "value"}` object, set for the
+    /// site's cookie domain.
+    pub inline_cookies: Option<std::sync::Arc<Vec<(String, String)>>>,
     /// Browser cookie specification (`firefox:PATH`, `helium:Profile 1`, ...)
     /// selected by an upstream-style `cookies` array.
     /// Mutually exclusive with the cookie file during scope resolution.
@@ -471,17 +475,24 @@ impl Options {
             } else {
                 self.directory_conditions.clone()
             },
-            cookies: if overrides.browser_cookies.is_some() {
+            cookies: if overrides.browser_cookies.is_some() || overrides.inline_cookies.is_some() {
                 None
             } else {
                 overrides.cookies.clone().or_else(|| self.cookies.clone())
             },
             browser_cookies: if overrides.browser_cookies.is_some() {
                 overrides.browser_cookies.clone()
-            } else if overrides.cookies.is_some() {
+            } else if overrides.cookies.is_some() || overrides.inline_cookies.is_some() {
                 None
             } else {
                 self.browser_cookies.clone()
+            },
+            inline_cookies: if overrides.inline_cookies.is_some() {
+                overrides.inline_cookies.clone()
+            } else if overrides.cookies.is_some() || overrides.browser_cookies.is_some() {
+                None
+            } else {
+                self.inline_cookies.clone()
             },
             proxy: overrides.proxy.clone().or_else(|| self.proxy.clone()),
             user_agent: overrides
@@ -659,6 +670,7 @@ pub const GLOBAL_KEYS: &[&str] = &[
     "path-strip",
     "path-convert",
     "path-extended",
+    "format-separator",
     "skip",
     "download",
     "cookies-update",
@@ -759,6 +771,74 @@ pub fn set_format(path: &Path, format: Format) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .push((path.to_path_buf(), format));
+}
+
+/// Upstream `subconfigs`: load each listed file (a path or list of paths,
+/// with `~` and variables expanded) after the current one, merging its values
+/// over it; subconfigs may name further subconfigs.
+fn with_subconfigs(bytes: Vec<u8>, depth: usize) -> Result<Vec<u8>> {
+    let normalized = crate::source_date_json::normalize(&bytes);
+    let Ok(Value::Object(mut root)) =
+        serde_json::from_slice::<Value>(normalized.as_deref().unwrap_or(&bytes))
+    else {
+        return Ok(bytes);
+    };
+    let Some(subconfigs) = root.remove("subconfigs") else {
+        return Ok(bytes);
+    };
+    if depth >= 8 {
+        return Err(error("native configuration subconfigs nest too deeply"));
+    }
+    let paths = match subconfigs {
+        Value::String(path) => vec![path],
+        Value::Array(paths) => paths
+            .into_iter()
+            .map(|path| match path {
+                Value::String(path) => Ok(path),
+                _ => Err(error("native configuration subconfigs must be paths")),
+            })
+            .collect::<Result<_>>()?,
+        Value::Null => Vec::new(),
+        _ => return Err(error("native configuration subconfigs must be paths")),
+    };
+    let mut root = Value::Object(root);
+    for path in paths {
+        let path = std::path::absolute(crate::postprocess::expand_path(&path))
+            .map_err(|_| error("cannot resolve native configuration subconfig"))?;
+        let mut bytes = Vec::new();
+        std::fs::File::open(&path)
+            .and_then(|file| {
+                use std::io::Read;
+                file.take((MAX_CONFIG_BYTES + 1) as u64)
+                    .read_to_end(&mut bytes)
+            })
+            .map_err(|_| error("cannot read native configuration subconfig"))?;
+        let bytes = with_subconfigs(to_json(&path, bytes)?, depth + 1)?;
+        let normalized = crate::source_date_json::normalize(&bytes);
+        let sub: Value = serde_json::from_slice(normalized.as_deref().unwrap_or(&bytes))
+            .map_err(|_| error("invalid native configuration subconfig"))?;
+        combine(&mut root, sub);
+    }
+    serde_json::to_vec(&root).map_err(|_| error("invalid native configuration"))
+}
+
+/// Upstream `util.combine_dict`: nested objects merge, other values replace.
+fn combine(base: &mut Value, other: Value) {
+    match (base, other) {
+        (Value::Object(base), Value::Object(other)) => {
+            for (key, value) in other {
+                match base.get_mut(&key) {
+                    Some(existing @ Value::Object(_)) if value.is_object() => {
+                        combine(existing, value)
+                    }
+                    _ => {
+                        base.insert(key, value);
+                    }
+                }
+            }
+        }
+        (base, other) => *base = other,
+    }
 }
 
 /// Convert YAML and TOML configuration files to JSON. The format is declared
@@ -1258,7 +1338,7 @@ impl Config {
             .read_to_end(&mut bytes)
             .await
             .map_err(|_| error("cannot read native configuration"))?;
-        let bytes = to_json(&absolute, bytes)?;
+        let bytes = with_subconfigs(to_json(&absolute, bytes)?, 0)?;
         Self::parse(&bytes, &parent)
     }
 
@@ -1288,7 +1368,7 @@ impl Config {
             .read_to_end(&mut bytes)
             .await
             .map_err(|_| error("cannot read native configuration"))?;
-        let bytes = to_json(&absolute, bytes)?;
+        let bytes = with_subconfigs(to_json(&absolute, bytes)?, 0)?;
         Self::parse_with_options(&bytes, &parent, options)
     }
 
@@ -1405,57 +1485,61 @@ impl Config {
                 if extractor.get(name).is_some_and(|value| !value.is_object()) {
                     return Err(error("native configuration category must be a JSON object"));
                 }
-                if !matches!(name, "danbooru" | "e621")
-                    && extractor
-                        .get(name)
-                        .and_then(Value::as_object)
-                        .is_some_and(|settings| {
-                            ["tag", "artist", "artist-search"]
-                                .iter()
-                                .any(|key| settings.contains_key(*key))
-                        })
-                {
-                    return Err(error(
-                        "native class settings are only supported for danbooru and e621",
-                    ));
-                }
             }
         }
         let mut raw_classes = Vec::new();
+        const CLASS_OPTIONS: &[&str] = &[
+            "parent-metadata",
+            "metadata-parent",
+            "init",
+            "postprocessors",
+            "postprocessor-options",
+            "base-directory",
+            "filename",
+            "directory",
+            "child-filter",
+            "child-range",
+            "post-filter",
+            "post-range",
+            "date-before",
+            "date-after",
+        ];
         if let Some(extractor) = shape.get_mut("extractor").and_then(Value::as_object_mut) {
-            for category in ["danbooru", "e621"] {
-                if let Some(settings) = extractor.get_mut(category).and_then(Value::as_object_mut) {
-                    for subcategory in ["artist", "artist-search", "tag"] {
-                        if let Some(value) = settings.remove(subcategory) {
-                            let fields = value.as_object().ok_or_else(|| {
-                                error("native configuration class must be a JSON object")
-                            })?;
-                            if fields.keys().any(|key| {
-                                !matches!(
-                                    key.as_str(),
-                                    "parent-metadata"
-                                        | "metadata-parent"
-                                        | "init"
-                                        | "postprocessors"
-                                        | "postprocessor-options"
-                                        | "base-directory"
-                                        | "filename"
-                                        | "directory"
-                                        | "child-filter"
-                                        | "child-range"
-                                        | "post-filter"
-                                        | "post-range"
-                                        | "date-before"
-                                        | "date-after"
-                                )
-                            }) {
-                                return Err(error("unsupported native booru class option"));
-                            }
-                            let raw: RawOptions = serde_json::from_value(value)
-                                .map_err(|_| error("invalid native booru class settings"))?;
-                            raw_classes.push((category.to_owned(), subcategory.to_owned(), raw));
+            for (category, settings) in extractor.iter_mut() {
+                let Some(settings) = settings.as_object_mut() else {
+                    continue;
+                };
+                let booru = matches!(category.as_str(), "danbooru" | "e621");
+                // Upstream `extractor.CATEGORY.SUBCATEGORY` scopes, by the
+                // subcategory names of upstream's extractor classes.
+                let subcategories: Vec<String> = settings
+                    .iter()
+                    .filter(|(key, value)| {
+                        if booru {
+                            matches!(key.as_str(), "artist" | "artist-search" | "tag")
+                        } else {
+                            value.is_object() && upstream_subcategory(key)
                         }
+                    })
+                    .map(|(key, _)| key.clone())
+                    .collect();
+                for subcategory in subcategories {
+                    let mut value = settings.remove(&subcategory).expect("listed key");
+                    let fields = value
+                        .as_object_mut()
+                        .ok_or_else(|| error("native configuration class must be a JSON object"))?;
+                    if booru
+                        && fields
+                            .keys()
+                            .any(|key| !CLASS_OPTIONS.contains(&key.as_str()))
+                    {
+                        return Err(error("unsupported native booru class option"));
                     }
+                    // Other sites keep the class options natively supported.
+                    fields.retain(|key, _| CLASS_OPTIONS.contains(&key.as_str()));
+                    let raw: RawOptions = serde_json::from_value(value)
+                        .map_err(|_| error("invalid native class settings"))?;
+                    raw_classes.push((category.clone(), subcategory, raw));
                 }
             }
         }
@@ -1585,6 +1669,10 @@ impl Config {
                 }
             }
         }
+        // Templates below are parsed with upstream's `format-separator`.
+        if let Some(separator) = globals.get("format-separator").and_then(Value::as_str) {
+            crate::naming::format::set_separator(separator);
+        }
         let mut sections = serde_json::Map::new();
         let mut root_extra = serde_json::Map::new();
         let mut extractor_extra = serde_json::Map::new();
@@ -1598,6 +1686,16 @@ impl Config {
             known.push("extractor");
             root_extra = take_unknown(object, &known);
             if let Some(extractor) = object.get_mut("extractor").and_then(Value::as_object_mut) {
+                // Upstream names the direct-link scope `directlink`.
+                if let Some(Value::Object(fields)) = extractor.remove("directlink") {
+                    match extractor
+                        .entry("direct")
+                        .or_insert_with(|| Value::Object(Default::default()))
+                    {
+                        Value::Object(direct) => direct.extend(fields),
+                        _ => return Err(error("invalid native configuration JSON")),
+                    }
+                }
                 extractor_extra = take_unknown(extractor, struct_fields::<RawExtractor>());
                 let options = struct_fields::<RawOptions>();
                 for category in DEDICATED_CATEGORIES {
@@ -1857,14 +1955,13 @@ impl Config {
         .into_iter()
         .chain(site_scopes)
         {
-            if !matches!(name, "danbooru" | "e621")
-                && (settings.tag.is_some()
-                    || settings.artist.is_some()
-                    || settings.artist_search.is_some())
-            {
-                return Err(error(
-                    "native class settings are only supported for danbooru and e621",
-                ));
+            settings.normalize();
+            // Settings native extractors of this category do not use are
+            // ignored (upstream configurations set them for every site).
+            if !matches!(name, "danbooru" | "e621") {
+                settings.tag = None;
+                settings.artist = None;
+                settings.artist_search = None;
             }
             if !matches!(
                 name,
@@ -1876,33 +1973,21 @@ impl Config {
                     | "gelbooru"
                     | "safebooru"
             ) && !crate::sites::site(name).is_some_and(|site| site.api_key)
-                && settings.api_key.0.is_some()
             {
-                return Err(error(
-                    "native configuration api-key is only supported for tumblr, flickr, wallhaven, weasyl, pixeldrain, gelbooru and safebooru",
-                ));
+                settings.api_key.0 = None;
             }
-            if !matches!(name, "danbooru" | "e621") && settings.threshold.0.is_some() {
-                return Err(error(
-                    "native configuration threshold is only supported for danbooru and e621",
-                ));
+            if !matches!(name, "danbooru" | "e621") {
+                settings.threshold.0 = None;
             }
-            if !matches!(name, "danbooru" | "e621" | "bluesky" | "kemono" | "coomer")
-                && (settings.username.0.is_some() || settings.password.0.is_some())
-            {
-                return Err(error(
-                    "native configuration username/password are only supported for danbooru, e621, bluesky, kemono and coomer",
-                ));
+            if !matches!(name, "danbooru" | "e621" | "bluesky" | "kemono" | "coomer") {
+                settings.username.0 = None;
+                settings.password.0 = None;
             }
-            if !matches!(name, "gelbooru" | "safebooru") && settings.user_id.0.is_some() {
-                return Err(error(
-                    "native configuration user-id is only supported for gelbooru and safebooru",
-                ));
+            if !matches!(name, "gelbooru" | "safebooru") {
+                settings.user_id.0 = None;
             }
-            if name != "bluesky" && settings.api_server.0.is_some() {
-                return Err(error(
-                    "native configuration api-server is only supported for bluesky",
-                ));
+            if name != "bluesky" {
+                settings.api_server.0 = None;
             }
             let bluesky_endpoint = if name == "bluesky" {
                 match settings.endpoint.0.take() {
@@ -1943,27 +2028,18 @@ impl Config {
             } else {
                 None
             };
-            if !matches!(name, "mastodon.social" | "pawoo" | "baraag" | "tumblr")
-                && settings.access_token.0.is_some()
-            {
-                return Err(error(
-                    "native configuration access-token requires a tumblr, mastodon.social, pawoo or baraag scope",
-                ));
+            // Tokens stay bound to the instance scopes that use them.
+            if !matches!(name, "mastodon.social" | "pawoo" | "baraag" | "tumblr") {
+                settings.access_token.0 = None;
             }
-            if !matches!(name, "pixiv" | "pixiv-novel" | "reddit")
-                && settings.refresh_token.0.is_some()
-            {
-                return Err(error(
-                    "native configuration refresh-token is only supported for pixiv, pixiv-novel or reddit",
-                ));
+            if !matches!(name, "pixiv" | "pixiv-novel" | "reddit" | "deviantart") {
+                settings.refresh_token.0 = None;
             }
-            if !matches!(name, "deviantart" | "reddit") && settings.client_id.0.is_some()
-                || name != "deviantart" && settings.client_secret.0.is_some()
-            {
-                return Err(error(
-                    "native configuration client-id is only supported for deviantart or reddit, \
-                     and client-secret for deviantart",
-                ));
+            if !matches!(name, "deviantart" | "reddit") {
+                settings.client_id.0 = None;
+            }
+            if name != "deviantart" {
+                settings.client_secret.0 = None;
             }
             if name == "deviantart"
                 && settings
@@ -2150,6 +2226,13 @@ impl Config {
     pub fn parent_keywords(&self) -> &[String] {
         &self.parent_keywords
     }
+    /// Configured `(category, subcategory)` scopes.
+    pub fn classes(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.classes
+            .keys()
+            .map(|(category, subcategory)| (category.as_str(), subcategory.as_str()))
+    }
+
     pub fn resolve_class(&self, category: &str, subcategory: &str) -> Result<Options> {
         let mut resolved = self.resolve(category)?;
         if let Some(class) = self.classes.get(&(category.into(), subcategory.into())) {
@@ -2174,7 +2257,45 @@ impl Config {
 }
 
 impl RawOptions {
-    fn resolve(self, directory: &Path, _parent_keywords: &[String]) -> Result<Options> {
+    /// Upstream treats a scoped `null` as "use the default". Credentials
+    /// become explicitly empty, so a parent scope's secret is never
+    /// inherited; other settings inherit. `cursor: true` is the default.
+    fn normalize(&mut self) {
+        let null = |field: &Field| matches!(field.0, Some(Value::Null));
+        for field in [
+            &mut self.cookies,
+            &mut self.proxy,
+            &mut self.user_agent,
+            &mut self.archive,
+            &mut self.max_posts,
+        ] {
+            if null(field) {
+                field.0 = None;
+            }
+        }
+        for field in [
+            &mut self.username,
+            &mut self.password,
+            &mut self.api_key,
+            &mut self.refresh_token,
+            &mut self.client_id,
+            &mut self.client_secret,
+            &mut self.user_id,
+        ] {
+            if null(field) {
+                field.0 = Some(Value::String(String::new()));
+            }
+        }
+        if null(&self.access_token) {
+            self.access_token.0 = Some(Value::Bool(false));
+        }
+        if matches!(self.cursor.0, Some(Value::Bool(true))) {
+            self.cursor.0 = None;
+        }
+    }
+
+    fn resolve(mut self, directory: &Path, _parent_keywords: &[String]) -> Result<Options> {
+        self.normalize();
         let primary_filter = filter_clauses(self.file_filter, "file-filter")?;
         let alias_filter = filter_clauses(self.image_filter, "image-filter")?;
         let file_filter = match primary_filter {
@@ -2376,8 +2497,7 @@ impl RawOptions {
             None => None,
             Some(Value::Bool(false)) => Some(String::new()),
             Some(Value::String(value))
-                if value != "cache"
-                    && value.len() <= 4096
+                if value.len() <= 4096
                     && value
                         .bytes()
                         .all(|b| b.is_ascii_alphanumeric() || b"-._~+/=".contains(&b)) =>
@@ -2386,7 +2506,7 @@ impl RawOptions {
             }
             Some(_) => {
                 return Err(error(
-                    "native configuration access-token must be a token string or false; OAuth cache discovery is not implemented",
+                    "native configuration access-token must be a token string, \"cache\" or false",
                 ));
             }
         };
@@ -2613,6 +2733,7 @@ impl RawOptions {
         };
         let api_key = match self.api_key.0 {
             None => None,
+            Some(Value::String(key)) if key.is_empty() => Some(key),
             Some(Value::String(key))
                 if (1..=128).contains(&key.len())
                     && key.bytes().all(|b| b.is_ascii_alphanumeric()) =>
@@ -2627,6 +2748,7 @@ impl RawOptions {
         };
         let refresh_token = match self.refresh_token.0 {
             None => None,
+            Some(Value::String(token)) if token.is_empty() => Some(token),
             Some(Value::String(token))
                 if (1..=256).contains(&token.len())
                     && token
@@ -2645,6 +2767,7 @@ impl RawOptions {
         // Reddit identifiers with '-' and '_'.
         let credential = |field: Field, name: &str, identifier: bool| match field.0 {
             None => Ok(None),
+            Some(Value::String(value)) if value.is_empty() => Ok(Some(value)),
             Some(Value::String(value))
                 if (1..=128).contains(&value.len())
                     && value.bytes().all(|b| {
@@ -2784,6 +2907,29 @@ impl RawOptions {
         };
         let user_agent = network_string(self.user_agent)?;
         NetworkOptions::new(proxy.clone(), user_agent.clone())?;
+        let inline_cookies = match &self.cookies.0 {
+            Some(Value::Object(values)) => {
+                let invalid = || error("native configuration cookies must map names to strings");
+                let mut pairs = Vec::new();
+                for (name, value) in values {
+                    let value = match value {
+                        Value::String(value) => value.clone(),
+                        Value::Number(value) => value.to_string(),
+                        _ => return Err(invalid()),
+                    };
+                    if name.is_empty()
+                        || name.contains(['\t', '\n', '\r', ';', '='])
+                        || value.contains(['\t', '\n', '\r'])
+                    {
+                        return Err(invalid());
+                    }
+                    pairs.push((name.clone(), value));
+                }
+                self.cookies.0 = None;
+                Some(std::sync::Arc::new(pairs))
+            }
+            _ => None,
+        };
         let (cookies, browser_cookies) = cookie_source(self.cookies, directory)?;
         Ok(Options {
             init: self
@@ -2805,6 +2951,7 @@ impl RawOptions {
             user_agent,
             base_directory: path(self.base_directory, directory, "base-directory")?,
             cookies,
+            inline_cookies,
             browser_cookies,
             archive: archive_path(self.archive, directory)?,
             filename,
@@ -2907,6 +3054,8 @@ fn range_spec(field: Field, name: &str) -> Result<Option<String>> {
         ))
     };
     let spec = match value {
+        // `null`, like an empty range, selects everything.
+        Value::Null => ":".into(),
         Value::String(spec) if spec.is_empty() => ":".into(),
         Value::String(spec) => spec,
         Value::Array(values) if values.is_empty() => ":".into(),
@@ -2931,6 +3080,7 @@ fn filter_clauses(field: Field, name: &str) -> Result<Option<Vec<String>>> {
         return Ok(None);
     };
     let clauses = match value {
+        Value::Null => Vec::new(),
         Value::String(value) if value.is_empty() => Vec::new(),
         Value::String(value) => vec![value],
         Value::Array(values) if values.len() <= 32 => values
@@ -3080,6 +3230,22 @@ fn archive_path(field: Field, directory: &Path) -> Result<Option<PathBuf>> {
     // Like upstream, relative paths resolve against the working directory.
     let _ = directory;
     Ok(Some(joined))
+}
+
+/// Whether `name` is the subcategory of one of upstream's extractor classes.
+fn upstream_subcategory(name: &str) -> bool {
+    static NAMES: std::sync::OnceLock<std::collections::HashSet<&'static str>> =
+        std::sync::OnceLock::new();
+    NAMES
+        .get_or_init(|| {
+            include_str!("upstream_extractors.tsv")
+                .lines()
+                .filter(|line| !line.starts_with('#'))
+                .filter_map(|line| line.split('\t').nth(3))
+                .filter(|subcategory| !subcategory.is_empty())
+                .collect()
+        })
+        .contains(name)
 }
 
 /// Replace `{category}` in an archive path from a segment list.
@@ -3332,6 +3498,51 @@ fn value_truthy(value: &Value) -> bool {
 
 #[cfg(test)]
 mod site_scope_tests {
+    #[tokio::test]
+    async fn subconfigs_merge_over_the_main_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("sub.json");
+        let nested = dir.path().join("nested.json");
+        std::fs::write(
+            &sub,
+            serde_json::json!({
+                "subconfigs": nested.to_str().unwrap(),
+                "extractor": {"twitter": {"retries": 5}}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(&nested, br#"{"extractor":{"twitter":{"timeout":7}}}"#).unwrap();
+        let main = dir.path().join("main.json");
+        std::fs::write(
+            &main,
+            serde_json::json!({
+                "subconfigs": [sub.to_str().unwrap()],
+                "extractor": {"twitter": {"retries": 1, "timeout": 2}, "reddit": {"retries": 3}}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let config = super::Config::load(&main).await.unwrap();
+        let twitter = config.resolve("twitter").unwrap();
+        assert_eq!(twitter.retries, Some(5));
+        assert_eq!(twitter.timeout, Some(std::time::Duration::from_secs(7)));
+        assert_eq!(config.resolve("reddit").unwrap().retries, Some(3));
+    }
+
+    #[test]
+    fn directlink_scope_is_an_alias_for_direct() {
+        let dir = std::env::temp_dir();
+        let config = super::Config::parse(
+            br#"{"extractor":{"directlink":{"retries":4},"direct":{"retries":2,"timeout":3}}}"#,
+            &dir,
+        )
+        .unwrap();
+        let resolved = config.resolve("direct").unwrap();
+        assert_eq!(resolved.retries, Some(4));
+        assert!(resolved.timeout.is_some());
+    }
+
     #[test]
     fn registry_scopes_decode_and_reject_duplicates() {
         let dir = std::env::temp_dir();

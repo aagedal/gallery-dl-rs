@@ -16,7 +16,7 @@ pub(super) enum Target {
 }
 
 impl Target {
-    fn subcategory(&self) -> &'static str {
+    pub(super) fn subcategory(&self) -> &'static str {
         match self {
             Self::Quotes(_) => "quotes",
             Self::Following(_) => "following",

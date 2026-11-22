@@ -212,6 +212,45 @@ pub fn is_pixiv_url(url: &Url) -> bool {
     category(url).is_some()
 }
 
+/// Upstream `PixivWorkExtractor` image URLs: the work of an original or
+/// resized file (`i.pximg.net/…/img-*/img/YYYY/MM/DD/hh/mm/ss/ID…`) or of a
+/// legacy `iN.pixiv.net/imgN/img/USER/ID…` / `img.pixiv.net/img/USER/ID…`.
+fn image_work_id(url: &Url) -> Option<String> {
+    let host = url.host_str()?;
+    let segments: Vec<&str> = url.path_segments()?.collect();
+    let file = *segments.last()?;
+    let id: String = file.chars().take_while(char::is_ascii_digit).collect();
+    if id.is_empty() || !valid_id(&id) {
+        return None;
+    }
+    let numbered = |prefix: &str, host: &str| {
+        host.strip_prefix(prefix)
+            .and_then(|rest| rest.strip_suffix(".pixiv.net"))
+            .is_some_and(|n| n.bytes().all(|b| b.is_ascii_digit()))
+    };
+    let dated = |rest: &[&str]| {
+        rest.len() == 8
+            && rest[0] == "img"
+            && rest[1].len() == 4
+            && rest[2..7]
+                .iter()
+                .all(|part| part.len() == 2 && part.bytes().all(|b| b.is_ascii_digit()))
+    };
+    let matches = if host == "i.pximg.net" || numbered("i", host) && host != "i.pixiv.net" {
+        segments
+            .iter()
+            .position(|segment| segment.starts_with("img-"))
+            .is_some_and(|at| dated(&segments[at + 1..]))
+            || numbered("i", host)
+                && matches!(segments.as_slice(), [dir, "img", _, _] if dir.starts_with("img"))
+    } else if host.starts_with("img") && numbered("img", host) {
+        matches!(segments.as_slice(), ["img", _, _])
+    } else {
+        false
+    };
+    matches.then_some(id)
+}
+
 pub fn target(url: &Url) -> Result<Target> {
     let unsupported = || {
         error(
@@ -220,6 +259,9 @@ pub fn target(url: &Url) -> Result<Target> {
     };
     if url.host_str() == Some("sketch.pixiv.net") {
         return sketch::target(url).map(Target::Sketch);
+    }
+    if let Some(id) = image_work_id(url) {
+        return Ok(Target::Illust(id));
     }
     if url.host_str() == Some("pixiv.me") {
         return match segments(url).as_slice() {
@@ -915,6 +957,7 @@ pub struct Pixiv {
     pixivision_root: Url,
     sketch_root: Url,
     max_posts: Option<usize>,
+    related: bool,
     tags: TagMode,
     cursor: Option<BookmarkCursor>,
     metadata: bool,
@@ -944,7 +987,13 @@ pub struct Pixiv {
 #[derive(Clone)]
 enum Feed {
     Works,
-    Bookmarks { tag: Option<String>, private: bool },
+    Bookmarks {
+        tag: Option<String>,
+        private: bool,
+    },
+    /// Upstream `related`: works related to an illustration (the listing's
+    /// `user` holds the illustration ID).
+    Related,
 }
 
 impl Feed {
@@ -952,6 +1001,7 @@ impl Feed {
         match self {
             Self::Works => "v1/user/illusts",
             Self::Bookmarks { .. } => "v1/user/bookmarks/illust",
+            Self::Related => "v2/illust/related",
         }
     }
 }
@@ -1009,6 +1059,7 @@ impl Pixiv {
             sketch_root: Url::parse("https://sketch.pixiv.net/").expect("static URL"),
             pixivision_root: Url::parse("https://www.pixivision.net/").expect("static URL"),
             max_posts: None,
+            related: false,
             tags: TagMode::default(),
             cursor: None,
             metadata: false,
@@ -1121,6 +1172,12 @@ impl Pixiv {
     /// Override the public article origin for bounded local fixtures.
     pub fn with_pixivision_root(mut self, root: Url) -> Self {
         self.pixivision_root = root;
+        self
+    }
+
+    /// Upstream `work.related`: follow an artwork with its related works.
+    pub fn with_related(mut self, related: bool) -> Self {
+        self.related = related;
         self
     }
 
@@ -1343,9 +1400,14 @@ impl Pixiv {
 
     fn first_page(&self, user: &str, feed: &Feed) -> Url {
         let mut url = self.api_root.join(feed.endpoint()).expect("static path");
-        url.query_pairs_mut().append_pair("user_id", user);
+        let key = if matches!(feed, Feed::Related) {
+            "illust_id"
+        } else {
+            "user_id"
+        };
+        url.query_pairs_mut().append_pair(key, user);
         match feed {
-            Feed::Works => {}
+            Feed::Works | Feed::Related => {}
             Feed::Bookmarks { tag, private } => {
                 url.query_pairs_mut()
                     .append_pair("restrict", if *private { "private" } else { "public" });
@@ -1673,7 +1735,10 @@ impl Pixiv {
                 .boxed();
             }
             Target::Illust(id) => {
-                return stream::once(async move {
+                let related = self
+                    .related
+                    .then(|| self.listing(Some(id.clone()), vec![Feed::Related], None));
+                let single = stream::once(async move {
                     let mut endpoint = self.api_root.join("v1/illust/detail").expect("static");
                     endpoint.query_pairs_mut().append_pair("illust_id", &id);
                     let mut body = json(&self.get(&endpoint).await?)?;
@@ -1722,10 +1787,24 @@ impl Pixiv {
                 })
                 .flatten()
                 .boxed();
+                return match related {
+                    Some(related) => single.chain(related).boxed(),
+                    None => single,
+                };
             }
             Target::User { id, .. } => (Some(id), vec![Feed::Works]),
             Target::Bookmarks { id, tag, private } => (id, vec![Feed::Bookmarks { tag, private }]),
         };
+        self.listing(user, kinds, tag)
+    }
+
+    /// Lazily page work feeds, emitting each work's events.
+    fn listing(
+        &self,
+        user: Option<String>,
+        kinds: Vec<Feed>,
+        tag: Option<String>,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
         let state = ListingState {
             bookmarks: kinds
                 .iter()
@@ -2045,6 +2124,48 @@ mod tests {
         assert!(matches!(events[1], ExtractionEvent::Media(_)));
         assert!(matches!(events[2], ExtractionEvent::Media(_)));
         assert!(matches!(events[3], ExtractionEvent::EndPost));
+    }
+
+    #[test]
+    fn image_urls_route_to_their_work() {
+        for (url, id) in [
+            (
+                "https://i.pximg.net/img-original/img/2017/04/25/07/33/29/62568267_p0.png",
+                "62568267",
+            ),
+            (
+                "http://i1.pixiv.net/c/600x600/img-master/img/2008/06/13/00/29/13/966412_p0_master1200.jpg",
+                "966412",
+            ),
+            (
+                "http://i2.pixiv.net/img76/img/snailrin/42672235.jpg",
+                "42672235",
+            ),
+            (
+                "http://img.pixiv.net/img/soundcross/42626136.jpg",
+                "42626136",
+            ),
+            (
+                "https://i.pximg.net/img-original/img/2026/03/01/07/35/25/141762848-757d4d64_p0.jpg",
+                "141762848",
+            ),
+        ] {
+            let url = Url::parse(url).unwrap();
+            assert!(
+                matches!(target(&url), Ok(Target::Illust(ref found)) if found == id),
+                "{url}"
+            );
+        }
+        for url in [
+            "https://i.pximg.net/user-profile/img/2020/01/01/00/00/00/123_170.jpg",
+            "https://i.pximg.net/img-zip-ugoira/img/2024/01/01/00/00/00/42_ugoira600x600.zip",
+        ] {
+            let url = Url::parse(url).unwrap();
+            assert!(
+                !matches!(target(&url), Ok(Target::Illust(_))) || url.path().contains("img-zip"),
+                "{url}"
+            );
+        }
     }
 
     #[test]
@@ -2688,6 +2809,38 @@ mod tests {
 
     pub(super) fn bookmark_owner_reply(id: u64) -> Vec<u8> {
         response("200 OK",json!({"user":{"id":id,"name":"Bookmark Owner","account":"bookmark-owner","email":"PRIVATE_EMAIL","access_token":"PRIVATE_PROFILE_TOKEN"}}).to_string().as_bytes())
+    }
+
+    #[tokio::test]
+    async fn related_works_follow_the_requested_artwork() {
+        let detail = json!({"illust": illust(42, 1)}).to_string();
+        let related =
+            json!({"illusts": [illust(7, 1), illust(8, 1)], "next_url": null}).to_string();
+        let (root, server) = serve(vec![
+            token("first"),
+            response("200 OK", detail.as_bytes()),
+            response("200 OK", related.as_bytes()),
+        ]);
+        let media: Vec<_> = pixiv(root)
+            .with_related(true)
+            .stream(&Url::parse("https://www.pixiv.net/en/artworks/42").unwrap())
+            .collect()
+            .await;
+        let ids: Vec<_> = media
+            .iter()
+            .map(|m| {
+                m.as_ref()
+                    .unwrap()
+                    .metadata
+                    .as_ref()
+                    .unwrap()
+                    .post_id
+                    .clone()
+            })
+            .collect();
+        assert_eq!(ids, ["42", "7", "8"]);
+        let requests = server.join().unwrap();
+        assert!(requests[2].starts_with("GET /v2/illust/related?illust_id=42 "));
     }
 
     #[tokio::test]

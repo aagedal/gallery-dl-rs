@@ -44,8 +44,10 @@ pub struct Http {
     ytdl_cookies: Option<crate::cookies::YtdlCookies>,
     /// Upstream `sleep-request`, `sleep-retries` and `sleep-429`.
     sleep_request: Option<SleepRange>,
-    sleep_retries: Option<SleepRange>,
-    sleep_429: Option<SleepRange>,
+    sleep_retries: Option<crate::sleep::RetrySleep>,
+    /// Upstream `headers`: configured session request headers.
+    headers: Vec<(String, String)>,
+    sleep_429: Option<crate::sleep::RetrySleep>,
 }
 
 /// Upstream `--print-traffic`: show requests and responses on stderr.
@@ -129,6 +131,7 @@ impl Http {
             ytdl_cookies: None,
             sleep_request: None,
             sleep_retries: None,
+            headers: Vec::new(),
             sleep_429: None,
         })
     }
@@ -273,14 +276,39 @@ impl Http {
                 })
             })
         };
+        let retry = |key: &str| {
+            self.option(key).and_then(|value| {
+                crate::sleep::RetrySleep::from_value(value).unwrap_or_else(|_| {
+                    eprintln!("warning: invalid '{key}' value; ignoring it");
+                    None
+                })
+            })
+        };
         let (request, retries, too_many) = (
             sleep("sleep-request"),
-            sleep("sleep-retries"),
-            sleep("sleep-429"),
+            retry("sleep-retries"),
+            retry("sleep-429"),
         );
         self.sleep_request = request;
         self.sleep_retries = retries;
         self.sleep_429 = too_many;
+        // Upstream `headers` (an object): session-wide request headers.
+        self.headers = self
+            .option("headers")
+            .and_then(Value::as_object)
+            .map(|headers| {
+                headers
+                    .iter()
+                    .filter_map(|(name, value)| {
+                        let value = value.as_str()?;
+                        (reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_ok()
+                            && reqwest::header::HeaderValue::from_str(value).is_ok()
+                            && !sensitive(name))
+                        .then(|| (name.clone(), value.to_owned()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         self
     }
 
@@ -702,9 +730,10 @@ impl Http {
                         } else {
                             self.sleep_retries
                         };
-                        tokio::time::sleep(
-                            configured.map_or_else(|| backoff(attempt), |range| range.sample()),
-                        )
+                        tokio::time::sleep(configured.map_or_else(
+                            || backoff(attempt),
+                            |sleep| sleep.delay(u32::from(attempt) + 1),
+                        ))
                         .await;
                     }
                     Err(failure) => return Err(failure.error),
@@ -767,6 +796,12 @@ impl Http {
                     .header(&target)
             {
                 request = request.header("Cookie", cookie);
+            }
+            // Configured session headers, unless the request sets them.
+            for (key, value) in &self.headers {
+                if !headers.iter().any(|(own, _)| own.eq_ignore_ascii_case(key)) {
+                    request = request.header(key.as_str(), value.as_str());
+                }
             }
             for (key, value) in headers {
                 request = request.header(*key, *value);
@@ -1060,6 +1095,25 @@ mod tests {
         let requests = server.join().unwrap();
         assert!(requests[0].contains("cookie: explicit=1"));
         assert!(!requests[0].contains("jar=1"));
+    }
+
+    #[tokio::test]
+    async fn configured_headers_are_sent_unless_the_request_sets_them() {
+        let (root, server) = serve(vec![json(serde_json::json!({}))]);
+        let mut options = serde_json::Map::new();
+        options.insert(
+            "headers".into(),
+            serde_json::json!({"X-Test": "1", "Referer": "https://configured/",
+                "Authorization": "secret"}),
+        );
+        let http = http("Test", root.clone()).with_options(Some(std::sync::Arc::new(options)));
+        http.json_with(&root, &[("Referer", "https://site/")])
+            .await
+            .unwrap();
+        let request = server.join().unwrap().remove(0).to_ascii_lowercase();
+        assert!(request.contains("x-test: 1\r\n"), "{request}");
+        assert!(request.contains("referer: https://site/\r\n"));
+        assert!(!request.contains("configured") && !request.contains("secret"));
     }
 }
 

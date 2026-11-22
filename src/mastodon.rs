@@ -83,6 +83,11 @@ pub enum Target {
         host: String,
         feed: Collection,
     },
+    /// A Pleroma/Akkoma `objects/UUID` link that redirects to a status.
+    Object {
+        host: String,
+        id: String,
+    },
     /// Accounts a user follows, queued as user jobs.
     Following {
         host: String,
@@ -188,6 +193,7 @@ impl Target {
             Self::Status { host, .. }
             | Self::User { host, .. }
             | Self::Collection { host, .. }
+            | Self::Object { host, .. }
             | Self::Following { host, .. } => host,
         }
     }
@@ -268,6 +274,14 @@ fn target_on(url: &Url, custom: bool) -> Result<Target> {
     };
     match segments {
         ["statuses", id] | ["notice", id] | ["users", _, "statuses", id] => status(id),
+        ["objects", id]
+            if !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') =>
+        {
+            Ok(Target::Object {
+                host: host.clone(),
+                id: (*id).into(),
+            })
+        }
         ["users", name, "following"] => following(name),
         [name, "following"] if name.starts_with('@') => following(name),
         ["users", name] | ["users", name, "media"] => user(name),
@@ -388,6 +402,21 @@ static STATUS: Route = Route::new(
     &["mastodon", "{instance}", "{account[username]}"],
     "{media[id]}",
 );
+
+/// Upstream's other Mastodon classes share the status formats.
+const fn class(subcategory: &'static str) -> Route {
+    Route::new(
+        subcategory,
+        "{category}_{id}_{media[id]}.{extension}",
+        &["mastodon", "{instance}", "{account[username]}"],
+        "{media[id]}",
+    )
+}
+static USER: Route = class("user");
+static BOOKMARK: Route = class("bookmark");
+static FAVORITE: Route = class("favorite");
+static LIST: Route = class("list");
+static HASHTAG: Route = class("hashtag");
 
 /// Upstream `items` keywords: the status without its attachments, plus
 /// `instance`, `instance_remote`, `count`, tag names, `date`, `num`,
@@ -636,6 +665,8 @@ struct TimelineState {
     max_id: Option<String>,
     pages: usize,
     done: bool,
+    moved_checked: bool,
+    route: &'static Route,
     pending: VecDeque<ExtractionEvent>,
 }
 
@@ -744,11 +775,26 @@ impl Mastodon {
         group(media, &category)
     }
 
-    fn status_events(&self, status: &Value, host: &str) -> VecDeque<ExtractionEvent> {
+    fn status_events(
+        &self,
+        status: &Value,
+        host: &str,
+        route: &'static Route,
+    ) -> VecDeque<ExtractionEvent> {
         if !selected(status, self.selection) {
             return VecDeque::new();
         }
-        let media = parse_status_with_options(status, host, self.selection);
+        let mut media = parse_status_with_options(status, host, self.selection);
+        // Files carry the class of the input, like upstream's extractors.
+        for item in &mut media {
+            if let Some(keywords) = item
+                .metadata
+                .as_mut()
+                .and_then(|metadata| metadata.site_keywords.as_mut())
+            {
+                Arc::make_mut(keywords).route = route;
+            }
+        }
         if !media.is_empty() {
             return self.finish(media);
         }
@@ -818,9 +864,15 @@ impl Mastodon {
             || state.pages >= MAX_PAGES;
         state.max_id = next;
         for status in entries {
+            if state.account_query && !state.moved_checked {
+                state.moved_checked = true;
+                if let Some(account) = status.get("account") {
+                    warn_moved(account);
+                }
+            }
             state
                 .pending
-                .extend(self.status_events(status, &state.host));
+                .extend(self.status_events(status, &state.host, state.route));
         }
         Ok(())
     }
@@ -837,29 +889,8 @@ impl Mastodon {
         };
         match target {
             Target::Following { host, acct } => self.following(host, acct),
-            Target::Status { host, id } => stream::once(async move {
-                let root = self.root(&host);
-                let (body, _) = self
-                    .call(&root, &format!("api/v1/statuses/{id}"), &[])
-                    .await?;
-                let status = json(&body)?;
-                if id_of(&status) != Some(id.as_str()) {
-                    return Err(error(
-                        "Mastodon response does not match the requested status",
-                    ));
-                }
-                let events = self.status_events(&status, &host);
-                if events.is_empty() && selected(&status, self.selection) {
-                    return Err(error("Mastodon status contains no supported media"));
-                }
-                Ok::<_, crate::Error>(stream::iter(events.into_iter().map(Ok)))
-            })
-            .map(|result| match result {
-                Ok(events) => events.boxed(),
-                Err(e) => stream::once(async move { Err(e) }).boxed(),
-            })
-            .flatten()
-            .boxed(),
+            Target::Status { host, id } => self.single(host, id, false),
+            Target::Object { host, id } => self.single(host, id, true),
             target => stream::unfold(Some((target, None)), move |state| async move {
                 let (target, state) = state?;
                 let mut state: TimelineState = match state {
@@ -885,22 +916,105 @@ impl Mastodon {
         }
     }
 
+    /// One status; Pleroma/Akkoma `objects/ID` links are first resolved
+    /// through their redirect to the status ID, like upstream.
+    fn single(
+        &self,
+        host: String,
+        id: String,
+        object: bool,
+    ) -> BoxStream<'_, Result<ExtractionEvent>> {
+        stream::once(async move {
+            let id = if object {
+                self.resolve_object(&host, &id).await?
+            } else {
+                id
+            };
+            let root = self.root(&host);
+            let (body, _) = self
+                .call(&root, &format!("api/v1/statuses/{id}"), &[])
+                .await?;
+            let status = json(&body)?;
+            if id_of(&status) != Some(id.as_str()) {
+                return Err(error(
+                    "Mastodon response does not match the requested status",
+                ));
+            }
+            let events = self.status_events(&status, &host, &STATUS);
+            if events.is_empty() && selected(&status, self.selection) {
+                return Err(error("Mastodon status contains no supported media"));
+            }
+            Ok::<_, crate::Error>(stream::iter(events.into_iter().map(Ok)))
+        })
+        .map(|result| match result {
+            Ok(events) => events.boxed(),
+            Err(e) => stream::once(async move { Err(e) }).boxed(),
+        })
+        .flatten()
+        .boxed()
+    }
+
+    async fn resolve_object(&self, host: &str, id: &str) -> Result<String> {
+        let url = self
+            .root(host)
+            .join(&format!("objects/{id}"))
+            .map_err(|_| error("invalid Mastodon object URL"))?;
+        let response = tokio::time::timeout(
+            self.timeout,
+            self.client.get(url).timeout(self.request_timeout).send(),
+        )
+        .await
+        .map_err(|_| error("native Mastodon extraction timed out"))?
+        .map_err(|_| error("Mastodon request failed; check network access"))?;
+        response
+            .status()
+            .is_redirection()
+            .then(|| response.headers().get(header::LOCATION))
+            .flatten()
+            .and_then(|location| location.to_str().ok())
+            .and_then(|location| location.trim_end_matches('/').rsplit('/').next())
+            .filter(|id| valid_id(id))
+            .map(str::to_owned)
+            .ok_or_else(|| error("Mastodon object did not redirect to a status"))
+    }
+
     /// An account's ID: `id:ID`, else `accounts/lookup`.
     async fn account_id(&self, host: &str, acct: &str) -> Result<String> {
         if let Some(id) = acct.strip_prefix("id:") {
             return Ok(id.to_owned());
         }
+        let root = self.root(host);
+        let lookup = self
+            .call(&root, "api/v1/accounts/lookup", &[("acct", acct)])
+            .await
+            .and_then(|(body, _)| json(&body));
+        if let Some(id) = lookup.as_ref().ok().and_then(id_of) {
+            return Ok(id.to_owned());
+        }
+        // Upstream falls back to an account search when lookup fails.
+        let handle = if acct.contains('@') {
+            format!("@{acct}")
+        } else {
+            format!("@{acct}@{host}")
+        };
         let (body, _) = self
             .call(
-                &self.root(host),
-                "api/v1/accounts/lookup",
-                &[("acct", acct)],
+                &root,
+                "api/v1/accounts/search",
+                &[("q", handle.as_str()), ("limit", "1")],
             )
             .await?;
-        let account = json(&body)?;
-        Ok(id_of(&account)
-            .ok_or_else(|| error("Mastodon account lookup returned no account ID"))?
-            .to_owned())
+        let accounts = json(&body)?;
+        accounts
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|account| string(account, "acct") == Some(acct))
+            .and_then(|account| {
+                warn_moved(account);
+                id_of(account).map(str::to_owned)
+            })
+            .ok_or_else(|| error("Mastodon account not found"))
     }
 
     /// Upstream `MastodonFollowingExtractor`: queue each followed account as
@@ -981,21 +1095,21 @@ impl Mastodon {
     }
 
     async fn timeline(&self, target: &Target) -> Result<TimelineState> {
-        let (host, path, account_query) = match target {
+        let (host, path, account_query, route) = match target {
             Target::User { host, acct } => {
                 let id = self.account_id(host, acct).await?;
-                (host, format!("api/v1/accounts/{id}/statuses"), true)
+                (host, format!("api/v1/accounts/{id}/statuses"), true, &USER)
             }
             Target::Collection { host, feed } => {
-                let path = match feed {
-                    Collection::Bookmarks => "api/v1/bookmarks".into(),
-                    Collection::Favourites => "api/v1/favourites".into(),
-                    Collection::List(id) => format!("api/v1/timelines/list/{id}"),
-                    Collection::Hashtag(tag) => format!("api/v1/timelines/tag/{tag}"),
+                let (path, route) = match feed {
+                    Collection::Bookmarks => ("api/v1/bookmarks".into(), &BOOKMARK),
+                    Collection::Favourites => ("api/v1/favourites".into(), &FAVORITE),
+                    Collection::List(id) => (format!("api/v1/timelines/list/{id}"), &LIST),
+                    Collection::Hashtag(tag) => (format!("api/v1/timelines/tag/{tag}"), &HASHTAG),
                 };
-                (host, path, false)
+                (host, path, false, route)
             }
-            Target::Status { .. } | Target::Following { .. } => {
+            Target::Status { .. } | Target::Object { .. } | Target::Following { .. } => {
                 unreachable!("statuses and followings do not have timeline state")
             }
         };
@@ -1008,6 +1122,8 @@ impl Mastodon {
             max_id: None,
             pages: 0,
             done: false,
+            moved_checked: false,
+            route,
             pending: VecDeque::new(),
         })
     }
@@ -1107,6 +1223,19 @@ impl Mastodon {
             body.extend_from_slice(&chunk);
         }
         Ok((body, link))
+    }
+}
+
+/// Upstream `_check_moved`: a truthy `moved` field means the account
+/// migrated elsewhere.
+fn moved_target(account: &Value) -> Option<(&str, &str)> {
+    let moved = account.get("moved").filter(|m| m.is_object())?;
+    Some((string(account, "acct")?, string(moved, "acct")?))
+}
+
+fn warn_moved(account: &Value) {
+    if let Some((from, to)) = moved_target(account) {
+        eprintln!("[mastodon][warning] Account '{from}' moved to '{to}'");
     }
 }
 
@@ -1905,6 +2034,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn object_links_resolve_their_status_redirect() {
+        let (root, server) = serve(vec![
+            response(
+                "302 Found",
+                "Location: https://pleroma.example/notice/100\r\n",
+                b"",
+            ),
+            response("200 OK", "", status("100").to_string().as_bytes()),
+        ]);
+        let url = Url::parse("mastodon:https://pleroma.example/objects/0b2e-4f1a").unwrap();
+        assert!(matches!(
+            target(&url),
+            Ok(Target::Object { ref id, .. }) if id == "0b2e-4f1a"
+        ));
+        let media: Vec<_> = mastodon(root).stream(&url).collect().await;
+        assert_eq!(media.len(), 2);
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET /objects/0b2e-4f1a "));
+        assert!(requests[1].starts_with("GET /api/v1/statuses/100 "));
+    }
+
+    #[tokio::test]
+    async fn failed_lookups_fall_back_to_account_search() {
+        let accounts = serde_json::json!([
+            {"id": "8", "acct": "bob"},
+            {"id": "9", "acct": "alice", "moved": {"acct": "alice@elsewhere"}},
+        ]);
+        let (root, server) = serve(vec![
+            response("404 Not Found", "", b"{}"),
+            response("200 OK", "", accounts.to_string().as_bytes()),
+            response("200 OK", "", b"[]"),
+        ]);
+        let media: Vec<_> = mastodon(root)
+            .with_retries(0)
+            .stream(&Url::parse("https://mastodon.social/@alice").unwrap())
+            .collect()
+            .await;
+        assert!(media.is_empty(), "{media:?}");
+        let requests = server.join().unwrap();
+        assert!(requests[0].starts_with("GET /api/v1/accounts/lookup?acct=alice "));
+        assert!(
+            requests[1]
+                .starts_with("GET /api/v1/accounts/search?q=%40alice%40mastodon.social&limit=1 ")
+        );
+        assert!(requests[2].starts_with("GET /api/v1/accounts/9/statuses?"));
+        assert_eq!(
+            moved_target(&accounts[1]),
+            Some(("alice", "alice@elsewhere"))
+        );
+        assert_eq!(
+            moved_target(&serde_json::json!({"acct": "a", "moved": null})),
+            None
+        );
+    }
+
+    #[tokio::test]
     async fn fetches_status_with_retries() {
         let (root, server) = serve(vec![
             response("429 Too Many Requests", "Retry-After: 0\r\n", b""),
@@ -1949,7 +2134,10 @@ mod tests {
 
     #[tokio::test]
     async fn terminal_errors_are_not_retried() {
-        let (root, server) = serve(vec![response("404 Not Found", "", b"{}")]);
+        let (root, server) = serve(vec![
+            response("404 Not Found", "", b"{}"),
+            response("200 OK", "", b"[]"),
+        ]);
         let error = mastodon(root)
             .with_retries(3)
             .stream(&Url::parse("https://pawoo.net/@nobody").unwrap())
@@ -1959,6 +2147,6 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("not found"));
         assert!(!error.to_string().contains("127.0.0.1"));
-        assert_eq!(server.join().unwrap().len(), 1);
+        assert_eq!(server.join().unwrap().len(), 2);
     }
 }
