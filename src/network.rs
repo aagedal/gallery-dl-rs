@@ -220,6 +220,7 @@ const RUSTLS: bool = cfg!(not(any(target_os = "macos", target_os = "windows")));
 /// A reqwest client builder with this platform's TLS setup: the operating
 /// system's TLS stack on macOS and Windows (at least TLS 1.2), elsewhere
 /// rustls with the RustCrypto provider and the system's root certificates.
+#[allow(clippy::disallowed_methods)]
 pub fn client_builder() -> reqwest::ClientBuilder {
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     return Client::builder().min_tls_version(reqwest::tls::Version::TLS_1_2);
@@ -244,6 +245,7 @@ mod rustls_tls {
     }
 
     /// A client builder verifying with the system's roots.
+    #[allow(clippy::disallowed_methods)]
     pub(super) fn builder() -> reqwest::ClientBuilder {
         static PROVIDER: std::sync::Once = std::sync::Once::new();
         // reqwest's provider-less rustls uses the process default provider.

@@ -602,7 +602,7 @@ mod tests {
         let mut helper = Helper {
             category: "reddit".into(),
             options: &options,
-            client: reqwest::Client::new(),
+            client: crate::network::client_builder().build().unwrap(),
             connection: None,
             cache_key: None,
         };

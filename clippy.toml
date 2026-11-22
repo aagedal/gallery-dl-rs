@@ -1,0 +1,7 @@
+# HTTP clients must come from `network::client_builder()`, which sets up each
+# platform's TLS stack (rustls builds need their crypto provider installed).
+disallowed-methods = [
+    { path = "reqwest::Client::new", reason = "use crate::network::client_builder()" },
+    { path = "reqwest::Client::builder", reason = "use crate::network::client_builder()" },
+    { path = "reqwest::ClientBuilder::new", reason = "use crate::network::client_builder()" },
+]
