@@ -4,8 +4,9 @@ on:
     tags: ["v*"]
   # Builds every target without publishing, to try the matrix before tagging.
   workflow_dispatch:
+  # Dependency changes can break a release target before anything is tagged.
   pull_request:
-    paths: [".github/workflows/release.yml"]
+    paths: [".github/workflows/release.yml", "Cargo.toml", "Cargo.lock"]
 
 permissions:
   contents: read
