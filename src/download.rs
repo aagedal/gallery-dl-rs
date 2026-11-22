@@ -932,20 +932,15 @@ pub(crate) async fn complete_original(
 }
 
 fn unchanged_file(before: &std::fs::Metadata, after: &std::fs::Metadata) -> bool {
-    if !after.is_file()
-        || before.len() != after.len()
-        || before.modified().ok() != after.modified().ok()
-    {
-        return false;
-    }
+    let same = after.is_file()
+        && before.len() == after.len()
+        && before.modified().ok() == after.modified().ok();
     #[cfg(unix)]
-    {
+    let same = same && {
         use std::os::unix::fs::MetadataExt;
-        if before.dev() != after.dev() || before.ino() != after.ino() {
-            return false;
-        }
-    }
-    true
+        before.dev() == after.dev() && before.ino() == after.ino()
+    };
+    same
 }
 
 /// Preserve a fully downloaded source even when the conversion future is cancelled.
