@@ -432,14 +432,17 @@ fn imgclick_info(page: &str) -> crate::Result<(String, Option<String>)> {
 }
 
 fn fappic_info(page: &str) -> crate::Result<(String, Option<String>)> {
-    let mut scan = Scan::new(page);
-    let url = scan.extr("<a href=\"#\"><img src=\"", "\"").to_owned();
-    let name = scan.extr("alt=\"", "\"");
+    // The image tag now spreads its attributes over several lines.
+    let Some(c) =
+        re!(r##"<a href="#">\s*<img\s+src="([^"]*)"(?s:.*?)\salt="([^"]*)""##).captures(page)
+    else {
+        return Ok((String::new(), Some(String::new())));
+    };
     Ok((
-        url,
+        c[1].to_owned(),
         Some(
             re!(r"^Porn[ -]Pic(?:s|ture)[ -]")
-                .replace(name, "")
+                .replace(&c[2], "")
                 .into_owned(),
         ),
     ))
@@ -790,6 +793,24 @@ mod tests {
         assert_eq!(keywords(&files[0])["filename"], "test");
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /qi2nplzmwq7d/pic.jpg "));
+    }
+
+    #[test]
+    fn fappic_reads_multiline_image_tags() {
+        let page = r##"<a href="#">
+  <img
+    src="https://img103.fappic.com/img/abc/4gq1yv.jpg"
+    class="pic"
+    data-file-name="4gq1yv.jpg"
+    alt="Porn Pics 4gq1yv.jpg"
+    title="Porn-Picture-4gq1yv.jpg">"##;
+        assert_eq!(
+            fappic_info(page).unwrap(),
+            (
+                "https://img103.fappic.com/img/abc/4gq1yv.jpg".into(),
+                Some("4gq1yv.jpg".into())
+            )
+        );
     }
 
     #[tokio::test]

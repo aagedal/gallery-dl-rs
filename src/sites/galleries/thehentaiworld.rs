@@ -282,8 +282,7 @@ mod tests {
     /// The minified markup served since 2026, with unquoted attributes.
     #[test]
     fn parses_minified_pages() {
-        let head =
-            r#"<title>Title &#8211; Artist</title><body class="single postid-226208 single-format-standard post-ubel">"#;
+        let head = r#"<title>Title &#8211; Artist</title><body class="single postid-226208 single-format-standard post-ubel">"#;
         let info = r#"<h3 id="tagsHead">Tags</h3><ul id=tags><li><a class=origin href=https://thehentaiworld.com/tag/o>Frieren</a> <span>5</span> </li><li><a class href=https://thehentaiworld.com/tag/b>blush</a> <span>9</span> </li></ul><h3>Info</h3><ul id=info> <li>Posted: 2024-04-16</li><li>Size: 800 x 1422</li><li><a href=https://thehentaiworld.com/wp-content/uploads/2024/04/Ubel.jpg>Full Size</a></li><li><span class=thw-rating-meta>4.64 / 5 · 11 votes</span></li></ul>"#;
         let nav = r#"<div id=doujin-nav><a class=bigBtn href=https://thehentaiworld.com/hentai-images/prev/ id=prev-page>Previous</a></div>"#;
         let thumbs = r#"<div id=miniThumbContainer><div class="current minithumb"> <a href="?pp=1"><img itemprop=thumbnail class=border loading=lazy src=https://thehentaiworld.com/wp-content/uploads/2024/04/Ubel-220x147.jpg width=160></a></div><div class=minithumb> <a href="?pp=2"><img itemprop=thumbnail class=border loading=lazy src=https://thehentaiworld.com/wp-content/uploads/2024/04/Ubel-2-220x147.jpg></a></div></div><div class="ad native">"#;
