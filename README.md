@@ -1,21 +1,19 @@
 # gallery-dl-rs
 
-An early Rust implementation of a gallery downloader, inspired by
-[gallery-dl](https://github.com/mikf/gallery-dl). The first target sites are
-**Instagram, Facebook, and Twitter/X**.
+A Rust gallery downloader, ported from
+[gallery-dl](https://github.com/mikf/gallery-dl). Extraction, configuration,
+filename templates, archives, postprocessors and downloads all run in Rust;
+neither Python nor gallery-dl is required. Authenticated live extraction from
+Instagram, Facebook and Twitter/X has not yet been verified.
 
-**This is a working foundation, not a native Rust replacement for gallery-dl yet.**
-The CLI, direct-link extraction, and HTTP download pipeline are Rust. Social-site
-extraction defaults to a separately installed `gallery-dl` executable and reads
-its JSON messages. Experimental native Instagram posts/collections/stories/highlights, Facebook
-photos/albums/videos, and Twitter/X posts/profile timelines are available with `--extractor native`; authenticated live post
-extraction has not yet been verified.
+`--extractor compatibility` optionally delegates extraction to a separately
+installed `gallery-dl` executable and reads its JSON messages.
 
 ## Build and run
 
-Requires a current stable Rust toolchain. The default social extractor additionally
-requires `gallery-dl` on `PATH` (for example, install it with `pipx install gallery-dl`).
-See [upstream installation instructions](https://github.com/mikf/gallery-dl#installation).
+Requires a current stable Rust toolchain. Only the optional compatibility
+extractor needs `gallery-dl` on `PATH` (see the
+[upstream installation instructions](https://github.com/mikf/gallery-dl#installation)).
 
 ```sh
 cargo build --release --locked
@@ -28,29 +26,26 @@ cargo build --release --locked
 ./target/release/gallery-dl-rs -C cookies.txt 'https://www.facebook.com/photo/?fbid=PHOTO_ID'
 ./target/release/gallery-dl-rs -C cookies.txt 'https://x.com/USERNAME/status/POST_ID'
 
-# Native direct media downloads need no Python or gallery-dl installation
+# Download direct media links
 ./target/release/gallery-dl-rs --jobs 4 -d downloads 'https://example.com/photo.jpg'
 
 # Keep validated partial downloads and resume after an interruption
 ./target/release/gallery-dl-rs --resume -d downloads 'https://example.com/large.mp4'
 
 # Save available post metadata beside downloaded media
-./target/release/gallery-dl-rs --write-metadata -C cookies.txt --extractor native 'https://www.instagram.com/p/SHORTCODE/'
+./target/release/gallery-dl-rs --write-metadata -C cookies.txt 'https://www.instagram.com/p/SHORTCODE/'
 
 # Keep completed-media history across runs, including refreshed social media URLs
 ./target/release/gallery-dl-rs --download-archive history.sqlite3 -C cookies.txt 'https://x.com/USERNAME/status/POST_ID'
 
 # Choose native filenames from available post metadata
-./target/release/gallery-dl-rs -f '{post_id}_{media_id}_{index:03}.{extension}' -C cookies.txt --extractor native 'https://www.instagram.com/p/SHORTCODE/'
+./target/release/gallery-dl-rs -f '{post_id}_{media_id}_{index:03}.{extension}' -C cookies.txt 'https://www.instagram.com/p/SHORTCODE/'
 
-# Inspect extracted media jobs as JSON; private request options are omitted
-./target/release/gallery-dl-rs -j 'https://x.com/USERNAME/status/POST_ID'
+# Print extraction messages as JSON, like gallery-dl's -j
+./target/release/gallery-dl-rs -C x-cookies.txt -j 'https://x.com/USERNAME/status/POST_ID'
 
-# Experimental Instagram extraction in Rust, without gallery-dl
-./target/release/gallery-dl-rs --extractor native -C cookies.txt -j 'https://www.instagram.com/p/SHORTCODE/'
-
-# Experimental authenticated Twitter/X extraction in Rust
-./target/release/gallery-dl-rs --extractor native -C x-cookies.txt -j 'https://x.com/USERNAME/status/POST_ID'
+# Delegate extraction to an installed gallery-dl instead
+./target/release/gallery-dl-rs --extractor compatibility 'https://www.instagram.com/p/SHORTCODE/'
 
 ./target/release/gallery-dl-rs --help
 ```
@@ -61,12 +56,7 @@ configuration for site-specific settings. Default gallery-dl config files are
 ignored. `--extractor-command /path/to/gallery-dl` selects another executable;
 it is invoked directly, without a shell.
 
-`--extractor compatibility` is the default. In compatibility mode, URLs outside
-every category listed here are still passed to gallery-dl, so any site it
-supports works; those files keep gallery-dl's category and complete keyword
-dictionary for filters, templates and postprocessors, and default to
-`CATEGORY/{filename}.{extension}` paths (per-extractor upstream path formats
-are not reported by gallery-dl, and no download-archive identity is derived). `--extractor native`
+`--extractor native` is the default. It
 handles almost every URL form in upstream gallery-dl's test suite (as of
 1.32.19, everything but 500px's login-only `liked` page) without Python:
 dedicated extractors for Instagram, Facebook, Twitter/X, Pixiv, DeviantArt,
@@ -76,8 +66,16 @@ Files carry upstream's keyword dictionaries and default paths, so upstream
 filename/directory templates, filters and postprocessors work unchanged; see
 ROADMAP.md for per-site status and the remaining differences. Many sites
 still need cookies or credentials, exactly as upstream.
-Native extraction does not fall back to that backend automatically. In native
-mode, `--config` names a gallery-dl configuration file that Rust reads in place
+Native extraction never falls back to gallery-dl automatically.
+
+`--extractor compatibility` runs gallery-dl instead. URLs outside every
+category listed here are still passed to gallery-dl, so any site it
+supports works; those files keep gallery-dl's category and complete keyword
+dictionary for filters, templates and postprocessors, and default to
+`CATEGORY/{filename}.{extension}` paths (per-extractor upstream path formats
+are not reported by gallery-dl, and no download-archive identity is derived).
+
+In native mode, `--config` names a gallery-dl configuration file that Rust reads in place
 of `--native-config`.
 Use `--native-config` for settings applied by Rust with either extractor backend.
 
@@ -2298,9 +2296,10 @@ available from upstream.
 
 ## Current behavior
 
-- By default Instagram, Facebook, and Twitter/X URLs use the compatibility backend, including
-  its child-extractor resolution. Actual URL coverage and login requirements
-  depend on the installed gallery-dl version and the account's access.
+- With `--extractor compatibility`, Instagram, Facebook, and Twitter/X URLs use
+  gallery-dl, including its child-extractor resolution. Actual URL coverage and
+  login requirements then depend on the installed gallery-dl version and the
+  account's access.
 - Direct media links use a native extractor. Arbitrary HTML galleries are not
   implemented in this milestone.
 - Download mode pulls one input at a time and incrementally parses compatibility

@@ -262,7 +262,7 @@ async fn compatibility_passes_raw_browser_spec_as_one_argument_and_clears_cookie
         binary(root.path())
             .arg("--native-config")
             .arg(config)
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(backend)
             .env("BROWSER_CLI_LOG", &log)
             .args(["--cookies-from-browser", spec, "-g", url]),
@@ -542,7 +542,7 @@ async fn compatibility_forwards_each_scoped_browser_profile_as_one_argument_with
         binary(root.path())
             .arg("--native-config")
             .arg(&config)
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(&backend)
             .env("BROWSER_CLI_LOG", &log)
             .args([

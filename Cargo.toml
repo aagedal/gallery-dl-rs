@@ -2,7 +2,7 @@
 name = "gallery-dl-rs"
 version = "0.1.0"
 edition = "2024"
-description = "A Rust gallery downloader with a gallery-dl social-site compatibility backend"
+description = "A Rust port of the gallery-dl image gallery downloader"
 license = "GPL-3.0-only"
 
 [dependencies]

@@ -195,8 +195,8 @@ struct Args {
     /// Override the User-Agent for extraction and media HTTP requests
     #[arg(short = 'a', long)]
     user_agent: Option<String>,
-    /// Social extractor; native supports experimental Instagram collections/stories/posts, Facebook media/albums, and X posts/profile tabs
-    #[arg(long, value_enum, default_value_t = Extractor::Compatibility)]
+    /// Extraction backend: native Rust (default) or an installed gallery-dl executable
+    #[arg(long, value_enum, default_value_t = Extractor::Native)]
     extractor: Extractor,
     /// Explicit gallery-dl configuration file (default config is ignored)
     #[arg(short, long)]
