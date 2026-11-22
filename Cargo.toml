@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 description = "A Rust port of the gallery-dl image gallery downloader"
 license = "GPL-3.0-only"
+repository = "https://github.com/aagedal/gallery-dl-rs"
+readme = "README.md"
+keywords = ["gallery-dl", "downloader", "image", "scraper", "cli"]
+categories = ["command-line-utilities", "multimedia::images"]
 
 [dependencies]
 base64 = "0.22"

@@ -143,7 +143,7 @@ A retry restarts the original request. These routes have synthetic parser and
 local transport tests; authenticated live verification and sanitized real
 response fixtures remain required. See the [collection fixture notes](tests/fixtures/instagram/collections_README.md).
 
-Experimental Instagram stories/highlights use `Instagram::stream` and the native
+Instagram stories/highlights use `Instagram::stream` and the native
 CLI. Supported URLs include `/stories/USERNAME/`, `/stories/USERNAME/MEDIA_ID/`,
 `/stories/id:USER_ID/`, `/stories/highlights/HIGHLIGHT_ID/`, `/USERNAME/highlights/`,
 and `/stories/me/` (the signed-in account's story tray). Highlight share links
@@ -195,7 +195,7 @@ pagination is refused end with an error asking for `--cookies` after the
 visible photos. Anonymous profile photos,
 albums and avatars were checked live on 2026-10-23.
 
-Experimental Facebook album traversal uses `Facebook::stream` and the native CLI.
+Facebook album traversal uses `Facebook::stream` and the native CLI.
 It resolves the first photo only from an ordered collection tied to the requested
 set token, then follows each requested Photo's own set-bound navigation. A
 `/photo/?fbid=ID&set=TOKEN&setextract` URL starts directly at that photo. Plain
@@ -219,7 +219,7 @@ an authenticated response. Empty albums and additional live envelope variants
 are not yet recognized. Compatibility remains the default. See the
 [album fixture notes](tests/fixtures/facebook/album_README.md).
 
-Experimental Facebook video extraction accepts `/watch/?v=ID` and
+Facebook video extraction accepts `/watch/?v=ID` and
 `/USER/videos/ID` URLs through both `Facebook::extract` and `Facebook::stream`.
 Delivery fields must belong to the exact requested Video (or a legacy record
 owning that `video_id`); previews and unrelated recommendations are excluded.
@@ -230,7 +230,7 @@ Legacy and modern progressive MP4 delivery fields provide HD/SD selection when
 there is no inline DASH manifest. Existing authenticated transport and configured
 user-agent settings apply to video requests and both emitted files.
 
-Experimental native Imgur extraction (`--extractor native`, category `imgur`)
+Native Imgur extraction (category `imgur`)
 accepts single images (`i.imgur.com/ID.ext`, `imgur.com/ID`), albums
 (`imgur.com/a/ID`, `/a/title-ID`) and gallery posts (`/gallery/ID`,
 `/gallery/slug-ID`, `/t/TAG/ID`). It reads Imgur's public `post/v1` API with
@@ -248,7 +248,7 @@ filenames are `{id}.{ext}`; archive identity is the Imgur media ID alone. User
 profiles, favorites, subreddit listings, searches and tag listings are rejected
 as unsupported. Compatibility mode sends Imgur URLs to the backend.
 
-Experimental native Bluesky extraction (`--extractor native`, category
+Native Bluesky extraction (category
 `bluesky`) accepts single posts (`bsky.app/profile/NAME/post/RKEY`) and author
 feeds (`bsky.app/profile/NAME`, `/media`, `/posts`, `/replies`, `/video`), custom feeds
 (`/profile/NAME/feed/RKEY`) and lists (`/profile/NAME/lists/RKEY`), where NAME
@@ -332,7 +332,7 @@ the public AppView. Both settings forward to compatibility mode. Blob routing
 and repository reads use their authors' DID service roots independently of this
 override; no API credentials are copied to blob jobs.
 
-Experimental native Reddit extraction (`--extractor native`, category `reddit`)
+Native Reddit extraction (category `reddit`)
 accepts submissions (`/r/SUB/comments/ID`, `/comments/ID`, `redd.it/ID`),
 subreddit listings (hot/new/top/rising/controversial, `?t=` kept), and user
 submissions (`/user/NAME`, `/u/NAME`) via the public `.json` endpoints, paging
@@ -354,7 +354,7 @@ only (upstream's `"cache"` refresh-token value selects no token).
 {"extractor": {"reddit": {"api": "oauth", "refresh-token": "TOKEN"}}}
 ```
 
-Experimental native booru extraction (`--extractor native`) covers categories
+Native booru extraction covers categories
 `danbooru` (danbooru.donmai.us), `e621` (e621.net, e926.net), `gelbooru` and
 `safebooru` (safebooru.org): single posts (`/posts/ID`,
 `index.php?page=post&s=view&id=ID`), tag searches (`/posts?tags=...`,
@@ -521,7 +521,7 @@ to another origin are refused. Authentication can expose posts hidden from publi
 API requests; posts without usable file URLs are still skipped. Plain CDN file
 links stay direct downloads.
 
-Experimental native Mastodon extraction (`--extractor native`) covers
+Native Mastodon extraction covers
 mastodon.social, pawoo.net and baraag.net with upstream categories
 `mastodon.social`, `pawoo` and `baraag`; the host is also exposed as `instance`.
 Supported: statuses (`/@USER/ID`, `/web/statuses/ID`), user timelines
@@ -558,7 +558,7 @@ and audio attachments are served from HTTPS CDN hosts without API credentials.
 upstream instance labels; existing files are not moved. Stable archive identity
 remains (instance, attachment ID), including for older `mastodon` archive entries.
 
-Experimental native Kemono/Coomer extraction (`--extractor native`) covers
+Native Kemono/Coomer extraction covers
 kemono.cr/.su/.party (`kemono` category) and coomer.st/.su/.party (`coomer`).
 Supported: posts (`/SERVICE/user/USER/post/ID`), creator listings
 (`/SERVICE/user/USER`) and global post listings (`/posts`) via the `/api/v1` API
@@ -698,7 +698,7 @@ and inspection output. API redirects remain confined to the original origin;
 public site media may follow CDN redirects with validated post/channel Referers.
 Username/password login is not implemented.
 
-Experimental native image host extraction (`--extractor native`), one category
+Native image host extraction, one category
 per site: `pixeldrain` files (`/u/ID`, via `/api/file/ID/info`, downloaded from
 `/api/file/ID?download`) and lists (`/l/ID`, `/api/list/ID`), including
 zero-based `#item=N` selection with original list numbering (out-of-range
@@ -716,7 +716,7 @@ gallery ID, `media_id` the file ID, caption the title (or file name), file
 otherwise; archive identity is (category, file ID). Plain CDN file links
 (files.catbox.moe, i.postimg.cc, images2.imgbox.com) stay direct downloads.
 
-Experimental native Tumblr extraction (`--extractor native`, `tumblr`
+Native Tumblr extraction (`tumblr`
 category) covers blog listings (`BLOG.tumblr.com`, `/posts`,
 `www.tumblr.com/BLOG`), single posts (`/post/ID[/slug]`,
 `www.tumblr.com/BLOG/ID`) and tags (`/tagged/TAG`) via API v2
@@ -756,7 +756,7 @@ then on, as upstream does.
 {"extractor": {"tumblr": {"access-token": "TOKEN", "access-token-secret": "SECRET"}}}
 ```
 
-Experimental native Pixiv extraction (`--extractor native`, `pixiv` category)
+Native Pixiv extraction (`pixiv` category)
 requires `extractor.pixiv.refresh-token` (accepted in the `pixiv` or `pixiv-novel`
 category, never echoed); without it selected Pixiv jobs fail before any network access,
 except for public Pixiv Sketch feeds and the Pixivision article request described below.
@@ -1112,7 +1112,7 @@ novels available. Authenticated live novel extraction remains unverified; source
 oracle and local HTTP fixtures cover ordering, mutations, selection, independent
 clients, archives, cancellation and failure boundaries.
 
-Experimental native DeviantArt extraction (`--extractor native`, `deviantart`
+Native DeviantArt extraction (`deviantart`
 category) uses the OAuth2 API with a client-credentials token (upstream's public
 client unless `extractor.deviantart.client-id`/`client-secret` are set; accepted
 only in the `deviantart` category, never echoed), cached for the run and
@@ -1128,7 +1128,7 @@ only. Deviations without image content (literature, journals) are skipped.
 the title, with `published_time` and width/height. Default filenames are
 `{post_id}.{extension}`; archive identity is the UUID.
 
-Experimental native Flickr extraction (`--extractor native`, `flickr` category)
+Native Flickr extraction (`flickr` category)
 uses the REST API with the site's public key (read once per run from
 `flickr.com/prints`, as upstream does; a built-in key is the fallback) unless
 `extractor.flickr.api-key` is set (accepted only for `tumblr`/`flickr`/`wallhaven`/`weasyl`/`pixeldrain`/`gelbooru`/`safebooru`, never
@@ -1145,7 +1145,7 @@ date, with width/height and photo/video type. Default filenames are
 `{post_id}.{extension}`; archive identity is the photo ID. Plain
 `staticflickr.com` links stay direct downloads.
 
-Experimental native Wallhaven extraction (`--extractor native`, `wallhaven`
+Native Wallhaven extraction (`wallhaven`
 category) uses the public API (`/api/v1`). Supported: `wallhaven.cc/w/ID` and
 `whvn.cc/ID` (`w/ID`), `wallhaven.cc/search?...` (same query forwarded to
 `search`), `user/USER/uploads` (search `q=@USER`) and
@@ -1159,7 +1159,7 @@ only; listing items carry neither), timestamp `created_at`, with
 width/height. Default filenames are `wallhaven-{id}.{extension}`; archive
 identity is the wallpaper ID. Plain `w.wallhaven.cc` links stay direct.
 
-Experimental native ArtStation extraction (`--extractor native`, `artstation`
+Native ArtStation extraction (`artstation`
 category) uses the site JSON: `www.artstation.com/artwork/HASH` and
 `USER.artstation.com/projects/HASH` (`projects/HASH.json`), and portfolios
 `www.artstation.com/USER[/albums/all]` or `USER.artstation.com`
@@ -1174,7 +1174,7 @@ title, timestamp `published_at`, index 1-based per project, with width/height.
 Default filenames are `{post_id}_{media_id}.{extension}`; archive identity is
 the asset ID. Plain CDN links stay direct.
 
-Experimental native Pinterest extraction (`--extractor native`, `pinterest`
+Native Pinterest extraction (`pinterest`
 category) uses the web resource API (`resource/NAME/get/?source_url=..&data=..`
 with upstream's XHR headers, including a pinned `X-APP-VERSION` that Pinterest
 may eventually reject). Supported on `pinterest.com` and an explicit list of
@@ -1190,7 +1190,7 @@ pinner, caption title/grid title/description, timestamp `created_at`, index
 1-based, with width/height. Default filenames are `{post_id}_{index}.{extension}`;
 archive identity is pin ID plus index. Plain `pinimg.com` links stay direct.
 
-Experimental native VSCO extraction (`--extractor native`, `vsco` category)
+Native VSCO extraction (`vsco` category)
 reads the page-embedded `window.__PRELOADED_STATE__` JSON, which is
 undocumented and fragile. `vsco.co/USER/media/ID` uses `medias.byId`;
 `vsco.co/USER` and `/USER/gallery` take the site ID and anonymous `tkn` bearer
@@ -1201,7 +1201,7 @@ kept only as progressive MP4 (HLS is skipped). HTTPS on `*.vsco.co` only.
 the description, timestamp `uploadDate`, with width/height. Default filenames
 are `{media_id}.{extension}`; archive identity is the media ID.
 
-Experimental native Newgrounds extraction (`--extractor native`, `newgrounds`
+Native Newgrounds extraction (`newgrounds`
 category) scrapes art pages `www.newgrounds.com/art/view/USER/SLUG` (main
 image from `<div class="image">` or `og:image`, extra images from `imageData`
 /`art-images`, title from `og:title`, date from `itemprop="datePublished"`).
@@ -1212,8 +1212,7 @@ skipped. HTTPS on `*.ngfiles.com` only. `post_id` is the image's numeric ID,
 `media_id` `POSTID_INDEX`, `username` the URL user, caption the title. Default
 filenames are `{post_id}_{index}.{extension}`; archive identity is `media_id`.
 
-Experimental native Fur Affinity extraction (`--extractor native`,
-`furaffinity` category) scrapes `www.furaffinity.net/view/ID/` and `/full/ID/`
+Native Fur Affinity extraction (`furaffinity` category) scrapes `www.furaffinity.net/view/ID/` and `/full/ID/`
 (the `Download` link, title, `/user/` artist, `popup_date` and rating).
 `/gallery/USER/` and `/scraps/USER/` page `/gallery/USER/N/` `<figure
 id="sid-ID">` items until a page adds no new IDs (capped at 200 pages) and
@@ -1224,7 +1223,7 @@ submissions are skipped. HTTPS on `d.furaffinity.net`/`*.facdn.net` only.
 title. Default filenames are `{post_id}.{extension}`; archive identity is the
 submission ID.
 
-Experimental native Weasyl extraction (`--extractor native`, `weasyl`
+Native Weasyl extraction (`weasyl`
 category) uses the API: `weasyl.com/~USER/submissions/ID/...` and
 `/submission/ID` read `api/submissions/ID/view`; `/~USER` and `/~USER/gallery`
 page `api/users/USER/gallery?nextid=N` until `nextid` is null (capped at 200
@@ -1415,7 +1414,7 @@ broader content variants, and upstream-style warning output for recovered articl
 errors remain unfinished. Library callers can use
 `Twitter::with_article_options` and `parse_response_with_article_options`.
 
-Experimental X profile timelines use `Twitter::stream` and the native CLI at
+X profile timelines use `Twitter::stream` and the native CLI at
 `/USERNAME/media`, `/USERNAME/tweets`, `/USERNAME/with_replies`, and
 `/USERNAME/highlights`, with equivalent `/id:USER_ID/TAB` forms on X/Twitter hosts.
 Username lookup uses `UserByScreenName`. Numeric IDs skip lookup by default;
@@ -1606,11 +1605,11 @@ Native mode imports cookies from Chromium-based browsers on macOS and from an
 explicitly selected Firefox profile:
 
 ```sh
-./target/release/gallery-dl-rs --extractor native \
+./target/release/gallery-dl-rs \
   --cookies-from-browser helium -g 'https://www.pinterest.com/USER/BOARD/'
-./target/release/gallery-dl-rs --extractor native \
+./target/release/gallery-dl-rs \
   --cookies-from-browser 'helium-neo:Profile 1' -g 'https://www.reddit.com/user/me/saved/'
-./target/release/gallery-dl-rs --extractor native \
+./target/release/gallery-dl-rs \
   --cookies-from-browser 'firefox:/absolute/path/to/firefox-profile' \
   -j 'https://www.instagram.com/p/SHORTCODE/'
 ```
@@ -1864,8 +1863,8 @@ creator IDs in observed catalogs are strings. Discord channel children expose
 upstream's `server` and `channel` objects with public scalar fields, for example:
 
 ```sh
-gallery-dl-rs --extractor native --child-filter "service == 'patreon'" --child-range '1-3' 'https://kemono.cr/artists'
-gallery-dl-rs --extractor native --child-filter "channel['type'] == 0" --child-range '1-2' 'https://kemono.cr/discord/server/SERVER_ID'
+gallery-dl-rs --child-filter "service == 'patreon'" --child-range '1-3' 'https://kemono.cr/artists'
+gallery-dl-rs --child-filter "channel['type'] == 0" --child-range '1-2' 'https://kemono.cr/discord/server/SERVER_ID'
 ```
 
 Fields also appear under `child` and `metadata` map aliases. Arbitrary transport
@@ -2488,15 +2487,14 @@ available from upstream.
 
 ### Social platforms
 
-Native coverage of the largest social platforms (`--extractor native`;
-`telegram`, `snapchat`, `kuaishou`, `xiaohongshu`, `threads`, `youtube`,
+Native coverage of the largest social platforms (`telegram`, `snapchat`, `kuaishou`, `xiaohongshu`, `threads`, `youtube`,
 `linkedin`, `shortlink` and `ytdl` have no upstream extractor and
 are always native):
 
 | Platform | Extractor | Anonymous access (checked live) |
 |---|---|---|
-| Instagram | native (experimental) | public posts, reels, app share links (`share/…`) and profile posts (paged through the logged-out profile query); stories, highlights and private accounts need `--cookies` |
-| X/Twitter | native (experimental) | single posts and a profile's top posts as a guest; full timelines and searches need `--cookies` |
+| Instagram | native | public posts, reels, app share links (`share/…`) and profile posts (paged through the logged-out profile query); stories, highlights and private accounts need `--cookies` |
+| X/Twitter | native | single posts and a profile's top posts as a guest; full timelines and searches need `--cookies` |
 | Facebook | native photos, posts, albums, videos, reels, share links and profiles | public albums, album lists and profile photos in full, paged through the logged-out grid and collection queries |
 | Reddit | native REST listings, submissions, users | yes; where Reddit sends logged-out JSON clients to its login page, listings, users and submissions fall back to the public Atom feeds (direct images, videos and links; no gallery metadata or comments; about one feed page per minute). `--cookies` restores the full API |
 | Pinterest, Bluesky | native | yes |
@@ -2522,8 +2520,9 @@ a captcha or a login page from them.
 
 ## Limitations
 
-Native Instagram, Facebook, and Twitter/X remain experimental, and live
-authenticated social downloads have not been verified in this repository.
+Live authenticated (logged-in) Instagram, Facebook, and Twitter/X downloads
+have not been verified in this repository; their parsers and transport are
+covered by fixture tests.
 Without session cookies they fall back to logged-out access, checked live on
 2026-10-23: Instagram posts are read from the public post page's embedded
 post object; X posts use a guest token with `TweetResultByRestId` (upstream's
@@ -2632,6 +2631,36 @@ sites and collection types remain planned. Library callers can use `Backend::str
 download archive to skip previously saved social media by stable IDs. Existing files are assumed complete,
 without revalidation.
 
+## Stability
+
+From 1.0, releases follow [Semantic Versioning](https://semver.org/). Within
+1.x, these stay compatible, and changes to them wait for 2.0:
+
+- Command-line options and their meaning. New options may be added.
+- Configuration files: upstream gallery-dl configuration (JSON, YAML or TOML)
+  passed with `--config`, and the native configuration read from the default
+  locations or `--native-config`. New settings may be added.
+- Exit codes, which use upstream's bit flags (1 error, 4 HTTP, 8 challenge,
+  16 authentication, 32 format, 64 no extractor, 128 OS).
+- `-j` output in upstream's message-list format and `-g` output of one URL
+  per line.
+- Download archives: upstream's SQLite `archive` table, and the native
+  history database, which only migrates forward.
+- The default directory and filename formats of each extractor. They follow
+  upstream's, so a later release may adopt a change upstream makes, which is
+  listed in CHANGELOG.md.
+
+Not covered:
+
+- Keyword dictionaries: they mirror upstream and may gain fields when sites
+  or upstream add them.
+- Site behaviour. Sites change without notice, and patch releases follow
+  them.
+- `--extractor compatibility`, which depends on the installed gallery-dl.
+- `--dump-media-json` and other inspection output marked as such.
+- The Rust library API (`gallery_dl_rs::…`), which exists for the binary
+  and its tests and may change in any release.
+
 ## Development
 
 ```sh
@@ -2639,6 +2668,12 @@ cargo fmt --check
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 ```
+
+To release, set `version` in `Cargo.toml`, move the CHANGELOG.md entries
+under a `## [X.Y.Z] - YYYY-MM-DD` heading, merge, and push a `vX.Y.Z` tag. The
+release workflow builds Linux (static musl), macOS and Windows binaries and
+publishes them with that CHANGELOG section as the release notes. Running it
+from the Actions tab builds every target without publishing.
 
 `src/extract.rs` owns URL dispatch and the compatibility protocol.
 `src/backend.rs` owns bounded compatibility process streaming and active timeouts;
@@ -2658,16 +2693,16 @@ cargo clippy --locked --all-targets -- -D warnings
 `src/transport.rs` owns redirect validation, per-origin cooldowns for downloads
 and native extraction, and Retry-After parsing.
 `src/main.rs` owns CLI orchestration and process exit status.
-`src/instagram.rs` owns the experimental native Instagram extractor;
-`src/twitter.rs` owns experimental native Twitter/X and transaction bootstrap;
+`src/instagram.rs` owns the native Instagram extractor;
+`src/twitter.rs` owns native Twitter/X and transaction bootstrap;
 `src/twitter_expansion.rs` validates explicit retweet/quote links and media identity;
 `src/twitter_search.rs` handles search routing, options, and pagination progress;
 `src/twitter_collections.rs` validates collection routes and response envelopes;
 `src/twitter_detail.rs` selects focal posts and buffers pre-focal conversation context;
 `src/twitter_detail_parse.rs` parses owned conversation entries and tombstones;
 `src/cookies.rs` owns scoped Netscape cookie selection. See the
-[fixture and manual-check notes](tests/fixtures/instagram/README.md) before
-promoting native extraction to the default.
+[fixture and manual-check notes](tests/fixtures/instagram/README.md) for
+verifying the social extractors live.
 
 See [ROADMAP.md](ROADMAP.md) for the native extractor work. This repository's
 existing [GPL-3.0 license](LICENSE) is retained. The gallery-dl backend is a separate
