@@ -4,6 +4,8 @@ on:
     tags: ["v*"]
   # Builds every target without publishing, to try the matrix before tagging.
   workflow_dispatch:
+  pull_request:
+    paths: [".github/workflows/release.yml"]
 
 permissions:
   contents: read
