@@ -1711,6 +1711,15 @@ matching destination calculations. A category's download clients reuse their
 connection pool and share the origin cooldown scheduler. The setting changes an
 HTTP header; TLS/browser impersonation remains unimplemented.
 
+HTTPS uses the operating system's TLS stack on macOS and Windows (TLS 1.2 or
+newer). Elsewhere it uses rustls with the RustCrypto provider and verifies
+against the system's root certificates, so Linux needs a CA bundle (usually the
+`ca-certificates` package; `SSL_CERT_FILE` and `SSL_CERT_DIR` are honoured).
+Every build verifies with the system's certificates, so `truststore` has no
+effect. `ciphers` and `tls12: false` (TLS 1.3 only) apply only to rustls
+builds; macOS and Windows warn once and ignore them. `--no-check-certificate`
+(`verify: false`) works everywhere.
+
 ## URL input files
 
 Use `-i urls.txt` / `--input-file urls.txt` to read a UTF-8 URL list; repeat the
@@ -2704,6 +2713,14 @@ and native extraction, and Retry-After parsing.
 [fixture and manual-check notes](tests/fixtures/instagram/README.md) for
 verifying the social extractors live.
 
-See [ROADMAP.md](ROADMAP.md) for the native extractor work. This repository's
-existing [GPL-3.0 license](LICENSE) is retained. The gallery-dl backend is a separate
-program; this project does not bundle its Python source.
+See [ROADMAP.md](ROADMAP.md) for the native extractor work.
+
+## License
+
+gallery-dl-rs is licensed under the [GNU General Public License version 2
+only](LICENSE), like gallery-dl, whose extractors it ports. Every linked
+dependency is under a GPL-2.0-compatible license; CI checks this with
+`cargo deny` for each release target (see `deny.toml`). For that reason HTTPS
+avoids `ring`, `aws-lc-rs` and the `openssl` crate, which are Apache-2.0
+licensed, and `crates/sync_wrapper` replaces the Apache-2.0 `sync_wrapper`
+crate that reqwest depends on with an MIT-licensed implementation.

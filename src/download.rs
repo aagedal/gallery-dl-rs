@@ -406,7 +406,7 @@ pub(crate) fn enumerated_path(path: &Path) -> PathBuf {
 
 pub fn client(timeout: Duration) -> Result<DownloadClient> {
     Ok(DownloadClient {
-        http: Client::builder()
+        http: crate::network::client_builder()
             .user_agent(concat!("gallery-dl-rs/", env!("CARGO_PKG_VERSION")))
             .timeout(timeout)
             // Redirects are validated manually before forwarding request headers.

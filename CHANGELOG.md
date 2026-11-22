@@ -29,6 +29,15 @@ a gallery-dl installation.
 - **`--extractor native` is now the default.** Pass `--extractor
   compatibility` to delegate extraction to an installed gallery-dl as before.
   An unsupported URL now exits with upstream's code 64.
+- **Licensed GPL-2.0-only**, matching gallery-dl, whose extractors the native
+  code ports (previously GPL-3.0-only). Every linked dependency is
+  GPL-2.0-compatible, which CI checks with `cargo deny`.
+- HTTPS uses the operating system's TLS stack on macOS and Windows, and rustls
+  with the RustCrypto provider elsewhere, verifying against the system's root
+  certificates (Linux needs a CA bundle such as `ca-certificates`). On macOS
+  and Windows, `ciphers` and `tls12: false` warn and are ignored; `truststore`
+  no longer changes anything.
+- LZMA entries written by the `zip` postprocessor use liblzma.
 
 ### Fixed
 

@@ -3,7 +3,7 @@ name = "gallery-dl-rs"
 version = "0.1.0"
 edition = "2024"
 description = "A Rust port of the gallery-dl image gallery downloader"
-license = "GPL-3.0-only"
+license = "GPL-2.0-only"
 repository = "https://github.com/aagedal/gallery-dl-rs"
 readme = "README.md"
 keywords = ["gallery-dl", "downloader", "image", "scraper", "cli"]
@@ -19,12 +19,9 @@ httpdate = "1"
 psl = "2"
 regex = "1"
 encoding_rs = "0.8"
-rustls-native-certs = "0.8"
-lzma-rust2 = { version = "0.22", default-features = false, features = ["std", "encoder"] }
+liblzma = { version = "0.4", default-features = false, features = ["static"] }
 crc32fast = "1"
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-webpki-roots = "1"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["stream"] }
 roxmltree = "0.21.1"
 rusqlite = { version = "0.38", features = ["bundled", "hooks"] }
 serde = { version = "1", features = ["derive", "rc"] }
@@ -46,5 +43,26 @@ aes = "0.8"
 cbc = "0.1"
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 
+# TLS: the operating system's stack on macOS and Windows; elsewhere rustls
+# with the RustCrypto provider and the system's root certificates. Both keep
+# every linked dependency compatible with GPL-2.0-only (ring, aws-lc-rs and
+# the openssl crate are Apache-2.0 licensed).
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }
+
+[target.'cfg(not(any(target_os = "macos", target_os = "windows")))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-manual-roots-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12"] }
+rustls-rustcrypto = "=0.1.0-pre.0"
+rustls-native-certs = "0.8"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
+
+[workspace]
+members = ["crates/sync_wrapper"]
+
+# sync_wrapper (required by reqwest and tower) is Apache-2.0 only; this
+# MIT-licensed reimplementation keeps the binary GPL-2.0-only compatible.
+[patch.crates-io]
+sync_wrapper = { path = "crates/sync_wrapper" }
