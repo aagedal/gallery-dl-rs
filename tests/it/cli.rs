@@ -57,6 +57,8 @@ fn metadata_is_opt_in_and_conflicts_with_inspection_modes() {
 fn direct_url_listing_does_not_need_backend() {
     let output = binary()
         .args([
+            "--extractor",
+            "compatibility",
             "--extractor-command",
             "/missing/backend",
             "-g",
@@ -76,6 +78,8 @@ fn direct_url_listing_does_not_need_backend() {
 fn missing_social_backend_is_actionable() {
     let output = binary()
         .args([
+            "--extractor",
+            "compatibility",
             "--extractor-command",
             "/missing/backend",
             "-g",
@@ -89,6 +93,24 @@ fn missing_social_backend_is_actionable() {
             .unwrap()
             .contains("Install gallery-dl")
     );
+}
+
+#[test]
+fn native_extraction_is_the_default_and_never_runs_gallery_dl() {
+    let output = binary()
+        .args([
+            "--extractor-command",
+            "/missing/backend",
+            "--proxy",
+            "http://127.0.0.1:9",
+            "-g",
+            "https://x.com/person/status/123",
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(!stderr.contains("could not run"), "{stderr}");
 }
 
 #[test]
@@ -120,7 +142,7 @@ fn json_inspection_keeps_input_order_and_deduplicates_after_failures() {
         ])
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(4));
+    assert_eq!(output.status.code(), Some(64));
     let items: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(items.as_array().unwrap().len(), 2);
     assert_eq!(items[0]["url"], "https://example.com/b.jpg");
@@ -258,7 +280,7 @@ printf '%s\n' '[[3,"ytdl:https://example.com/synthetic",{"_ytdl_manifest":"hls",
 "##).unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
     let output = binary()
-        .arg("--extractor-command")
+        .args(["--extractor", "compatibility", "--extractor-command"])
         .arg(script)
         .args(["-g", "https://x.com/person/status/1"])
         .output()
@@ -315,7 +337,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
                 .env("EXPANSION_ARGUMENTS", &log)
                 .arg("--native-config")
                 .arg(&config)
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(&script)
                 .args(["-g", url])
                 .output()
@@ -385,7 +407,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
                 .env("PROFILE_ARGUMENTS", &log)
                 .arg("--native-config")
                 .arg(&config)
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(&script)
                 .args(["-g", url])
                 .output()
@@ -418,7 +440,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
             .env("PROFILE_ARGUMENTS", &log)
             .arg("--native-config")
             .arg(&config)
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(&script)
             .args(["-g", "https://x.com/user/with_replies"])
             .output()
@@ -451,7 +473,7 @@ printf '%s\n' '[[2,{}],[3,"https://cdn.example/photo.jpg",{"filename":"photo","e
         "https://x.com/person/status/1",
     ] {
         let output = binary()
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(&script)
             .args(["-g", url])
             .output()
@@ -577,7 +599,7 @@ mod cancellation {
             binary()
                 .arg("-d")
                 .arg(&destination)
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(script)
                 .args([
                     "--jobs",
@@ -636,7 +658,7 @@ mod cancellation {
             binary()
                 .arg("-d")
                 .arg(&destination)
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(script)
                 .args(["--ytdl-command", "/nonexistent/yt-dlp"])
                 .env("PIPELINE_SAVED", saved)
@@ -675,7 +697,7 @@ mod cancellation {
             binary()
                 .arg("-d")
                 .arg(&destination)
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(script)
                 .args(["--jobs", "2", &url, "https://x.com/user/status/1"])
                 .stdout(Stdio::piped())
@@ -769,7 +791,7 @@ mod cancellation {
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
         let child = Running(Some(
             binary()
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(&script)
                 .args(["-g", "https://x.com/user/status/1"])
                 .stdout(Stdio::piped())
@@ -957,7 +979,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
                 .env("SEARCH_ARGUMENTS", &log)
                 .arg("--native-config")
                 .arg(&config)
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(&script)
                 .args(["-g", url])
                 .output()
@@ -998,7 +1020,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
             .env("SEARCH_ARGUMENTS", &log)
             .arg("--native-config")
             .arg(&config)
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(&script)
             .args(["-g", "https://x.com/search?q=rust"])
             .output()
@@ -1056,7 +1078,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
                 .env("STATUS_ARGUMENTS", &log)
                 .arg("--native-config")
                 .arg(&config)
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(&script)
                 .args(["-g", url])
                 .output()
@@ -1090,7 +1112,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
             .env("STATUS_ARGUMENTS", &log)
             .arg("--native-config")
             .arg(&config)
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(&script)
             .args(["-g", "https://x.com/user/status/1"])
             .output()
@@ -1140,7 +1162,7 @@ printf '%s\n' '[[3,"https://cdn.example/first.jpg",{"filename":"first","extensio
                 .env("THREAD_ARGUMENTS", &log)
                 .arg("--native-config")
                 .arg(&config)
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(&backend)
                 .args(["-g", url, url])
                 .output()
@@ -1197,7 +1219,7 @@ printf '%s\n' '[[3,"https://cdn.example/first.jpg",{"filename":"first","extensio
             .env("THREAD_ARGUMENTS", &log)
             .arg("--native-config")
             .arg(&config)
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(&backend)
             .args(["-g", "https://x.com/person/status/1"])
             .output()
@@ -1264,7 +1286,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
                 .env("MEDIA_ARGUMENTS", &log)
                 .arg("--native-config")
                 .arg(&config)
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(&backend)
                 .args(["-g", url])
                 .output()
@@ -1301,7 +1323,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
             .env("MEDIA_ARGUMENTS", &log)
             .arg("--native-config")
             .arg(&config)
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(&backend)
             .args(["-g", "https://x.com/person/status/1"])
             .output()
@@ -1389,7 +1411,7 @@ fn social_dedup_preserves_distinct_files_and_request_context_across_inputs() {
         std::fs::write(&fixture, serde_json::to_vec(&rows).unwrap()).unwrap();
         let output = binary()
             .env("SOCIAL_ROWS", &fixture)
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(&script)
             .args(["--dump-media-json", source, other_source])
             .output()
@@ -1457,7 +1479,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
                 .env("CARD_ARGUMENTS", &log)
                 .arg("--native-config")
                 .arg(&config)
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(&backend)
                 .args(["-g", url])
                 .output()
@@ -1491,7 +1513,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
             .env("CARD_ARGUMENTS", &log)
             .arg("--native-config")
             .arg(&config)
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(&backend)
             .args(["-g", "https://x.com/person/status/1"])
             .output()
@@ -1558,7 +1580,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
                 .env("ARTICLE_ARGUMENTS", &log)
                 .arg("--native-config")
                 .arg(&config)
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(&backend)
                 .args(["-g", url])
                 .output()
@@ -1597,7 +1619,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
             .env("ARTICLE_ARGUMENTS", &log)
             .arg("--native-config")
             .arg(&config)
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(&backend)
             .args(["-g", "https://x.com/person/status/1"])
             .output()
@@ -1655,7 +1677,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
                 .env("SIZE_ARGUMENTS", &log)
                 .arg("--native-config")
                 .arg(&config)
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(&backend)
                 .args(["-g", url])
                 .output()
@@ -1699,7 +1721,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
             .env("SIZE_ARGUMENTS", &log)
             .arg("--native-config")
             .arg(&config)
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(&backend)
             .args(["-g", "https://x.com/person/status/1"])
             .output()
@@ -1791,7 +1813,7 @@ fn fallback_configuration_controls_actual_download_attempts() {
         let saved = root.path().join("saved");
         let output = binary()
             .env("FALLBACK_ROWS", &fixture)
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(&backend)
             .arg("--native-config")
             .arg(&config)
@@ -1858,7 +1880,7 @@ fn compatibility_community_archives_keep_scoped_files_distinct_from_ordinary_pos
     std::fs::set_permissions(&backend, std::fs::Permissions::from_mode(0o700)).unwrap();
     let output = binary()
         .env("COMMUNITY_ROWS", &fixture)
-        .arg("--extractor-command")
+        .args(["--extractor", "compatibility", "--extractor-command"])
         .arg(&backend)
         .args([
             "--dump-media-json",
@@ -1949,7 +1971,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
                 .env("TEXT_ARGUMENTS", &log)
                 .arg("--native-config")
                 .arg(&config)
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(&backend)
                 .arg("-g")
                 .args(&extra)
@@ -1990,7 +2012,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
         .env("TEXT_ARGUMENTS", &log)
         .arg("--native-config")
         .arg(&config)
-        .arg("--extractor-command")
+        .args(["--extractor", "compatibility", "--extractor-command"])
         .arg(&backend)
         .args(["-g", "https://x.com/person/status/1"])
         .output()
@@ -2001,7 +2023,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
     assert!(!log.exists());
     let output = binary()
         .env("TEXT_ARGUMENTS", &log)
-        .arg("--extractor-command")
+        .args(["--extractor", "compatibility", "--extractor-command"])
         .arg(&backend)
         .args([
             "-g",

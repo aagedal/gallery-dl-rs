@@ -383,7 +383,7 @@ fn compatibility_backend_receives_exact_network_and_browser_arguments_before_sep
     std::fs::set_permissions(&backend, std::fs::Permissions::from_mode(0o700)).unwrap();
     let output = binary()
         .env("NETWORK_ARGUMENTS", &args)
-        .arg("--extractor-command")
+        .args(["--extractor", "compatibility", "--extractor-command"])
         .arg(&backend)
         .args([
             "--proxy",

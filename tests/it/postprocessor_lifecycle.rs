@@ -128,7 +128,7 @@ async fn cli(root: &Path, backend: &Path, config: &Path, extra: &[&str]) -> std:
             "--proxy",
             "",
         ])
-        .arg("--extractor-command")
+        .args(["--extractor", "compatibility", "--extractor-command"])
         .arg(backend)
         .arg("--native-config")
         .arg(config)

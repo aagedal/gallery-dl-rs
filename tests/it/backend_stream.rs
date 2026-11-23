@@ -139,7 +139,7 @@ async fn cli_listing_preserves_items_and_continues_after_late_failure() {
         );
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"));
         command
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(backend.executable)
             .args(["-g", social_url().as_str(), "https://example.com/later.jpg"])
             .kill_on_drop(true);

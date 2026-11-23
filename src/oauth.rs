@@ -478,7 +478,7 @@ pub async fn run(target: &str, options: Options<'_>) -> Result<()> {
     let mut helper = Helper {
         category: category.to_owned(),
         options,
-        client: reqwest::Client::builder()
+        client: crate::network::client_builder()
             .user_agent(concat!("gallery-dl-rs/", env!("CARGO_PKG_VERSION")))
             .build()?,
         connection: None,
@@ -516,7 +516,7 @@ pub async fn run(target: &str, options: Options<'_>) -> Result<()> {
                 "_refresh_token_cache",
                 &format!("#{id}"),
             ));
-            helper.client = reqwest::Client::builder()
+            helper.client = crate::network::client_builder()
                 .user_agent("Python:gallery-dl:0.8.4 (by /u/mikf1)")
                 .build()?;
             helper
@@ -602,7 +602,7 @@ mod tests {
         let mut helper = Helper {
             category: "reddit".into(),
             options: &options,
-            client: reqwest::Client::new(),
+            client: crate::network::client_builder().build().unwrap(),
             connection: None,
             cache_key: None,
         };

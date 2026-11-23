@@ -1,0 +1,22 @@
+# `cargo deny check licenses`: every linked dependency must be usable in a
+# GPL-2.0-only program, so Apache-2.0-only crates (ring, aws-lc-rs, openssl)
+# are rejected; dual-licensed crates qualify through their other license.
+[graph]
+# CI checks each release target separately (`cargo deny --target T`):
+# checked together, cargo-deny unifies features across targets and would
+# count macOS's native-tls (and Linux's openssl) in every build.
+exclude-dev = true
+
+[licenses]
+allow = [
+    "GPL-2.0-only",
+    "MIT",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "Unlicense",
+    "BSL-1.0",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.9

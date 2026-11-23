@@ -195,8 +195,8 @@ struct Args {
     /// Override the User-Agent for extraction and media HTTP requests
     #[arg(short = 'a', long)]
     user_agent: Option<String>,
-    /// Social extractor; native supports experimental Instagram collections/stories/posts, Facebook media/albums, and X posts/profile tabs
-    #[arg(long, value_enum, default_value_t = Extractor::Compatibility)]
+    /// Extraction backend: native Rust (default) or an installed gallery-dl executable
+    #[arg(long, value_enum, default_value_t = Extractor::Native)]
     extractor: Extractor,
     /// Explicit gallery-dl configuration file (default config is ignored)
     #[arg(short, long)]
@@ -472,8 +472,8 @@ fn parse_size(value: &str) -> std::result::Result<u64, String> {
 }
 
 /// The first existing default native configuration, like upstream's search
-/// of user configuration directories. Upstream gallery-dl files are not read:
-/// the native schema is a strict subset and would reject their settings.
+/// of user configuration directories. Upstream gallery-dl's own files are
+/// not searched, so the two tools keep separate defaults; `--config` reads one.
 fn default_native_config() -> Option<PathBuf> {
     native_config_candidates()
         .into_iter()

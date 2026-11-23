@@ -465,7 +465,7 @@ fn cli_does_not_deduplicate_a_failed_representation_by_its_stable_id() {
     let output = Command::new(env!("CARGO_BIN_EXE_gallery-dl-rs"))
         .arg("--download-archive")
         .arg(&path)
-        .arg("--extractor-command")
+        .args(["--extractor", "compatibility", "--extractor-command"])
         .arg(&script)
         .arg("--no-ytdl")
         .arg("-d")

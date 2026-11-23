@@ -101,7 +101,7 @@ async fn category_destinations_and_filenames_resolve_against_working_directory()
     }
     let mut command = binary(&cwd, &cfg);
     command
-        .arg("--extractor-command")
+        .args(["--extractor", "compatibility", "--extractor-command"])
         .arg(backend(root.path()))
         .env("CONFIG_TEST_LOG", root.path().join("backend.log"))
         .args([
@@ -134,7 +134,7 @@ async fn category_cookies_reach_backend_and_explicit_cli_cookie_overrides() {
     let log = root.path().join("backend.log");
     let mut command = binary(root.path(), &cfg);
     command
-        .arg("--extractor-command")
+        .args(["--extractor", "compatibility", "--extractor-command"])
         .arg(&executable)
         .env("CONFIG_TEST_LOG", &log)
         .args([
@@ -154,7 +154,7 @@ async fn category_cookies_reach_backend_and_explicit_cli_cookie_overrides() {
     std::fs::write(&log, b"").unwrap();
     let mut command = binary(root.path(), &cfg);
     command
-        .arg("--extractor-command")
+        .args(["--extractor", "compatibility", "--extractor-command"])
         .arg(executable)
         .env("CONFIG_TEST_LOG", &log)
         .args([
@@ -270,7 +270,7 @@ async fn native_and_backend_config_flags_are_separate_and_can_coexist() {
     let log = root.path().join("backend.log");
     let mut command = binary(root.path(), &cfg);
     command
-        .arg("--extractor-command")
+        .args(["--extractor", "compatibility", "--extractor-command"])
         .arg(backend(root.path()))
         .env("CONFIG_TEST_LOG", &log)
         .args([
@@ -654,7 +654,7 @@ async fn site_media_options_forward_only_to_their_compatibility_categories() {
         let _ = std::fs::remove_file(&log);
         let mut command = binary(root.path(), &cfg);
         command
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(backend(root.path()))
             .env("CONFIG_TEST_LOG", &log)
             .args(["-g", url]);
@@ -712,7 +712,7 @@ async fn bluesky_and_pixiv_selection_forward_only_to_matching_backends() {
         let _ = std::fs::remove_file(&log);
         let mut command = binary(root.path(), &cfg);
         command
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(backend(root.path()))
             .env("CONFIG_TEST_LOG", &log)
             .args(["-g", url]);
@@ -761,7 +761,7 @@ async fn mastodon_instance_scopes_preserve_credentials_metadata_and_distinct_arc
     let log = root.path().join("backend.log");
     let mut command = binary(root.path(), &cfg);
     command
-        .arg("--extractor-command")
+        .args(["--extractor", "compatibility", "--extractor-command"])
         .arg(mastodon_backend(root.path()))
         .env("CONFIG_TEST_LOG", &log)
         .args([
@@ -804,7 +804,7 @@ async fn mastodon_bookmark_date_filter_keeps_later_newer_posts() {
     let cfg = config(root.path(), serde_json::json!({}));
     let mut command = binary(root.path(), &cfg);
     command
-        .arg("--extractor-command")
+        .args(["--extractor", "compatibility", "--extractor-command"])
         .arg(mastodon_backend(root.path()))
         .env("CONFIG_TEST_LOG", root.path().join("backend.log"))
         .args([
@@ -895,7 +895,7 @@ async fn date_selection_preserves_later_newer_bluesky_posts_and_unordered_pixiv_
             std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
             let mut command = binary(root.path(), &cfg);
             command
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(&executable)
                 .args(extra)
                 .args(["--dump-media-json", "--date-after", "2024-01-01", url]);
@@ -987,7 +987,7 @@ async fn tumblr_selections_and_booru_credentials_forward_with_exact_types_and_sc
         let _ = std::fs::remove_file(&log);
         let mut command = binary(root.path(), &cfg);
         command
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(backend(root.path()))
             .env("CONFIG_TEST_LOG", &log)
             .args(["-g", url]);
@@ -1064,7 +1064,7 @@ async fn expansion_and_post_limits_forward_only_to_supported_categories() {
         let _ = std::fs::remove_file(&log);
         let mut command = binary(root.path(), &cfg);
         command
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(backend(root.path()))
             .env("CONFIG_TEST_LOG", &log)
             .args(["-g", url]);
@@ -1097,7 +1097,7 @@ printf '%s\n' '[[2,"",{"id":"1","user":"42","service":"patreon","date":"2020-01-
         for selection in [vec![], vec!["--post-range", "1"]] {
             let mut command = binary(root.path(), &cfg);
             command
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(&executable)
                 .args(["--dump-media-json", "--date-after", "2024-01-01"])
                 .args(selection)
@@ -1155,7 +1155,7 @@ async fn kemono_file_selection_forwards_only_to_its_category_and_keeps_duplicate
         let _ = std::fs::remove_file(&log);
         let mut command = binary(root.path(), &cfg);
         command
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(backend(root.path()))
             .env("CONFIG_TEST_LOG", &log)
             .args(["-g", url]);
@@ -1175,7 +1175,7 @@ printf '%s\n' '[[3,"https://kemono.cr/data/aa/bb/aabb.jpg",{"id":"7","user":"42"
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
     let mut command = binary(root.path(), &cfg);
     command
-        .arg("--extractor-command")
+        .args(["--extractor", "compatibility", "--extractor-command"])
         .arg(&executable)
         .args(["--dump-media-json", "https://kemono.cr/posts"]);
     let result = output(&mut command).await;
@@ -1224,7 +1224,7 @@ async fn kemono_revision_options_forward_as_typed_scoped_values_and_keep_history
         let _ = std::fs::remove_file(&log);
         let mut command = binary(root.path(), &cfg);
         command
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(backend(root.path()))
             .env("CONFIG_TEST_LOG", &log)
             .args(["-g", url]);
@@ -1243,12 +1243,15 @@ printf '%s\n' '[[3,"https://kemono.cr/data/aa/bb/aabb.jpg",{"id":"7","user":"42"
 "#).unwrap();
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
     let mut command = binary(root.path(), &cfg);
-    command.arg("--extractor-command").arg(&executable).args([
-        "--dump-media-json",
-        "--filter",
-        "revision_count == 2",
-        "https://kemono.cr/posts",
-    ]);
+    command
+        .args(["--extractor", "compatibility", "--extractor-command"])
+        .arg(&executable)
+        .args([
+            "--dump-media-json",
+            "--filter",
+            "revision_count == 2",
+            "https://kemono.cr/posts",
+        ]);
     let result = output(&mut command).await;
     success(&result);
     let jobs: Vec<serde_json::Value> = serde_json::from_slice(&result.stdout).unwrap();
@@ -1275,7 +1278,7 @@ async fn kemono_metadata_setting_forwards_only_to_kemono_and_coomer() {
         let _ = std::fs::remove_file(&log);
         let mut command = binary(root.path(), &cfg);
         command
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(backend(root.path()))
             .env("CONFIG_TEST_LOG", &log)
             .args(["-g", url]);
@@ -1312,7 +1315,7 @@ async fn kemono_endpoint_and_discord_order_forward_only_to_their_categories() {
         let _ = std::fs::remove_file(&log);
         let mut command = binary(root.path(), &cfg);
         command
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(backend(root.path()))
             .env("CONFIG_TEST_LOG", &log)
             .args(["-g", url]);
@@ -1352,7 +1355,7 @@ async fn kemono_favorites_setting_forwards_only_to_supported_categories() {
         let _ = std::fs::remove_file(&log);
         let mut command = binary(root.path(), &cfg);
         command
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(backend(root.path()))
             .env("CONFIG_TEST_LOG", &log)
             .args(["-g", url]);
@@ -1409,7 +1412,7 @@ async fn child_selection_forwards_to_backend_and_cli_overrides_scoped_settings()
         let _ = std::fs::remove_file(&log);
         let mut command = binary(root.path(), &cfg);
         command
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(backend(root.path()))
             .env("CONFIG_TEST_LOG", &log);
         if cli {
@@ -1502,7 +1505,7 @@ async fn include_settings_forward_to_compatibility_with_all_and_empty_preserved(
         let _ = std::fs::remove_file(&log);
         let result = output(
             binary(root.path(), &cfg)
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(&executable)
                 .env("CONFIG_TEST_LOG", &log)
                 .args(["-g", source]),
@@ -1565,7 +1568,7 @@ async fn bluesky_server_and_endpoint_forward_only_to_its_compatibility_backend()
             let _ = std::fs::remove_file(&log);
             let result = output(
                 binary(root.path(), &cfg)
-                    .arg("--extractor-command")
+                    .args(["--extractor", "compatibility", "--extractor-command"])
                     .arg(backend(root.path()))
                     .env("CONFIG_TEST_LOG", &log)
                     .args(["-g", source]),
@@ -1622,7 +1625,7 @@ async fn original_ugoira_and_truthy_fallback_modes_forward_only_to_pixiv() {
             let _ = std::fs::remove_file(&log);
             let mut command = binary(root.path(), &cfg);
             command
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(backend(root.path()))
                 .env("CONFIG_TEST_LOG", &log)
                 .args(["-g", url]);
@@ -1660,7 +1663,7 @@ async fn pixiv_optional_enrichment_forwards_truthiness_only_to_illustrations() {
             let _ = std::fs::remove_file(&log);
             let mut command = binary(root.path(), &cfg);
             command
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(backend(root.path()))
                 .env("CONFIG_TEST_LOG", &log)
                 .args(["-g", url]);
@@ -1704,7 +1707,7 @@ async fn novel_and_illustration_enrichment_forward_independent_category_override
         let _ = std::fs::remove_file(&log);
         let mut command = binary(root.path(), &cfg);
         command
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(backend(root.path()))
             .env("CONFIG_TEST_LOG", &log)
             .args(["-g", url]);
@@ -1745,7 +1748,7 @@ async fn pixiv_metadata_truthiness_forwards_independent_scopes_and_keeps_other_c
         let _ = std::fs::remove_file(&log);
         let mut command = binary(root.path(), &cfg);
         command
-            .arg("--extractor-command")
+            .args(["--extractor", "compatibility", "--extractor-command"])
             .arg(backend(root.path()))
             .env("CONFIG_TEST_LOG", &log)
             .args(["-g", url]);
@@ -1783,7 +1786,7 @@ async fn pixiv_captions_truthiness_forwards_only_to_supported_illustration_jobs(
             let _ = std::fs::remove_file(&log);
             let mut command = binary(root.path(), &cfg);
             command
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(backend(root.path()))
                 .env("CONFIG_TEST_LOG", &log)
                 .args(["-g", url]);
@@ -1823,7 +1826,7 @@ async fn pixiv_sanity_truthiness_forwards_only_to_supported_illustration_jobs() 
             let _ = std::fs::remove_file(&log);
             let mut command = binary(root.path(), &cfg);
             command
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(backend(root.path()))
                 .env("CONFIG_TEST_LOG", &log)
                 .args(["-g", url]);
@@ -1863,7 +1866,7 @@ async fn pixiv_novel_switches_truthiness_forward_only_to_novel_jobs() {
             let _ = std::fs::remove_file(&log);
             let mut command = binary(root.path(), &cfg);
             command
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(backend(root.path()))
                 .env("CONFIG_TEST_LOG", &log)
                 .args(["-g", url]);
@@ -1907,7 +1910,7 @@ async fn danbooru_pool_order_forwards_canonical_values_with_category_scope() {
             let _ = std::fs::remove_file(&log);
             let mut command = binary(root.path(), &cfg);
             command
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(backend(root.path()))
                 .env("CONFIG_TEST_LOG", &log)
                 .args(["-g", url]);

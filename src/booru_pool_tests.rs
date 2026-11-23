@@ -292,6 +292,8 @@ async fn native_collection_traversal_matches_actual_source_order_context_and_req
             );
             let pairs: Vec<_> = actual
                 .query_pairs()
+                // e621 tag categories need `mode=extended`, which upstream never sent.
+                .filter(|(key, value)| (key.as_ref(), value.as_ref()) != ("mode", "extended"))
                 .map(|(key, value)| (key.into_owned(), value.into_owned()))
                 .collect();
             let wanted: std::collections::BTreeMap<_, _> = expected["wire_params"]
@@ -505,6 +507,8 @@ async fn live_collection_hooks_preserve_nested_aliases_and_detach_replaced_roots
             let actual = api_root.join(target).unwrap();
             let actual: std::collections::BTreeMap<_, _> = actual
                 .query_pairs()
+                // e621 tag categories need `mode=extended`, which upstream never sent.
+                .filter(|(key, value)| (key.as_ref(), value.as_ref()) != ("mode", "extended"))
                 .map(|(key, value)| (key.into_owned(), value.into_owned()))
                 .collect();
             let expected: std::collections::BTreeMap<_, _> = expected["wire_params"]
@@ -662,6 +666,8 @@ async fn collection_routes_and_wire_identities_match_actual_source_constructor_p
             );
             let actual = actual
                 .query_pairs()
+                // e621 tag categories need `mode=extended`, which upstream never sent.
+                .filter(|(key, value)| (key.as_ref(), value.as_ref()) != ("mode", "extended"))
                 .map(|(k, v)| (k.into_owned(), v.into_owned()))
                 .collect::<std::collections::BTreeMap<_, _>>();
             let expected = call["params"]

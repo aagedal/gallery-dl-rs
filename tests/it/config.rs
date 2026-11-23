@@ -3803,7 +3803,7 @@ printf '%s\n' '[[3,"https://cdn.example/photo.jpg",{"filename":"photo","extensio
                 .env("BOORU_THRESHOLD_ARGUMENTS", &log)
                 .arg("--native-config")
                 .arg(&config)
-                .arg("--extractor-command")
+                .args(["--extractor", "compatibility", "--extractor-command"])
                 .arg(&backend)
                 .args(["--extractor", "compatibility", "-g", url])
                 .output()

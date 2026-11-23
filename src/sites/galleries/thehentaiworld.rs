@@ -57,8 +57,33 @@ async fn pace() {
     }
 }
 
+/// Quote the unquoted attribute values of the site's minified markup
+/// (`<a href=https://…>`, since 2026), which upstream's quoted patterns
+/// would otherwise skip.
+fn requote(page: &str) -> String {
+    re!(r"<[A-Za-z][^<>]*>")
+        .replace_all(page, |tag: &regex::Captures| {
+            re!(r#"(\s[\w-]+)=("[^"]*"|'[^']*'|[^\s"'<>`]+)"#)
+                .replace_all(&tag[0], |attr: &regex::Captures| match &attr[2][..1] {
+                    "\"" | "'" => attr[0].to_owned(),
+                    _ => format!("{}=\"{}\"", &attr[1], &attr[2]),
+                })
+                .into_owned()
+        })
+        .into_owned()
+}
+
+/// `(votes, score)` from the current `3.86 / 5 · 7 votes` rating line.
+fn rating(page: &str) -> Option<(i64, f64)> {
+    let c =
+        re!(r#"class="thw-rating-meta">\s*([\d.]+)\s*/\s*\d+\s*·\s*(\d+) vote"#).captures(page)?;
+    Some((c[2].parse().ok()?, c[1].parse().ok()?))
+}
+
 /// `_extract_post`: fields plus the file URLs.
 fn parse_post(url: &str, page: &str) -> (Map<String, Value>, Vec<String>) {
+    let page = &requote(page);
+    let rating = rating(page);
     let mut scan = Scan::new(page);
     let mut post = Map::new();
     post.insert("num".into(), 0.into());
@@ -80,14 +105,7 @@ fn parse_post(url: &str, page: &str) -> (Map<String, Value>, Vec<String>) {
         post.insert("type".into(), "video".into());
         post.insert("width".into(), 0.into());
         post.insert("height".into(), 0.into());
-        post.insert(
-            "votes".into(),
-            parse_int(scan.extr("(<strong>", "</strong>")).into(),
-        );
-        post.insert(
-            "score".into(),
-            parse_float(scan.extr("<strong>", "<")).into(),
-        );
+        votes_and_score(&mut post, &mut scan, rating);
         urls.push(scan.extr("<source src=\"", "\"").to_owned());
     } else {
         let kind = match kind {
@@ -102,21 +120,19 @@ fn parse_post(url: &str, page: &str) -> (Map<String, Value>, Vec<String>) {
         );
         post.insert("height".into(), parse_int(scan.extr("x ", "<")).into());
         let file = scan.extr("a href=\"", "\"").to_owned();
-        post.insert(
-            "votes".into(),
-            parse_int(scan.extr("(<strong>", "</strong>")).into(),
-        );
-        post.insert(
-            "score".into(),
-            parse_float(scan.extr("<strong>", "<")).into(),
-        );
-        let doujin = scan.extr("<a id=\"prev-page\"", "</div></div><");
+        votes_and_score(&mut post, &mut scan, rating);
+        // Doujin pages were thumbnails after `prev-page`; they now sit in
+        // `miniThumbContainer`, while `prev-page` links neighbouring posts.
+        let mut doujin = scan.extr("<a id=\"prev-page\"", "</div></div><");
+        if doujin.is_empty() {
+            doujin = extr(page, "id=\"miniThumbContainer\"", "</div></div><");
+        }
         if doujin.is_empty() {
             urls.push(file);
         } else {
-            let pages: Vec<String> = extract_iter(doujin, "class=\"border\" src=\"", "\"")
-                .into_iter()
-                .map(|u| re!(r"-220x\d+\.").replace(u, ".").into_owned())
+            let pages: Vec<String> = re!(r#"class="border"[^>]*? src="([^"]+)""#)
+                .captures_iter(doujin)
+                .map(|c| re!(r"-220x\d+\.").replace(&c[1], ".").into_owned())
                 .collect();
             post.insert("count".into(), pages.len().into());
             urls = pages;
@@ -124,10 +140,12 @@ fn parse_post(url: &str, page: &str) -> (Map<String, Value>, Vec<String>) {
         }
     }
     let mut groups: Vec<(String, Vec<Value>)> = Vec::new();
-    for c in re!(r#"<li><a class="([^"]*)" href="[^"]*">([^<]+)"#).captures_iter(&tags_html) {
-        match groups.iter_mut().find(|(k, _)| k == &c[1]) {
+    // General tags now carry a bare `class` attribute.
+    for c in re!(r#"<li><a class(?:="([^"]*)")? href="[^"]*">([^<]+)"#).captures_iter(&tags_html) {
+        let key = c.get(1).map_or("", |m| m.as_str());
+        match groups.iter_mut().find(|(k, _)| k == key) {
             Some((_, list)) => list.push(c[2].into()),
-            None => groups.push((c[1].to_owned(), vec![c[2].into()])),
+            None => groups.push((key.to_owned(), vec![c[2].into()])),
         }
     }
     let mut tags = Vec::new();
@@ -144,6 +162,17 @@ fn parse_post(url: &str, page: &str) -> (Map<String, Value>, Vec<String>) {
     }
     post.insert("tags".into(), tags.into());
     (post, urls)
+}
+
+/// Upstream's `(<strong>votes</strong>) <strong>score</strong>`, or the
+/// current rating line when the page has one.
+fn votes_and_score(post: &mut Map<String, Value>, scan: &mut Scan, rating: Option<(i64, f64)>) {
+    let (votes, score) = rating.unwrap_or_else(|| {
+        let votes = parse_int(scan.extr("(<strong>", "</strong>"));
+        (votes, parse_float(scan.extr("<strong>", "<")))
+    });
+    post.insert("votes".into(), votes.into());
+    post.insert("score".into(), score.into());
 }
 
 async fn post_items(http: &Http, url: &str) -> Vec<Item> {
@@ -195,7 +224,7 @@ fn extract(http: &Http, url: Url) -> Events<'_> {
                 } else {
                     format!("{base}page/{page_num}/")
                 };
-                let page = http.text(&http.api(&url)?).await?;
+                let page = requote(&http.text(&http.api(&url)?).await?);
                 let posts: Vec<String> = extract_iter(
                     extr(&page, "id=\"thumbContainer\"", "<script"),
                     " href=\"",
@@ -247,6 +276,70 @@ mod tests {
                 post["score"].as_f64()
             ),
             (Some("image"), Some(800), Some(4.5))
+        );
+    }
+
+    /// The minified markup served since 2026, with unquoted attributes.
+    #[test]
+    fn parses_minified_pages() {
+        let head = r#"<title>Title &#8211; Artist</title><body class="single postid-226208 single-format-standard post-ubel">"#;
+        let info = r#"<h3 id="tagsHead">Tags</h3><ul id=tags><li><a class=origin href=https://thehentaiworld.com/tag/o>Frieren</a> <span>5</span> </li><li><a class href=https://thehentaiworld.com/tag/b>blush</a> <span>9</span> </li></ul><h3>Info</h3><ul id=info> <li>Posted: 2024-04-16</li><li>Size: 800 x 1422</li><li><a href=https://thehentaiworld.com/wp-content/uploads/2024/04/Ubel.jpg>Full Size</a></li><li><span class=thw-rating-meta>4.64 / 5 · 11 votes</span></li></ul>"#;
+        let nav = r#"<div id=doujin-nav><a class=bigBtn href=https://thehentaiworld.com/hentai-images/prev/ id=prev-page>Previous</a></div>"#;
+        let thumbs = r#"<div id=miniThumbContainer><div class="current minithumb"> <a href="?pp=1"><img itemprop=thumbnail class=border loading=lazy src=https://thehentaiworld.com/wp-content/uploads/2024/04/Ubel-220x147.jpg width=160></a></div><div class=minithumb> <a href="?pp=2"><img itemprop=thumbnail class=border loading=lazy src=https://thehentaiworld.com/wp-content/uploads/2024/04/Ubel-2-220x147.jpg></a></div></div><div class="ad native">"#;
+        let login = r#"<div class=wpd-login> <a href="https://thehentaiworld.com/wp-login.php?redirect_to=x">Login</a></div>"#;
+        let related = r#"<div id=related><img class=border src=https://thehentaiworld.com/wp-content/uploads/other-220x147.jpg></div></div></div><"#;
+
+        let single = format!("{head}{info}{nav}{login}{related}");
+        let (post, urls) = parse_post("https://thehentaiworld.com/hentai-images/ubel/", &single);
+        assert_eq!(
+            urls,
+            ["https://thehentaiworld.com/wp-content/uploads/2024/04/Ubel.jpg"]
+        );
+        assert_eq!(
+            (post["id"].as_i64(), post["slug"].as_str()),
+            (Some(226208), Some("ubel"))
+        );
+        assert_eq!(
+            (post["width"].as_i64(), post["height"].as_i64()),
+            (Some(800), Some(1422))
+        );
+        assert_eq!(
+            (post["votes"].as_i64(), post["score"].as_f64()),
+            (Some(11), Some(4.64))
+        );
+        assert_eq!(post["tags_origin"], serde_json::json!(["Frieren"]));
+        assert_eq!(post["tags_general"], serde_json::json!(["blush"]));
+
+        let doujin = format!("{head}{info}{nav}{thumbs}{login}{related}");
+        let (post, urls) = parse_post("https://thehentaiworld.com/hentai-images/ubel/", &doujin);
+        assert_eq!(
+            urls,
+            [
+                "https://thehentaiworld.com/wp-content/uploads/2024/04/Ubel.jpg",
+                "https://thehentaiworld.com/wp-content/uploads/2024/04/Ubel-2.jpg",
+            ]
+        );
+        assert_eq!(post["count"], 2);
+
+        let video = format!(
+            "{head}<li>Posted: 2025-09-19</li><span class=thw-rating-meta>4.98 / 5 · 42 votes</span><video><source src=https://thehentaiworld.com/wp-content/uploads/v.mp4 type=video/mp4></video>{login}"
+        );
+        let (post, urls) = parse_post("https://thehentaiworld.com/videos/v/", &video);
+        assert_eq!(
+            urls,
+            ["https://thehentaiworld.com/wp-content/uploads/v.mp4"]
+        );
+        assert_eq!(
+            (post["votes"].as_i64(), post["type"].as_str()),
+            (Some(42), Some("video"))
+        );
+    }
+
+    #[test]
+    fn requotes_only_unquoted_tag_attributes() {
+        assert_eq!(
+            requote(r#"<a class href=https://x/y?a=1 id="q" title='t'>if a=b</a><img src=/i.jpg>"#),
+            r#"<a class href="https://x/y?a=1" id="q" title='t'>if a=b</a><img src="/i.jpg">"#
         );
     }
 

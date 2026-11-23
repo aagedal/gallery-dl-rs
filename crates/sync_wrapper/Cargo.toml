@@ -1,0 +1,14 @@
+[package]
+name = "sync_wrapper"
+# Matches the crates.io release it replaces through [patch.crates-io].
+version = "1.0.2"
+edition = "2021"
+license = "MIT"
+description = "MIT-licensed replacement for sync_wrapper, used by gallery-dl-rs"
+publish = false
+
+[features]
+futures = ["dep:futures-core"]
+
+[dependencies]
+futures-core = { version = "0.3", default-features = false, optional = true }

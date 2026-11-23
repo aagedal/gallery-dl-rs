@@ -164,6 +164,8 @@ async fn native_tag_traversal_matches_actual_source_requests_order_and_cancellat
             );
             let actual_pairs: Vec<_> = actual
                 .query_pairs()
+                // e621 tag categories need `mode=extended`, which upstream never sent.
+                .filter(|(key, value)| (key.as_ref(), value.as_ref()) != ("mode", "extended"))
                 .map(|(key, value)| (key.into_owned(), value.into_owned()))
                 .collect();
             let expected_pairs: std::collections::BTreeMap<_, _> = expected["wire_params"]
@@ -370,6 +372,8 @@ async fn live_metadata_hooks_change_next_cursor_at_the_source_checkpoint() {
             let url = api_root.join(target).unwrap();
             let actual: std::collections::BTreeMap<_, _> = url
                 .query_pairs()
+                // e621 tag categories need `mode=extended`, which upstream never sent.
+                .filter(|(key, value)| (key.as_ref(), value.as_ref()) != ("mode", "extended"))
                 .map(|(key, value)| (key.into_owned(), value.into_owned()))
                 .collect();
             let expected: std::collections::BTreeMap<_, _> = expected["wire_params"]

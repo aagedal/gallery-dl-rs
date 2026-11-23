@@ -155,18 +155,14 @@ fn detected(program: &str) -> bool {
             let Ok(metadata) = candidate.metadata() else {
                 return false;
             };
-            if !metadata.is_file() {
-                return false;
-            }
             #[cfg(unix)]
-            {
+            let executable = {
                 use std::os::unix::fs::PermissionsExt;
                 metadata.permissions().mode() & 0o111 != 0
-            }
+            };
             #[cfg(not(unix))]
-            {
-                true
-            }
+            let executable = true;
+            metadata.is_file() && executable
         })
     })
 }

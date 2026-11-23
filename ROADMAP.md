@@ -1,7 +1,10 @@
 # Native Rust roadmap
 
-The compatibility backend is a bootstrap step. The intended end state is a native
-Rust gallery downloader, starting with Instagram, Facebook, and Twitter/X.
+The compatibility backend was a bootstrap step. Since 2026-11-22 native
+extraction is the default and needs neither Python nor gallery-dl;
+`--extractor compatibility` remains opt-in. The sections below record how each
+area was built and what still differs from upstream; CHANGELOG.md lists
+released changes.
 
 ## 1. Native single-post extractors
 
@@ -1891,12 +1894,16 @@ upstream uses the host; listings queue prefixed children). Still without
 prefix support: danbooru, e621, jschan, wikimedia, xenforo, chevereto,
 reactor, manganelo, imhentai, nijie, urlshortener and `tumblr:` custom
 domains. A live comparison against upstream on 611 sample URLs (2026-10-31) left
-uninvestigated native-only failures: empty results without an error for
-bit.ly, e926 pools/posts, ibb.co albums, myhentaigallery, thehentaiworld and
-urlgalleries; Derpibooru HTTP 501; a Coomer network error; and login
-demands where upstream succeeds anonymously (nijie, horne, weibo user
-pages, vm.tiktok.com). Others were HTTP 403s that upstream passes, which
-may come from its browser-like default User-Agent.
+native-only failures, rechecked 2026-11-22: e621/e926 had switched to a new
+post API (fixed; upstream 1.32.21 cannot read it either), TheHentaiWorld to
+minified markup and fappic to multi-line image tags (both fixed;
+urlgalleries links fappic); ibb.co albums, myhentaigallery, Derpibooru and
+vm.tiktok.com work. The nijie, horne and weibo "upstream succeeds" cases were
+upstream's `-g` printing the queued first-level URL without resolving it;
+resolved, upstream needs the same login. bit.ly queues a gumroad link, which
+no extractor handles. **Remaining divergence:** `-g`/`-j` resolve queued
+URLs completely (upstream `-G`/`-J`); upstream's plain `-g` stops at depth 1
+and `-gg` at depth 2.
 **Remaining:** DeviantArt `watch/deviations`,
 `notifications/watch` and `watch/posts` use the `refresh-token` from
 `oauth:deviantart` (unverified without an account); journals and literature are saved as `.htm`

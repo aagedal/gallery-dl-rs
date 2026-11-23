@@ -47,7 +47,7 @@ fn binary(root: &Path, backend: &Path) -> Command {
     command
         .current_dir(root)
         .kill_on_drop(true)
-        .arg("--extractor-command")
+        .args(["--extractor", "compatibility", "--extractor-command"])
         .arg(backend);
     command
 }

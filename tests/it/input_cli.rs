@@ -18,7 +18,14 @@ fn files_follow_positionals_in_order_and_preserve_source_bytes() {
     std::fs::write(&first, contents).unwrap();
     std::fs::write(&second, b"https://example.com/c.jpg").unwrap();
     let output = binary()
-        .args(["-g", "--extractor-command", "/missing/backend", "-i"])
+        .args([
+            "-g",
+            "--extractor",
+            "compatibility",
+            "--extractor-command",
+            "/missing/backend",
+            "-i",
+        ])
         .arg(&first)
         .arg("https://example.com/positional.jpg")
         .arg("--input-file")

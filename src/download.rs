@@ -406,7 +406,7 @@ pub(crate) fn enumerated_path(path: &Path) -> PathBuf {
 
 pub fn client(timeout: Duration) -> Result<DownloadClient> {
     Ok(DownloadClient {
-        http: Client::builder()
+        http: crate::network::client_builder()
             .user_agent(concat!("gallery-dl-rs/", env!("CARGO_PKG_VERSION")))
             .timeout(timeout)
             // Redirects are validated manually before forwarding request headers.
@@ -932,20 +932,15 @@ pub(crate) async fn complete_original(
 }
 
 fn unchanged_file(before: &std::fs::Metadata, after: &std::fs::Metadata) -> bool {
-    if !after.is_file()
-        || before.len() != after.len()
-        || before.modified().ok() != after.modified().ok()
-    {
-        return false;
-    }
+    let same = after.is_file()
+        && before.len() == after.len()
+        && before.modified().ok() == after.modified().ok();
     #[cfg(unix)]
-    {
+    let same = same && {
         use std::os::unix::fs::MetadataExt;
-        if before.dev() != after.dev() || before.ino() != after.ino() {
-            return false;
-        }
-    }
-    true
+        before.dev() == after.dev() && before.ino() == after.ino()
+    };
+    same
 }
 
 /// Preserve a fully downloaded source even when the conversion future is cancelled.

@@ -158,7 +158,7 @@ impl Twitter {
     /// Build an extractor from an already scoped in-memory cookie jar.
     pub fn from_cookie_jar(cookies: CookieJar, timeout: Duration) -> Result<Self> {
         Ok(Self {
-            client: Client::builder()
+            client: crate::network::client_builder()
                 .user_agent(USER_AGENT)
                 .timeout(timeout)
                 .redirect(reqwest::redirect::Policy::none())

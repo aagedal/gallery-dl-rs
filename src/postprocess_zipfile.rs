@@ -233,15 +233,26 @@ impl ZipOptions {
 /// 5-byte properties and a raw LZMA stream with an end marker (flag bit 1).
 fn lzma_entry(data: &[u8], name: &str) -> Result<Vec<u8>> {
     use std::io::Write;
-    let options = lzma_rust2::LzmaOptions::with_preset(6);
-    let mut compressed = vec![9, 4, 5, 0, options.get_props()];
-    compressed.extend_from_slice(&options.dict_size.to_le_bytes());
-    let mut encoder = lzma_rust2::LzmaWriter::new_no_header(compressed, &options, true)
-        .map_err(|_| error("LZMA compression failed"))?;
+    // Preset 6 with its literal/position bits spelled out, so the header's
+    // properties byte matches what the encoder uses.
+    const DICT_SIZE: u32 = 8 << 20;
+    let (lc, lp, pb) = (3, 0, 2);
+    let failed = |_| error("LZMA compression failed");
+    let mut options = liblzma::stream::LzmaOptions::new_preset(6).map_err(failed)?;
+    options
+        .dict_size(DICT_SIZE)
+        .literal_context_bits(lc)
+        .literal_position_bits(lp)
+        .position_bits(pb);
+    let mut filters = liblzma::stream::Filters::new();
+    filters.lzma1(&options);
+    // A raw LZMA1 stream always ends with the end-of-payload marker.
+    let stream = liblzma::stream::Stream::new_raw_encoder(&filters).map_err(failed)?;
+    let mut compressed = vec![9, 4, 5, 0, ((pb * 5 + lp) * 9 + lc) as u8];
+    compressed.extend_from_slice(&DICT_SIZE.to_le_bytes());
+    let mut encoder = liblzma::write::XzEncoder::new_stream(compressed, stream);
     encoder.write_all(data)?;
-    let compressed = encoder
-        .finish()
-        .map_err(|_| error("LZMA compression failed"))?;
+    let compressed = encoder.finish()?;
     let too_large = || error("LZMA zip entries are limited to 4 GiB");
     let compressed_size = u32::try_from(compressed.len()).map_err(|_| too_large())?;
     let size = u32::try_from(data.len()).map_err(|_| too_large())?;
@@ -299,6 +310,24 @@ mod tests {
         assert_eq!(file.name().unwrap(), "a.txt");
         assert_eq!(file.size(), 17);
         assert_eq!(file.crc32(), crc32fast::hash(b"hello hello hello"));
+    }
+
+    /// The entry's LZMA payload decodes with the properties its header names.
+    #[test]
+    fn lzma_entries_decode() {
+        use std::io::Write;
+        let data = b"hello hello hello, LZMA".repeat(100);
+        let entry = super::lzma_entry(&data, "a.txt").unwrap();
+        let start = 30 + "a.txt".len();
+        let size = u32::from_le_bytes(entry[18..22].try_into().unwrap()) as usize;
+        let payload = &entry[start..start + size];
+        assert_eq!(&payload[..4], &[9, 4, 5, 0]);
+        let mut filters = liblzma::stream::Filters::new();
+        filters.lzma1_properties(&payload[4..9]).unwrap();
+        let stream = liblzma::stream::Stream::new_raw_decoder(&filters).unwrap();
+        let mut decoder = liblzma::write::XzDecoder::new_stream(Vec::new(), stream);
+        decoder.write_all(&payload[9..]).unwrap();
+        assert_eq!(decoder.finish().unwrap(), data);
     }
 
     use super::*;

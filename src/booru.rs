@@ -107,7 +107,7 @@ impl Site {
     fn media_host(self, host: &str) -> bool {
         match self {
             Self::Danbooru => host == "cdn.donmai.us" || host.ends_with(".donmai.us"),
-            Self::E621 => host == "static1.e621.net" || host.ends_with(".e621.net"),
+            Self::E621 => host.ends_with(".e621.net") || host.ends_with(".e926.net"),
             Self::Gelbooru => host.ends_with(".gelbooru.com"),
             Self::Safebooru => host == "safebooru.org" || host.ends_with(".safebooru.org"),
         }
@@ -940,13 +940,122 @@ fn invalid(site: Site) -> crate::Error {
     error(format!("{} returned invalid JSON", site.name()))
 }
 
+/// Whether an e621-dialect API path answers with posts, which then need
+/// `mode=extended` for categorized tags.
+pub(crate) fn e621_post_endpoint(path: &str) -> bool {
+    let path = path.trim_start_matches('/');
+    matches!(
+        path,
+        "posts.json" | "favorites.json" | "popular.json" | "explore/posts/popular.json"
+    ) || path
+        .strip_prefix("posts/")
+        .and_then(|rest| rest.strip_suffix(".json"))
+        .is_some_and(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Rewrite an e621 post response from the November 2026 API format (a bare
+/// post or post array whose posts carry `files`, `stats` and `has`) into the
+/// legacy `{"post": …}`/`{"posts": […]}` format that upstream's keywords
+/// and templates use. Legacy responses are returned unchanged.
+pub(crate) fn e621_legacy_body(body: Value) -> Value {
+    match body {
+        Value::Array(posts) => {
+            serde_json::json!({ "posts": posts.into_iter().map(e621_legacy_post).collect::<Vec<_>>() })
+        }
+        Value::Object(post) if post.contains_key("files") => {
+            serde_json::json!({ "post": e621_legacy_post(Value::Object(post)) })
+        }
+        body => body,
+    }
+}
+
+/// One post in the legacy (`v1=true`) e621 layout, keys in legacy order.
+fn e621_legacy_post(post: Value) -> Value {
+    let Value::Object(mut post) = post else {
+        return post;
+    };
+    if !post.contains_key("files") {
+        return Value::Object(post);
+    }
+    let mut take = |key: &str| post.remove(key).unwrap_or(Value::Null);
+    let files = take("files");
+    let (stats, has, relationships) = (take("stats"), take("has"), take("relationships"));
+    let meta = &files["meta"];
+    let has_sample = meta["has_sample"].as_bool() == Some(true);
+    let sample_url = |key: &str| {
+        if has_sample {
+            files["sample"][key].clone()
+        } else {
+            Value::Null
+        }
+    };
+    let alternates = match &files["video"] {
+        Value::Null => Value::Object(Default::default()),
+        video => video.clone(),
+    };
+    serde_json::json!({
+        "id": take("id"),
+        "created_at": take("created_at"),
+        "updated_at": take("updated_at"),
+        "file": {
+            "width": files["original"]["width"],
+            "height": files["original"]["height"],
+            "ext": meta["ext"],
+            "size": meta["size"],
+            "md5": meta["md5"],
+            "url": files["original"]["url"],
+        },
+        "preview": {
+            "width": files["preview"]["width"],
+            "height": files["preview"]["height"],
+            "url": files["preview"]["jpg"],
+            "alt": files["preview"]["webp"],
+        },
+        "sample": {
+            "has": meta["has_sample"],
+            "width": files["sample"]["width"],
+            "height": files["sample"]["height"],
+            "url": sample_url("jpg"),
+            "alt": sample_url("webp"),
+            "alternates": alternates,
+        },
+        "score": stats["score"],
+        "tags": take("tags"),
+        "locked_tags": take("locked_tags"),
+        "change_seq": take("change_seq"),
+        "flags": take("flags"),
+        "rating": take("rating"),
+        "fav_count": stats["fav_count"],
+        "sources": take("sources"),
+        "pools": take("pools"),
+        "relationships": {
+            "parent_id": relationships["parent_id"],
+            "has_children": has["children"],
+            "has_active_children": has["active_children"],
+            "children": relationships["children"],
+        },
+        "approver_id": take("approver_id"),
+        "uploader_id": take("uploader_id"),
+        "uploader_name": take("uploader_name"),
+        "description": take("description"),
+        "comment_count": stats["comment_count"],
+        "is_favorited": stats["is_favorited"],
+        "vote": stats["vote"],
+        "has_notes": has["notes"],
+        "duration": meta["duration"],
+    })
+}
+
 /// Extract the raw post objects from a single-post or listing response.
 pub fn posts(site: Site, bytes: &[u8]) -> Result<Vec<Value>> {
     if site == Site::Safebooru && bytes.iter().all(u8::is_ascii_whitespace) {
         // Safebooru answers an empty result with an empty body.
         return Ok(Vec::new());
     }
-    let body: Value = serde_json::from_slice(bytes).map_err(|_| invalid(site))?;
+    let mut body: Value = serde_json::from_slice(bytes).map_err(|_| invalid(site))?;
+    if site == Site::E621 {
+        body = e621_legacy_body(body);
+    }
     let list = match (site, body) {
         (Site::Danbooru | Site::Safebooru, Value::Array(list)) => list,
         (Site::Danbooru, post @ Value::Object(_)) => vec![post],
@@ -1345,6 +1454,9 @@ impl Booru {
         if !query.is_empty() {
             endpoint.query_pairs_mut().extend_pairs(query);
         }
+        if self.site == Site::E621 && e621_post_endpoint(path) {
+            endpoint.query_pairs_mut().append_pair("mode", "extended");
+        }
         tokio::time::timeout(self.timeout, self.request(&endpoint, kind))
             .await
             .map_err(|_| error(format!("native {} extraction timed out", self.site.name())))?
@@ -1569,7 +1681,11 @@ impl Booru {
                 };
                 let body = self.call(&state.root, path, &query).await?;
                 let mut raw = if state.popular.is_some() {
-                    popular::posts(&body)?
+                    let raw = popular::posts(&body)?;
+                    match self.site {
+                        Site::E621 => raw.into_iter().map(e621_legacy_post).collect(),
+                        _ => raw,
+                    }
                 } else {
                     posts(self.site, &body)?
                 };
@@ -2583,6 +2699,57 @@ mod tests {
         assert_eq!(posts(Site::E621, list.as_bytes()).unwrap().len(), 2);
     }
 
+    /// Live e926 responses (2026-11-22) for the same posts with
+    /// `mode=extended` and with `v1=true`: a video and an image without a sample.
+    #[test]
+    fn rewrites_current_e621_posts_into_the_legacy_format() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/booru/e621_api_formats.json"
+        ))
+        .unwrap();
+        let (current, legacy) = (&fixture["current"], &fixture["legacy"]);
+        let rewritten = e621_legacy_body(current.clone());
+        // Key order matters for `-j` output and keyword listings.
+        assert_eq!(rewritten.to_string(), legacy.to_string());
+        assert_eq!(
+            e621_legacy_body(current[1].clone()).to_string(),
+            json!({"post": legacy["posts"][1]}).to_string()
+        );
+        assert_eq!(e621_legacy_body(legacy.clone()), *legacy);
+        let pool = json!({"id": 73, "name": "The_Quiet", "post_ids": [1, 2]});
+        assert_eq!(e621_legacy_body(pool.clone()), pool);
+
+        let raw = posts(Site::E621, current.to_string().as_bytes()).unwrap();
+        assert_eq!(raw, legacy["posts"].as_array().unwrap().clone());
+        let media = parse_post(Site::E621, &raw[0]).unwrap();
+        assert_eq!(media.url.as_str(), legacy["posts"][0]["file"]["url"]);
+        let single = posts(Site::E621, current[1].to_string().as_bytes()).unwrap();
+        assert_eq!(single[0]["id"], legacy["posts"][1]["id"]);
+    }
+
+    #[test]
+    fn requests_extended_tags_only_from_e621_post_endpoints() {
+        for path in [
+            "posts.json",
+            "/posts.json",
+            "posts/535.json",
+            "favorites.json",
+            "popular.json",
+            "/explore/posts/popular.json",
+        ] {
+            assert!(e621_post_endpoint(path), "{path}");
+        }
+        for path in [
+            "pools/73.json",
+            "posts/random.json",
+            "posts/.json",
+            "artists.json",
+            "notes.json",
+        ] {
+            assert!(!e621_post_endpoint(path), "{path}");
+        }
+    }
+
     #[test]
     fn parses_gelbooru_and_safebooru_posts() {
         let body = json!({"@attributes": {"count": 1}, "post": [{"id": 7, "md5": MD5,
@@ -2828,7 +2995,7 @@ mod tests {
         };
         assert_eq!(file_fields.as_ref(), &["num", "index", "media_id"]);
         let requests = server.join().unwrap();
-        assert!(requests[1].starts_with("GET /posts/5.json "));
+        assert!(requests[1].starts_with("GET /posts/5.json?mode=extended "));
         assert!(
             requests[1]
                 .to_ascii_lowercase()
@@ -3162,7 +3329,11 @@ mod tests {
             assert_eq!(requests.len(), 2);
             for request in requests {
                 assert!(request.lines().any(|line| line == expected));
-                assert!(request.starts_with("GET /posts/5.json HTTP/1.1"));
+                assert!(request.starts_with(if site == Site::E621 {
+                    "GET /posts/5.json?mode=extended HTTP/1.1"
+                } else {
+                    "GET /posts/5.json HTTP/1.1"
+                }));
             }
         }
     }
@@ -3206,7 +3377,12 @@ mod tests {
             );
             let requests = server.join().unwrap();
             assert_eq!(requests.len(), 2);
-            assert!(requests[0].starts_with("GET /posts/5.json HTTP/1.1"));
+            let first = if site == Site::E621 {
+                "GET /posts/5.json?mode=extended HTTP/1.1"
+            } else {
+                "GET /posts/5.json HTTP/1.1"
+            };
+            assert!(requests[0].starts_with(first));
             assert!(requests[1].starts_with("GET /redirected/posts/5.json HTTP/1.1"));
             for request in requests {
                 assert!(request.lines().any(|line| line == expected));
